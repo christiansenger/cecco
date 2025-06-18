@@ -176,6 +176,17 @@ size_t GilbertVarshamovLowerBound(size_t n, size_t dmin) {
 }
 
 template <class T>
+size_t BurstUpperBound(size_t n, size_t ell) {
+    constexpr size_t q = T::get_size();
+    return floorl(n - ell - log2l(1 + (q - 1) * (n - ell) / q) / log2l(q));
+}
+
+size_t ReigerBurstUpperBound(size_t n, size_t ell) {
+    if (2 * ell > n) return 0;
+    return n - 2 * ell;
+}
+
+template <class T>
 static Polynomial<InfInt> MacWilliamsIdentity(const Polynomial<InfInt>& A, size_t n, size_t k) {
     auto a = Vector<InfInt>(n + 1);
     for (size_t i = 0; i < n + 1; ++i) {
@@ -864,8 +875,8 @@ class PolynomialCodeBackend : public Backend {
         }
         Mi.invert();
     }
-    //PolynomialCodeBackend(const PolynomialCodeBackend& other)
-    //    : k(other.k), gamma(other.gamma), cyclic(other.cyclic), G(other.G), Mi(other.Mi), infoset(other.infoset) {}
+    // PolynomialCodeBackend(const PolynomialCodeBackend& other)
+    //     : k(other.k), gamma(other.gamma), cyclic(other.cyclic), G(other.G), Mi(other.Mi), infoset(other.infoset) {}
     //~PolynomialCodeBackend() override = default;
     const Polynomial<T>& get_gamma() const { return gamma; }
 
@@ -1128,7 +1139,7 @@ class GRSCodeBackend : public Backend {
             if (d[i] == T(0)) throw std::invalid_argument("GRS codes must have nonzero column multipliers!");
         }
     }
-    //GRSCodeBackend(const GRSCodeBackend<T>& other) : a(other.a), d(other.d), k(other.k), G(other.G), Mi(other.Mi) {}
+    // GRSCodeBackend(const GRSCodeBackend<T>& other) : a(other.a), d(other.d), k(other.k), G(other.G), Mi(other.Mi) {}
     //~GRSCodeBackend() override = default;
     const Vector<T>& get_locators() const { return a; }
     const Vector<T>& get_multipliers() const { return d; }

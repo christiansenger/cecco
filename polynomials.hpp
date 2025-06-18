@@ -353,7 +353,7 @@ inline Polynomial<T>& Polynomial<T>::operator*=(const Polynomial<T>& rhs) noexce
 template <class T>
 inline Polynomial<T>& Polynomial<T>::operator/=(const Polynomial<T>& rhs) {
     if (rhs.is_zero()) throw std::invalid_argument("division by zero (polynomial)");
-    auto res = polynomialLongDivision(*this, rhs);
+    auto res = poly_long_div(*this, rhs);
     *this = res.first;
     cache.invalidate();
     return *this;
@@ -371,7 +371,7 @@ inline Polynomial<T>& Polynomial<T>::operator%=(const Polynomial<T>& rhs) {
         }
         set_coeff(get_degree(), 0);
     } else {  // full-blown polynomial long division
-        auto res = polynomialLongDivision(*this, rhs);
+        auto res = poly_long_div(*this, rhs);
         *this = res.second;
         cache.invalidate();
     }
@@ -715,7 +715,7 @@ Polynomial<T> operator/(Polynomial<T>&& lhs, const T& rhs) noexcept {
  */
 
 template <class T>
-std::pair<Polynomial<T>, Polynomial<T>> polynomialLongDivision(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
+std::pair<Polynomial<T>, Polynomial<T>> poly_long_div(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     if (rhs.get_degree() == 0) {
         if (rhs[0] == T(0)) throw std::invalid_argument("polynomial long division by zero polynomial");
         return std::make_pair(lhs / rhs[0], Polynomial<T>());
@@ -742,8 +742,8 @@ std::pair<Polynomial<T>, Polynomial<T>> polynomialLongDivision(const Polynomial<
 }
 
 template <class T>
-std::pair<Polynomial<T>, Polynomial<T>> polynomialLongDivision(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
-    if (rhs.get_degree() == 0) {
+std::pair<Polynomial<T>, Polynomial<T>> poly_long_div(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
+    if (rhs.is_zero()) {
         if (rhs[0] == T(0)) throw std::invalid_argument("polynomial long division by zero polynomial");
         return std::make_pair(lhs / rhs[0], Polynomial<T>());
     }
