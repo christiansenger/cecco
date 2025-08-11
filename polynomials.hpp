@@ -1,257 +1,1066 @@
-/*
-   Copyright 2025 Christian Senger <senger@inue.uni-stuttgart.de>
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-        http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-
-   v1.0
-*/
-
-/* ToDo:
-    - rvalue unary operator-
-*/
+/**
+ * @file polynomials.hpp
+ * @brief Polynomial arithmetic library
+ * @author Christian Senger <senger@inue.uni-stuttgart.de>
+ * @version 2.0
+ * @date 2025
+ *
+ * @copyright
+ * Copyright (c) 2025, Christian Senger <senger@inue.uni-stuttgart.de>V
+ *
+ * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
+ * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
+ * repository root for full terms and how to request a commercial license.
+ *
+ * @section Description
+ *
+ * This header file provides an implementation of univariate polynomial arithmetic. It supports:
+ *
+ * - **Generic polynomial operations**: Over any @ref ECC::ComponentType including finite fields,
+ *   floating-point numbers, complex numbers, and signed integers
+ * - **Field-specific algorithms**: Polynomial long division, GCD computation, and factorization
+ *   support for @ref ECC::FieldType coefficients
+ * - **Cross-field compatibility**: Safe conversions between polynomials over related fields using
+ *   @ref ECC::SubfieldOf, @ref ECC::ExtensionOf, and @ref ECC::largest_common_subfield_t
+ * - **Performance optimizations**: High-performance O(1) caching for expensive operations, move semantics, and
+ *   Horner's method for efficient evaluation
+ *
+ * @section Usage_Example
+ *
+ * @code{.cpp}
+ * // Basic polynomial operations
+ * using F7 = Fp<7>;
+ * Polynomial<F7> p = {1, 2, 3};  // 1 + 2x + 3x²
+ * Polynomial<F7> q = {4, 5};     // 4 + 5x
+ * auto r = p * q;                // Polynomial multiplication
+ * F7 result = p(F7(2));          // Evaluate p at x=2 using Horner's method
+ *
+ * // Advanced polynomial algorithms
+ * auto [quotient, remainder] = p.poly_long_div(q);  // Polynomial division
+ * auto gcd = GCD(p, q);                            // Greatest common divisor
+ * auto derivative_p = p.differentiate(1);          // First derivative
+ *
+ * // Cross-field operations (field tower compatibility)
+ * using F2 = Fp<2>;
+ * using F4 = Ext<F2, MOD{1, 1, 1}>;
+ * Polynomial<F2> a = {1, 0, 1};       // x² + 1 over F₂
+ * Polynomial<F4> b(a);                // Safe upcast: F₂ ⊆ F₄
+ * Vector<F2> coeffs = Vector<F2>(b);  // Convert to coefficient vector
+ * @endcode
+ *
+ * @section Performance_Features
+ *
+ * - **Lazy evaluation**: Hamming weight computed on-demand with compile-time optimized caching
+ * - **Move semantics**: Optimal performance for temporary polynomial operations and chained computations
+ * - **Horner's method**: O(n) polynomial evaluation algorithm for maximum efficiency
+ * - **Automatic pruning**: Maintains canonical form by removing leading zero coefficients
+ * - **STL integration**: Uses standard algorithms for optimal compiler optimization
+ * - **Type safety**: C++20 concepts prevent invalid operations:
+ *   - @ref ECC::ComponentType Ensures valid coefficient types
+ *   - @ref ECC::FieldType Required for division and advanced algorithms
+ *   - @ref ECC::FiniteFieldType Enables specialized finite field operations
+ *   - @ref ECC::largest_common_subfield_t Enables generalized cross-field conversions
+ *
+ * @see @ref fields.hpp for finite field arithmetic and extension field operations
+ * @see @ref vectors.hpp for vector representations and linear algebra integration
+ * @see @ref matrices.hpp for matrix representations and matrix operations
+ * @see @ref field_concepts_traits.hpp for type constraints and field relationships (C++20 concepts)
+ */
 
 #ifndef POLYNOMIALS_HPP
 #define POLYNOMIALS_HPP
 
-#include <algorithm>
 #include <initializer_list>
-#include <iterator>
-#include <utility>
-#include <vector>
+// #include <ranges> // transitive through matrices.hpp
+// #include <utility> // transitive through field_concepts_traits.hpp
+// #include <vector> // transitive through field_concepts_traits.hpp
 
-#include "fields.hpp"
-#include "helpers.hpp"
 #include "matrices.hpp"
+// #include <algorithm> // transitive through matrices.hpp
+// #include "field_concepts_traits.hpp" // transitive through matrices.hpp
+// #include "helpers.hpp" // transitive through field_concepts_traits.hpp
 
 namespace ECC {
 
-template <class T>
+template <ComponentType T>
+class Vector;
+template <ComponentType T>
 class Polynomial;
-template <class T>
-bool operator==(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept;
-template <class T>
-bool operator!=(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept;
-template <class T>
-Polynomial<T> derivative(const Polynomial<T>& poly, size_t s);
-template <class T>
-Polynomial<T> derivative(Polynomial<T>&& poly, size_t s);
-template <class T>
-Polynomial<T> reciprocal(const Polynomial<T>& poly);
-template <class T>
-Polynomial<T> reciprocal(Polynomial<T>&& poly);
-template <class T>
+
+template <ComponentType T>
+constexpr bool operator==(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept;
+template <ComponentType T>
 std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) noexcept;
 
-template <class T>
+template <ComponentType T>
+Polynomial<T> ZeroPolynomial();
+
+/**
+ * @class Polynomial
+ * @brief Generic univariate polynmial class for error control coding (ECC) and finite field applications 
+ *
+ * @tparam T Coefficient type satisfying @ref ECC::ComponentType concept. Supported types include:
+ *   - **Finite field types**: @ref ECC::Fp, @ref ECC::Ext, also satisfying concept @ref ECC::FiniteFieldType
+ *   - **Floating-point types**: `double`
+ *   - **Complex types**: `std::complex<double>`
+ *   - **Signed integer types**: Signed integer types including `InfInt` satisfying concept @ref ECC::SignedIntType
+ *
+ * This class provides comprehensive polynomial operations optimized for error-correcting codes (ECC),
+ * with special support for finite field arithmetic and cross-field conversions.
+ *
+ * @section Implementation_Notes
+ *
+ * - **Coefficient storage**: Uses `std::vector<T>` with index i representing coefficient of x^i
+ * - **Canonical form**: Automatically removes leading zero coefficients via pruning
+ * - **Cross-field compatibility**: Safe conversions between related field types using concepts
+ * - **Performance optimization**: Lazy evaluation with compile-time optimized O(1) caching for expensive operations
+ * - **Type safety**: Compile-time validation of coefficient types and field relationships
+ *
+ * @section Usage_Example
+ *
+ * @code{.cpp}
+ * // Create polynomials over finite fields
+ * using F7 = Fp<7>;
+ * Polynomial<F7> p = {1, 2, 3};  // 1 + 2x + 3x²
+ * Polynomial<F7> q({4, 5});      // 4 + 5x
+ *
+ * // Basic polynomial operations
+ * auto sum = p + q;      // Addition
+ * auto product = p * q;  // Multiplication
+ * F7 value = p(F7(3));   // Evaluation at x=3
+ *
+ * // Advanced operations (field types only)
+ * auto [quotient, remainder] = p.poly_long_div(q);  // Polynomial division
+ * auto derivative = p.differentiate(1);             // First derivative
+ * p.normalize();                                    // Make monic
+ *
+ * // Applications (e.g., error control coding)
+ * size_t weight = p.wH();     // Hamming weight (non-zero coefficients)
+ * auto gcd_poly = GCD(p, q);  // Greatest common divisor
+ *
+ * // Cross-field operations (F₂ ⊆ F₄)
+ * using F2 = Fp<2>;
+ * using F4 = Ext<F2, MOD{1, 1, 1}>;
+ * Polynomial<F2> p_f2 = {1, 0, 1};  // x² + 1 over F₂
+ * Polynomial<F4> p_f4(p_f2);        // Safe upcast: F₂ ⊆ F₄
+ * @endcode
+ *
+ * @note Polynomial operations require compatible types. Division operations require
+ *          coefficient types satisfying @ref ECC::FieldType concept.
+ *
+ * @note Additional methods available via concept constraints:
+ *       - **Field types only**: poly_long_div(), normalize(), differentiate()
+ *       - **Finite fields and signed integers**: degree(), wH() (Hamming weight)
+ *
+ * @see Concept @ref ECC::ComponentType for supported coefficient types
+ * @see Concepts @ref ECC::FieldType, @ref ECC::FiniteFieldType for advanced operations
+ * @see Concepts @ref ECC::SubfieldOf, @ref ECC::largest_common_subfield_t for cross-field operation constraints
+ * @see @ref ECC::Vector for coefficient vector representations
+ */
+template <ComponentType T>
 class Polynomial {
     friend bool operator== <>(const Polynomial& lhs, const Polynomial& rhs) noexcept;
-    friend bool operator!= <>(const Polynomial& lhs, const Polynomial& rhs) noexcept;
-    friend Polynomial derivative<>(const Polynomial& poly, size_t s);
-    friend Polynomial derivative<>(Polynomial&& poly, size_t s);
-    friend Polynomial reciprocal<>(const Polynomial& poly);
-    friend Polynomial reciprocal<>(Polynomial&& poly);
     friend std::ostream& operator<< <>(std::ostream& os, const Polynomial& rhs) noexcept;
 
    public:
-    /* constructors */
-    Polynomial() noexcept : data(0) {}
-    Polynomial(int e) noexcept : data(1) { data.back() = T(e); }
-    Polynomial(const T& e) noexcept : data(1) { data.back() = e; }
-    Polynomial(const Vector<T>& v) noexcept;
-    Polynomial(const std::initializer_list<T>& l) noexcept;
-    Polynomial(const Polynomial& other) noexcept : data(other.data), cache(other.cache) {}
-    template <class S>
-    Polynomial(Polynomial&& other) noexcept requires (std::is_base_of_v<S, T>) : data(std::move(other.data)), cache(std::move(other.cache)) {}
-    template <class S, typename = std::enable_if_t<std::is_base_of_v<S, T>>>
-    Polynomial(const Polynomial<S>& other) noexcept;
-    template <uint8_t m>
-    Polynomial(const Polynomial<SF<T, m>>& other) noexcept;
+    // Cache configuration for this class
+    enum CacheIds { Weight = 0 };
 
-    /* assignment operators */
-    Polynomial& operator=(const T& rhs) noexcept;
-    Polynomial& operator=(const Vector<T>& rhs) noexcept;
-    Polynomial& operator=(const Polynomial& rhs) noexcept;
-    Polynomial& operator=(Polynomial&& rhs) noexcept;
+    /** @name Constructors
+     * @{
+     */
 
-    /* non-modifying operations */
-    Polynomial operator+() const noexcept { return *this; }
-    Polynomial operator-() const noexcept;
-    T operator()(const T& s) const;  // evaluation
+    /**
+     * @brief Default constructor creating the zero polynomial
+     *
+     * Creates an empty polynomial representing the zero polynomial.
+     */
+    constexpr Polynomial() noexcept : data(0) {}
 
-    /* modifying operations */
-    Polynomial& differentiate(size_t s);
-    Polynomial& Hasse_differentiate(size_t s);
+    /**
+     * @brief Constructs a constant polynomial from an integer
+     *
+     * @param e Integer value to convert to coefficient type T
+     *
+     * Creates a constant polynomial p(x) = T(e).
+     */
+    constexpr Polynomial(int e) noexcept : data(1) { data.back() = T(e); }
 
-    /* operational assignments */
-    Polynomial& operator+=(const Polynomial& rhs) noexcept;
-    Polynomial& operator-=(const Polynomial& rhs) noexcept;
-    Polynomial& operator*=(const Polynomial& rhs) noexcept;
-    Polynomial& operator/=(const Polynomial& rhs);
-    Polynomial& operator%=(const Polynomial& rhs);
-    Polynomial& operator*=(const T& s) noexcept;
+    /**
+     * @brief Constructs a constant polynomial from a coefficient
+     *
+     * @param e Coefficient value of type T
+     *
+     * Creates a constant polynomial p(x) = e.
+     */
+    constexpr Polynomial(const T& e) : data(1) { data.back() = e; }
+
+    /**
+     * @brief Constructs a polynomial from an initializer list of coefficients
+     *
+     * @param l Initializer list containing coefficients in ascending degree order
+     *
+     * Creates a polynomial where l[i] is the coefficient of x^i.
+     * Enables convenient polynomial initialization syntax:
+     * @code{.cpp}
+     * Polynomial<int> p{1, 2, 3};       // 1 + 2x + 3x²
+     * Polynomial<Fp<7>> q{0, 1, 0, 1};  // x + x³
+     * @endcode
+     *
+     * Automatically removes leading zero coefficients from list in order to maintain canonical form.
+     */
+    constexpr Polynomial(const std::initializer_list<T>& l) : data(l) { prune(); }
+
+    /**
+     * @brief Copy constructor
+     *
+     * @param other Polynomial to copy from
+     */
+    constexpr Polynomial(const Polynomial& other) noexcept : data(other.data), cache(other.cache) {}
+
+    /**
+     * @brief Move constructor
+     *
+     * @param other Polynomial to move from (left in valid but unspecified state)
+     */
+    constexpr Polynomial(Polynomial&& other) noexcept : data(std::move(other.data)), cache(std::move(other.cache)) {}
+
+    /**
+     * @brief Cross-field constructor between finite fields with the same characteristic
+     *
+     * @tparam S Source field type that must have the same characteristic as T
+     * @param other Polynomial over field S to convert
+     *
+     * Safely converts polynomials between any finite fields with the same characteristic using
+     * @ref largest_common_subfield_t as the conversion bridge. Supports conversions across
+     * different field towers, not just within the same construction hierarchy.
+     *
+     * @throws std::invalid_argument if a coefficient cannot be represented in target field (downcasting not
+     * possible)
+     * @throws std::bad_alloc if memory allocation fails
+     */
+    template <FiniteFieldType S>
+        requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
+    Polynomial(const Polynomial<S>& other);
+
+    /**
+     * @brief Constructs polynomial from coefficient vector
+     *
+     * @param v Vector whose components become polynomial coefficients
+     *
+     * Creates a polynomial where v[i] is the coefficient of x^i.
+     * The polynomial degree equals v.get_n() - 1.
+     *
+     * @note If you need cross-field polynomial <-> vector conversion then first convert v into the the other field.
+     *
+     * @throws std::bad_alloc if memory allocation fails
+     */
+    Polynomial(const Vector<T>& v);
+
+    /** @} */
+
+    /** @name Assignment Operators
+     * @{
+     */
+
+    /**
+     * @brief Scalar assignment operator
+     *
+     * @param rhs Coefficient value to assign
+     * @return Reference to this polynomial after assignment
+     */
+    constexpr Polynomial& operator=(const T& rhs);
+
+    /**
+     * @brief Copy assignment operator
+     *
+     * @param rhs Polynomial to copy from
+     * @return Reference to this polynomial after assignment
+     */
+    constexpr Polynomial& operator=(const Polynomial<T>& rhs);
+
+    /**
+     * @brief Move assignment operator
+     *
+     * @param rhs Polynomial to move from (left in valid but unspecified state)
+     * @return Reference to this polynomial after assignment
+     */
+    constexpr Polynomial& operator=(Polynomial&& rhs) noexcept;
+
+    /**
+     * @brief Cross-field assignment operator between finite fields with the same characteristic
+     *
+     * @tparam S Source field type that must have the same characteristic as T
+     * @param other Polynomial over field S to convert
+     * @return Reference to this polynomial after assignment
+     *
+     * Safely converts polynomials between any finite fields with the same characteristic using
+     * @ref largest_common_subfield_t as the conversion bridge. Supports conversions across
+     * different field towers, not just within the same construction hierarchy.
+     *
+     * @throws std::invalid_argument if a coefficient cannot be represented in target field (downcasting not
+     * possible)
+     * @throws std::bad_alloc if memory allocation fails
+     */
+    template <FiniteFieldType S>
+        requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
+    Polynomial& operator=(const Polynomial<S>& other);
+
+    /** @} */
+
+    /** @name Unary Arithmetic Operations
+     * @{
+     */
+
+    /**
+     * @brief Unary plus operator for lvalue references (identity)
+     *
+     * @return Copy of this polynomial (mathematical identity operation)
+     */
+    constexpr Polynomial operator+() const& noexcept { return *this; }
+
+    /**
+     * @brief Unary plus operator for rvalue references (move optimization)
+     *
+     * @return This polynomial moved (mathematical identity operation)
+     */
+    constexpr Polynomial operator+() && noexcept { return std::move(*this); }
+
+    /**
+     * @brief Unary minus operator for lvalue references
+     *
+     * @return New polynomial with all coefficients negated
+     *
+     * Creates a new polynomial -p(x) where each coefficient is negated.
+     * Uses copy constructor for lvalue references.
+     */
+    constexpr Polynomial operator-() const& noexcept;
+
+    /**
+     * @brief Unary minus operator for rvalue references (move optimization)
+     *
+     * @return This polynomial with all coefficients negated in-place
+     *
+     * Efficiently negates coefficients in-place for temporary polynomials.
+     */
+    constexpr Polynomial operator-() && noexcept;
+
+    /**
+     * @brief Polynomial evaluation using Horner's method
+     *
+     * @param s Value at which to evaluate the polynomial
+     * @return Result of p(s) = a₀ + a₁s + a₂s² + ... + aₙsⁿ
+     *
+     * Efficiently evaluates the polynomial at the given value using Horner's method
+     * for O(n) complexity. Essential for Reed-Solomon encoding/decoding and root finding.
+     *
+     * @throws std::invalid_argument if attempting to evaluate empty polynomial
+     */
+    T operator()(const T& s) const;
+
+    /** @} */
+
+    /** @name Compound Assignment Operations
+     * @{
+     */
+
+    /**
+     * @brief Polynomial addition assignment
+     *
+     * @param rhs Polynomial to add to this polynomial
+     * @return Reference to this polynomial after addition
+     *
+     * Performs coefficient-wise addition with automatic degree handling.
+     * Automatically expands coefficient storage if rhs has higher degree.
+     * Maintains canonical form through automatic pruning.
+     */
+    constexpr Polynomial& operator+=(const Polynomial& rhs) noexcept;
+
+    /**
+     * @brief Polynomial subtraction assignment
+     *
+     * @param rhs Polynomial to subtract from this polynomial
+     * @return Reference to this polynomial after subtraction
+     *
+     * Performs coefficient-wise subtraction with automatic degree handling.
+     * Automatically expands coefficient storage if rhs has higher degree.
+     * Maintains canonical form through automatic pruning.
+     */
+    constexpr Polynomial& operator-=(const Polynomial& rhs) noexcept;
+
+    /**
+     * @brief Polynomial multiplication assignment
+     *
+     * @param rhs Polynomial to multiply with this polynomial
+     * @return Reference to this polynomial after multiplication
+     *
+     * Performs polynomial multiplication using convolution algorithm.
+     * Result degree is deg(this) + deg(rhs). Uses O(n²) naive algorithm.
+     */
+    constexpr Polynomial& operator*=(const Polynomial& rhs);
+
+    /**
+     * @brief Polynomial division assignment (field coefficients only)
+     *
+     * @param rhs Polynomial to divide this polynomial by
+     * @return Reference to this polynomial after division (quotient)
+     *
+     * Performs polynomial long division, storing the quotient in this polynomial.
+     * Requires field coefficient type for division operations.
+     *
+     * @throws std::invalid_argument if attempting to divide by zero polynomial
+     *
+     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     */
+    Polynomial& operator/=(const Polynomial& rhs)
+        requires FieldType<T>;
+
+    /**
+     * @brief Polynomial modulo assignment (field coefficients only)
+     *
+     * @param rhs Polynomial to compute remainder against
+     * @return Reference to this polynomial after modulo operation (remainder)
+     *
+     * Computes polynomial remainder: this = this mod rhs.
+     * Uses optimized algorithm for equal degree case, full division otherwise.
+     * Critical for modular polynomial arithmetic in coding theory.
+     *
+     * @throws std::invalid_argument if attempting modulo by zero polynomial
+     *
+     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     */
+    Polynomial& operator%=(const Polynomial& rhs)
+        requires FieldType<T>;
+
+    /**
+     * @brief Scalar multiplication assignment
+     *
+     * @param s Scalar value to multiply with
+     * @return Reference to this polynomial after multiplication
+     *
+     * Multiplies each coefficient by the scalar: p(x) *= s.
+     */
+    constexpr Polynomial& operator*=(const T& s) noexcept;
+
+    /**
+     * @brief Scalar division assignment
+     *
+     * @param s Scalar value to divide by
+     * @return Reference to this polynomial after division
+     *
+     * Divides each coefficient by the scalar: p(x) /= s.
+     *
+     * @throws std::invalid_argument if attempting to divide by zero scalar
+     *
+     * @warning Reliable results ( (p / s) *  s == p for a polynomial p and nonzero scalar s are only guaranteed in case
+     * T fulfills concept FieldType<T>
+     */
     Polynomial& operator/=(const T& s);
 
-    /* randomization */
-    void randomize(size_t d) noexcept;
+    /**
+     * @brief Integer multiplication assignment (field coefficients only)
+     *
+     * @param n Integer value to multiply with (handles characteristic)
+     * @return Reference to this polynomial after multiplication
+     *
+     * Multiplies each coefficient by integer n, accounting for field characteristic.
+     * For finite fields, reduces n modulo characteristic before multiplication.
+     *
+     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     */
+    constexpr Polynomial& operator*=(size_t n) noexcept
+        requires FieldType<T>;
 
-    /* getters */
-    size_t get_degree() const;
-    size_t get_trailing_degree() const;
-    size_t wH() noexcept { return cache("weight", *this, &Polynomial::calculateWeight); }
+    /**
+     * @brief Polynomial long division
+     *
+     * @param rhs Divisor polynomial
+     * @return Pair containing quotient and remainder polynomials
+     *
+     * Performs complete polynomial long division: this = quotient * rhs + remainder.
+     * Essential for polynomial GCD computation and modular arithmetic.
+     * Handles special cases (constant divisor, degree conditions) efficiently.
+     *
+     * @throws std::invalid_argument if attempting division by zero polynomial
+     *
+     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     *
+     * @code{.cpp}
+     * using F7 = Fp<7>;
+     * Polynomial<F7> p = {1, 2, 3};  // 1 + 2x + 3x²
+     * Polynomial<F7> q = {4, 5};     // 4 + 5x
+     * auto [quotient, remainder] = p.poly_long_div(q);
+     * @endcode
+     */
+    std::pair<Polynomial<T>, Polynomial<T>> poly_long_div(const Polynomial<T>& rhs) const
+        requires FieldType<T>;
 
-    /* coefficient access */
-    void set_coeff(size_t i, const T& c);
-    void add_to_coeff(const T& c, size_t i);
-    T operator[](size_t i) const noexcept;
+    /** @} */
 
-    /* properties */
-    bool is_empty() const noexcept { return data.size() == 0; }
-    bool is_zero() const {
+    /** @name Randomization
+     * @{
+     */
+
+    /**
+     * @brief Randomize polynomial coefficients
+     *
+     * @param d Desired degree of the randomized polynomial
+     * @return Reference to this polynomial after randomization
+     *
+     * Creates a random polynomial of degree exactly d with random coefficients.
+     * Ensures the leading coefficient is non-zero to maintain the exact degree.
+     * Uses the coefficient type's randomize() method for field elements.
+     */
+    Polynomial& randomize(size_t d) noexcept;
+
+    /** @} */
+
+    /** @name Differentiation
+     * @{
+     */
+
+    /**
+     * @brief Compute s-th classical derivative (field coefficients only)
+     *
+     * @param s Order of differentiation (0 = identity, 1 = first derivative, etc.)
+     * @return Reference to this polynomial after differentiation
+     *
+     * Computes the s-th formal derivative using the standard formula:
+     * d^s/dx^s [∑ aᵢxᵢ] = ∑ (i!/(i-s)!) aᵢx^(i-s) for i ≥ s
+     *
+     * For s=0, returns the original polynomial unchanged.
+     *
+     * @throws std::invalid_argument if attempting to differentiate empty polynomial
+     *
+     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     */
+    Polynomial& differentiate(size_t s)
+        requires FieldType<T>;
+
+    /**
+     * @brief Compute s-th Hasse derivative (field coefficients only)
+     *
+     * @param s Order of Hasse differentiation
+     * @return Reference to this polynomial after Hasse differentiation
+     *
+     * Computes the s-th Hasse derivative using binomial coefficients:
+     * D^(s)[∑ aᵢxᵢ] = ∑ C(i,s) aᵢx^(i-s) for i ≥ s
+     *
+     * @throws std::invalid_argument if attempting to Hasse differentiate empty polynomial
+     *
+     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     */
+    Polynomial& Hasse_differentiate(size_t s)
+        requires FieldType<T>;
+
+    /** @} */
+
+    /** @name Information and Properties
+     * @{
+     */
+
+    /**
+     * @brief Get the degree of the polynomial
+     *
+     * @return Degree of the polynomial (highest power of x with non-zero coefficient)
+     *
+     * Returns deg(p) = max{i : aᵢ ≠ 0} for polynomial p(x) = ∑ aᵢxᵢ.
+     *
+     * @throws std::invalid_argument if called on empty polynomial
+     *
+     * @note Only available for types satisfying @ref ReliablyComparableType
+     */
+    size_t degree() const
+        requires ReliablyComparableType<T>;
+
+    /**
+     * @brief Get the trailing degree (lowest power with non-zero coefficient)
+     *
+     * @return Trailing degree of the polynomial
+     *
+     * Returns the trailing degree: min{i : aᵢ ≠ 0} for polynomial p(x) = ∑ aᵢxᵢ.
+     *
+     * @throws std::invalid_argument if called on empty polynomial
+     *
+     * @note Only available for types satisfying @ref ReliablyComparableType
+     */
+    size_t trailing_degree() const
+        requires ReliablyComparableType<T>;
+
+    /**
+     * @brief Get the trailing coefficient (coefficient of lowest power term)
+     *
+     * @return Reference to trailing coefficient
+     *
+     * Returns the coefficient of x^k where k is the trailing degree.
+     *
+     * @throws std::invalid_argument if called on empty polynomial
+     *
+     * @note Only available for types satisfying @ref ReliablyComparableType
+     */
+    const T& trailing_coefficient() const
+        requires ReliablyComparableType<T>;
+
+    /**
+     * @brief Get the leading coefficient (coefficient of highest power term)
+     *
+     * @return Reference to leading coefficient
+     *
+     * Returns the coefficient of x^n where n is the degree.
+     *
+     * @throws std::invalid_argument if called on empty polynomial
+     */
+    const T& leading_coefficient() const;
+
+    /**
+     * @brief Check if polynomial is empty
+     *
+     * @return true if polynomial has no coefficients, false otherwise
+     *
+     * An empty polynomial represents an uninitialized state, distinct from
+     * the zero polynomial which has degree 0.
+     */
+    constexpr bool is_empty() const noexcept { return data.size() == 0; }
+
+    /**
+     * @brief Check if polynomial is the zero polynomial
+     *
+     * @return true if polynomial equals 0, false otherwise
+     *
+     * Tests whether the polynomial is identically zero: p(x) = 0.
+     * Different from empty polynomial.
+     *
+     * @throws std::invalid_argument if called on empty polynomial
+     *
+     * @note Only available for types satisfying @ref ReliablyComparableType
+     */
+    bool is_zero() const
+        requires ReliablyComparableType<T>
+    {
         if (is_empty()) throw std::invalid_argument("trying to check whether empty polynomial is zero");
-        return get_degree() == 0 && get_trailing_coefficient() == T(0);
+        return degree() == 0 && trailing_coefficient() == T(0);
     }
-    bool is_one() const {
+
+    /**
+     * @brief Check if polynomial is the constant polynomial 1
+     *
+     * @return true if polynomial equals 1, false otherwise
+     *
+     * Tests whether the polynomial is the multiplicative identity: p(x) = 1.
+     *
+     * @throws std::invalid_argument if called on empty polynomial
+     *
+     * @note Only available for types satisfying @ref ReliablyComparableType
+     */
+    bool is_one() const
+        requires ReliablyComparableType<T>
+    {
         if (is_empty()) throw std::invalid_argument("trying to check whether empty polynomial is one");
-        return get_degree() == 0 && get_trailing_coefficient() == T(1);
+        return degree() == 0 && trailing_coefficient() == T(1);
     }
-    bool is_monic() const {
+
+    /**
+     * @brief Check if polynomial is monic (leading coefficient equals 1)
+     *
+     * @return true if leading coefficient is 1, false otherwise
+     *
+     * A monic polynomial has leading coefficient 1.
+     *
+     * @throws std::invalid_argument if called on empty polynomial
+     *
+     * @note Only available for types satisfying @ref ReliablyComparableType
+     */
+    bool is_monic() const
+        requires ReliablyComparableType<T>
+    {
         if (is_empty()) throw std::invalid_argument("trying to check whether empty polynomial is monic");
-        return get_leading_coefficient() == T(1);
+        return leading_coefficient() == T(1);
     }
-    const T& get_trailing_coefficient() const;
-    const T& get_leading_coefficient() const;
+
+    constexpr bool is_irreducible() const
+        requires FieldType<T>
+    {
+        const size_t d = degree();
+        if (d == 0) return false;
+        if (d == 1) return true;
+
+        // find "smaller half" of factorization (if factor of deg > d/2 there must be a factor of deg < d/2 and we would
+        // already have found it once i > d/2)
+        for (size_t i = 1; i <= d / 2; ++i) {
+            if (i == 1) {
+                for (size_t j = 0; j < T::get_size(); ++j) {
+                    auto p = Polynomial({T(j), 1});
+                    if ((*this) % p == ZeroPolynomial<T>()) return false;
+                }
+            } else {
+                auto I = IdentityMatrix<T>(i - 1);
+                auto v = I.rowspace();
+                for (auto it = v.begin(); it != v.end(); ++it) {
+                    auto p = Polynomial((*it).append(Vector<T>({T(1)})));
+                    if ((*this) % p == ZeroPolynomial<T>()) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * @brief Compute Hamming weight (number of non-zero coefficients)
+     *
+     * @return Number of non-zero coefficients
+     *
+     * Uses lazy evaluation with O(1) compile-time optimized caching for optimal performance on repeated calls.
+     *
+     * @note Only available for types satisfying @ref ReliablyComparableType
+     */
+    size_t wH() const noexcept
+        requires ReliablyComparableType<T>
+    {
+        return cache.template get_or_compute<Weight>([this] { return calculate_weight(); });
+    }
+
+    /** @} */
+
+    /** @name Coefficient Access and Manipulation
+     * @{
+     */
+
+    /**
+     * @brief Add value to coefficient at specified position
+     *
+     * @param i Index of coefficient to modify (power of x)
+     * @param c Value to add to the coefficient
+     * @return Reference to this polynomial after modification
+     *
+     * Adds c to the coefficient of x^i. Automatically grows polynomial
+     * if i exceeds current degree. Maintains canonical form through pruning.
+     */
+    /**
+     * @brief Add value to coefficient at specified position using perfect forwarding
+     *
+     * @tparam U Type that can be converted to T
+     * @param i Index of coefficient to modify (power of x)
+     * @param c Value to add to the coefficient
+     * @return Reference to this polynomial after modification
+     *
+     * Adds c to the coefficient of x^i. Automatically grows polynomial
+     * if i exceeds current degree. Maintains canonical form through pruning.
+     */
+    template <typename U>
+    constexpr Polynomial& add_to_coefficient(size_t i, U&& c)
+        requires std::convertible_to<std::decay_t<U>, T>;
+
+    /**
+     * @brief Set coefficient at specified position using perfect forwarding
+     *
+     * @tparam U Type that can be converted to T
+     * @param i Index of coefficient to set (power of x)
+     * @param c New value for the coefficient
+     * @return Reference to this polynomial after modification
+     *
+     * Sets the coefficient of x^i to c. Automatically grows polynomial
+     * if i exceeds current degree. Maintains canonical form through pruning.
+     */
+    template <typename U>
+    constexpr Polynomial& set_coefficient(size_t i, U&& c)
+        requires std::convertible_to<std::decay_t<U>, T>;
+
+    /**
+     * @brief Reverse coefficient order (reciprocal polynomial)
+     *
+     * @return Reference to this polynomial after reciprocal operation
+     *
+     * Transforms p(x) = a₀ + a₁x + ... + aₙx^n into x^n·p(1/x) = aₙ + aₙ₋₁x + ... + a₀x^n.
+     */
+    constexpr Polynomial& reciprocal() noexcept;
+
+    /**
+     * @brief Normalize polynomial to monic form (field coefficients only)
+     *
+     * @return Reference to this polynomial after normalization
+     *
+     * Divides all coefficients by the leading coefficient to make the polynomial monic.
+     *
+     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     */
+    constexpr Polynomial& normalize()
+        requires FieldType<T>;
+
+    /**
+     * @brief Access coefficient by index (const version)
+     *
+     * @param i Index of coefficient to access (power of x)
+     * @return Coefficient of x^i (returns T(0) if i exceeds degree)
+     *
+     * Provides safe, bounds-checked access to polynomial coefficients.
+     * Returns zero for indices beyond the polynomial degree.
+     */
+    constexpr T operator[](size_t i) const noexcept;
+
+    /** @} */
 
    private:
     std::vector<T> data;
-    Cache<Polynomial, size_t> cache;
 
-    size_t calculateWeight() noexcept;
+    /// High-performance O(1) cache for expensive operations (Hamming weight, etc.) - uses compile-time optimized array
+    /// storage
+    mutable details::Cache<details::CacheEntry<Weight, size_t>> cache;
 
-    void prune() noexcept;
+    constexpr size_t calculate_weight() const noexcept
+        requires ReliablyComparableType<T>;
+
+    constexpr Polynomial& prune() noexcept;
 };
 
 /* member functions for Polynomial */
 
-template <class T>
-inline Polynomial<T>::Polynomial(const Vector<T>& v) noexcept : data(v.get_n()) {
-    for (size_t i = 0; i < data.size(); ++i) {
-        data[i] = v[i];
-    }
+template <ComponentType T>
+template <FiniteFieldType S>
+    requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
+Polynomial<T>::Polynomial(const Polynomial<S>& other) {
+    const size_t deg = other.degree();
+    auto indices = std::views::iota(size_t{0}, deg + 1);
+    std::ranges::for_each(
+        indices, [&](size_t i) { this->set_coefficient(i, T(other[i])); });  // Uses enhanced cross-field constructors
+}
+
+template <ComponentType T>
+Polynomial<T>::Polynomial(const Vector<T>& v) : data(v.get_n()) {
+    auto indices = std::views::iota(size_t{0}, data.size());
+    std::ranges::transform(indices, data.begin(), [&v](size_t i) { return v[i]; });
     prune();
 }
 
-template <class T>
-inline Polynomial<T>::Polynomial(const std::initializer_list<T>& l) noexcept : data(l) {
-    // std::reverse(data.begin(), data.end());
-    prune();
-}
-
-template <class T>
-template <class S, typename>
-inline Polynomial<T>::Polynomial(const Polynomial<S>& other) noexcept {
-    Vector<S> coefficients(other);
-    auto M = coefficients.template as_matrix<T>();
-    // std::cout << M << std::endl;
-    bool breakflag = false;
-    for (size_t i = 1; i < M.get_m(); ++i) {
-        for (size_t j = 0; j < M.get_n(); ++j) {
-            if (M(i, j) != T(0)) {
-                std::cout << "Warning: data loss while converting superfield polynomial to (prime) subfield polynomial!"
-                          << std::endl;
-                breakflag = true;
-                break;
-            }
-        }
-        if (breakflag) break;
-    }
-    auto firstrow = M.get_row(0);
-    *this = Polynomial(firstrow);
-}
-
-template <class T>
-template <uint8_t m>
-inline Polynomial<T>::Polynomial(const Polynomial<SF<T, m>>& other) noexcept {
-    for (size_t i = 0; i <= other.get_degree(); ++i) {
-        data.push_back(T(other[i]));
-    }
-}
-
-template <class T>
-inline Polynomial<T>& Polynomial<T>::operator=(const T& rhs) noexcept {
+template <ComponentType T>
+constexpr Polynomial<T>& Polynomial<T>::operator=(const T& rhs) {
     data.resize(1);
     data.back() = rhs;
+    if (rhs == T(0))
+        cache.template set<Weight>(0);
+    else
+        cache.template set<Weight>(1);
+    return *this;
+}
 
-    if (rhs != T(0)) {
-        cache.set("weight", (size_t)1);
+template <ComponentType T>
+constexpr Polynomial<T>& Polynomial<T>::operator=(const Polynomial<T>& rhs) {
+    if (this == &rhs) return *this;
+    data = rhs.data;
+    cache = rhs.cache;
+    return *this;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T>& Polynomial<T>::operator=(Polynomial<T>&& rhs) noexcept {
+    if (this == &rhs) return *this;
+    data = std::move(rhs.data);
+    cache = std::move(rhs.cache);
+    return *this;
+}
+
+template <ComponentType T>
+template <FiniteFieldType S>
+    requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
+Polynomial<T>& Polynomial<T>::operator=(const Polynomial<S>& rhs) {
+    data.resize(0);
+    for (size_t i = 0; i <= rhs.degree(); ++i)
+        this->set_coefficient(i, T(rhs[i]));  // Uses enhanced cross-field constructors
+    cache.invalidate();
+    return *this;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> Polynomial<T>::operator-() const& noexcept {
+    Polynomial res(*this);
+    std::for_each(res.data.begin(), res.data.end(), [](T& c) { c = -c; });
+    cache.invalidate();
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> Polynomial<T>::operator-() && noexcept {
+    std::for_each(data.begin(), data.end(), [](T& c) { c = -c; });
+    cache.invalidate();
+    return std::move(*this);
+}
+
+template <ComponentType T>
+T Polynomial<T>::operator()(const T& s) const {
+    if (data.size() == 0) throw std::invalid_argument("trying to evaluate empty polynomial");
+    if (data.size() == 1) return data.front();
+
+    // Use std::accumulate with Horner's method for polynomial evaluation
+    return std::accumulate(data.crbegin() + 1, data.crend(), data.back(),
+                           [&s](const T& acc, const T& coeff) { return acc * s + coeff; });
+}
+
+template <ComponentType T>
+constexpr Polynomial<T>& Polynomial<T>::operator+=(const Polynomial<T>& rhs) noexcept {
+    if (data.size() < rhs.data.size()) data.resize(rhs.data.size());
+    std::transform(rhs.data.begin(), rhs.data.end(), data.begin(), data.begin(), std::plus<T>{});
+    cache.invalidate();
+    prune();
+    return *this;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T>& Polynomial<T>::operator-=(const Polynomial<T>& rhs) noexcept {
+    if (data.size() < rhs.data.size()) data.resize(rhs.data.size());
+    std::transform(rhs.data.begin(), rhs.data.end(), data.begin(), data.begin(), std::minus<T>{});
+    cache.invalidate();
+    prune();
+    return *this;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T>& Polynomial<T>::operator*=(const Polynomial<T>& rhs) {
+    Polynomial res;
+    res.data.resize(data.size() + rhs.data.size() - 1);
+    for (size_t i = 0; i < data.size(); ++i) {
+        for (size_t j = 0; j < rhs.data.size(); ++j) res.add_to_coefficient(i + j, data[i] * rhs.data[j]);
+    }
+    data = std::move(res.data);
+    cache.invalidate();
+    prune();
+    return *this;
+}
+
+template <ComponentType T>
+Polynomial<T>& Polynomial<T>::operator/=(const Polynomial<T>& rhs)
+    requires FieldType<T>
+{
+    if (rhs.is_zero()) throw std::invalid_argument("division by zero (polynomial)");
+    *this = this->poly_long_div(rhs).first;
+    cache.invalidate();
+    return *this;
+}
+
+template <ComponentType T>
+Polynomial<T>& Polynomial<T>::operator%=(const Polynomial<T>& rhs)
+    requires FieldType<T>
+{
+    if (rhs.is_zero()) throw std::invalid_argument("division by zero (polynomial)");
+
+    const size_t d = degree();
+    if (d == rhs.degree()) {  // simply subtract polynomial modulus
+        const auto scalar = leading_coefficient() / rhs.leading_coefficient();
+        for (size_t i = 0; i < d; ++i) {
+            data[i] -= scalar * rhs[i];
+        }
+        set_coefficient(d, 0);
+    } else {  // full-blown polynomial long division
+        auto res = this->poly_long_div(rhs);
+        *this = res.second;
+        cache.invalidate();
+    }
+
+    return *this;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T>& Polynomial<T>::operator*=(const T& s) noexcept {
+    if (s == T(0)) {
+        cache.template set<Weight>(0);
+        data.resize(1);
+        data.back() = T(0);
     } else {
-        cache.set("weight", (size_t)0);
+        std::for_each(data.begin(), data.end(), [&s](T& c) { c *= s; });
+        cache.invalidate();
     }
     return *this;
 }
 
-template <class T>
-inline Polynomial<T>& Polynomial<T>::operator=(const Vector<T>& rhs) noexcept {
-    data.resize(rhs.get_degree() + 1);
-    for (size_t i = 0; i < data.size(); ++i) {
-        data[i] = rhs[i];
+template <ComponentType T>
+constexpr Polynomial<T>& Polynomial<T>::operator*=(size_t n) noexcept
+    requires FieldType<T>
+{
+    if (T::get_characteristic() != 0) {
+        n = n % T::get_characteristic();
+    }
+    if (n == 0) {
+        cache.template set<Weight>(0);
+        data.resize(1);
+        data.back() = T(0);
+    } else {
+        std::for_each(data.begin(), data.end(), [&n](T& c) { c *= n; });
+        cache.invalidate();
+    }
+    return *this;
+}
+
+template <ComponentType T>
+Polynomial<T>& Polynomial<T>::operator/=(const T& s) {
+    if (s == T(0)) throw std::invalid_argument("division by zero (polynomial)");
+    std::for_each(data.begin(), data.end(), [&s](T& c) { c /= s; });
+    cache.invalidate();
+    return *this;
+}
+
+template <ComponentType T>
+std::pair<Polynomial<T>, Polynomial<T>> Polynomial<T>::poly_long_div(const Polynomial<T>& rhs) const
+    requires FieldType<T>
+{
+    if (rhs.degree() == 0) {
+        if (rhs[0] == T(0)) throw std::invalid_argument("polynomial long division by zero polynomial");
+        return std::make_pair(*this / rhs[0], Polynomial<T>());
+    }
+
+    if (degree() == 0) return std::make_pair(Polynomial<T>(), Polynomial<T>());
+
+    if (degree() < rhs.degree()) return std::make_pair(Polynomial<T>(), rhs);
+
+    Polynomial<T> q;
+    Polynomial<T> r = *this;
+
+    while (r.degree() >= rhs.degree()) {
+        const T t = r.leading_coefficient() / rhs.leading_coefficient();
+        // std::cout << (*this)[d] << ", " << rhs[rhs.degree()] << ": " << t << std::endl;
+        const size_t i = r.degree() - rhs.degree();
+        q.add_to_coefficient(i, t);
+        for (size_t j = 0; j <= rhs.degree(); ++j) {
+            r.add_to_coefficient(i + j, -(t * rhs)[j]);
+        }
+    }
+
+    return std::make_pair(std::move(q), std::move(r));
+}
+
+template <ComponentType T>
+Polynomial<T>& Polynomial<T>::randomize(size_t d) noexcept {
+    data.resize(d + 1);
+    if constexpr (FieldType<T>) {
+        std::for_each(data.begin(), data.end(), std::mem_fn(&T::randomize));
+        do {
+            data.back().randomize();
+        } while (data.back() == T(0));
+    } else if constexpr (std::same_as<T, double>) {
+        std::uniform_real_distribution<double> dist(-1.0, 1.0);
+        std::for_each(data.begin(), data.end(), [&](double& val) { val = dist(gen()); });
+        do {
+            data.back() = dist(gen());
+        } while (data.back() == T(0));
+    } else if constexpr (std::same_as<T, std::complex<double>>) {
+        std::uniform_real_distribution<double> dist(-1.0, 1.0);
+        std::for_each(data.begin(), data.end(),
+                      [&](std::complex<double>& val) { val = std::complex<double>(dist(gen()), dist(gen())); });
+        do {
+            data.back() = std::complex<double>(dist(gen()), dist(gen()));
+        } while (data.back() == T(0));
+    } else if constexpr (SignedIntType<T>) {
+        std::uniform_int_distribution<long long> dist(-100, 100);
+        std::for_each(data.begin(), data.end(), [&](T& val) { val = T(dist(gen())); });
+        do {
+            data.back() = dist(gen());
+        } while (data.back() == T(0));
     }
     cache.invalidate();
     return *this;
 }
 
-template <class T>
-inline Polynomial<T>& Polynomial<T>::operator=(const Polynomial<T>& rhs) noexcept {
-    if (*this == rhs) return *this;
-    data = rhs.data;
-    cache = rhs.cache;
-    // std::cout << "polynomial copy assignment" << std::endl;
-    return *this;
-}
-
-template <class T>
-inline Polynomial<T>& Polynomial<T>::operator=(Polynomial<T>&& rhs) noexcept {
-    if (*this == rhs) return *this;
-    data = std::move(rhs.data);
-    cache = std::move(rhs.cache);
-    // std::cout << "polynomial move assignment" << std::endl;
-    return *this;
-}
-
-template <class T>
-inline Polynomial<T> Polynomial<T>::operator-() const noexcept {
-    Polynomial res(*this);
-    std::for_each(res.data.begin(), res.data.end(), [](T& v) { v = -v; });
-    return res;
-}
-
-template <class T>
-inline T Polynomial<T>::operator()(const T& s) const {
-    if (data.size() == 0) throw std::invalid_argument("trying to evaluate empty polynomial");
-
-    if (data.size() == 1) return data.front();
-
-    T value(data.back() * s);
-    for (auto it = data.crbegin() + 1; it != std::prev(data.crend()); ++it) {
-        value += *it;
-        value *= s;
-    }
-    value += data.front();
-
-    return value;
-}
-
-template <class T>
-inline Polynomial<T>& Polynomial<T>::differentiate(size_t s) {
+template <ComponentType T>
+Polynomial<T>& Polynomial<T>::differentiate(size_t s)
+    requires FieldType<T>
+{
     if (data.size() == 0) throw std::invalid_argument("trying to differentiate empty polynomial");
 
     if (s == 0) return *this;
@@ -261,17 +1070,18 @@ inline Polynomial<T>& Polynomial<T>::differentiate(size_t s) {
         data[0] = T(0);
         return *this;
     }
-    for (size_t i = 0; i <= d - s; ++i) {
-        data[i] = fac<size_t>(i + s) / fac<size_t>(i) * data[i + s];
-    }
+    auto indices = std::views::iota(size_t{0}, d - s + 1);
+    std::ranges::for_each(indices, [&](size_t i) { data[i] = fac<size_t>(i + s) / fac<size_t>(i) * data[i + s]; });
     data.resize(data.size() - s);
     prune();
     cache.invalidate();
     return *this;
 }
 
-template <class T>
-inline Polynomial<T>& Polynomial<T>::Hasse_differentiate(size_t s) {
+template <ComponentType T>
+Polynomial<T>& Polynomial<T>::Hasse_differentiate(size_t s)
+    requires FieldType<T>
+{
     if (data.size() == 0) throw std::invalid_argument("trying to Hasse differentiate empty polynomial");
 
     if (s == 0) return *this;
@@ -281,215 +1091,47 @@ inline Polynomial<T>& Polynomial<T>::Hasse_differentiate(size_t s) {
         data[0] = T(0);
         return *this;
     }
-    for (size_t i = 0; i <= d - s; ++i) {
-        data[i] = bin<size_t>(i + s, s) * data[i + s];
-    }
+    auto indices = std::views::iota(size_t{0}, d - s + 1);
+    std::ranges::for_each(indices, [&](size_t i) { data[i] = bin<size_t>(i + s, s) * data[i + s]; });
     data.resize(data.size() - s);
     prune();
     cache.invalidate();
     return *this;
-
-    /*
-    if (data.size() == 1) {
-        data[0] = T(0);
-    } else {
-        for (size_t i = 0; i < s; ++i) {
-            if (data.size() == 1) {
-                data[0] = T(0);
-                break;
-            }
-            data.erase(data.begin());
-            for (size_t j = 0; j < data.size(); ++j) {
-                data[j] *= j + 1;
-            }
-        }
-    }
-    cache.invalidate();
-    return *this;
-    */
 }
 
-template <class T>
-inline Polynomial<T>& Polynomial<T>::operator+=(const Polynomial<T>& rhs) noexcept {
-    if (data.size() < rhs.data.size()) {
-        data.resize(rhs.data.size());
-    }
-    for (size_t i = 0; i < rhs.data.size(); ++i) {
-        data[i] += rhs.data[i];
-    }
-    cache.invalidate();
-    prune();
-    return *this;
-}
-
-template <class T>
-inline Polynomial<T>& Polynomial<T>::operator-=(const Polynomial<T>& rhs) noexcept {
-    if (data.size() < rhs.data.size()) {
-        data.resize(rhs.data.size());
-    }
-    for (size_t i = 0; i < rhs.data.size(); ++i) {
-        data[i] -= rhs.data[i];
-    }
-    cache.invalidate();
-    prune();
-    return *this;
-}
-
-template <class T>
-inline Polynomial<T>& Polynomial<T>::operator*=(const Polynomial<T>& rhs) noexcept {
-    Polynomial res;
-    res.data.resize(data.size() + rhs.data.size() - 1);
-    for (size_t i = 0; i < data.size(); ++i) {
-        for (size_t j = 0; j < rhs.data.size(); ++j) {
-            res.add_to_coeff(data[i] * rhs.data[j], i + j);
-        }
-    }
-    data = std::move(res.data);
-    cache.invalidate();
-    prune();  // ToDo: check if necessary!!
-    return *this;
-}
-
-template <class T>
-inline Polynomial<T>& Polynomial<T>::operator/=(const Polynomial<T>& rhs) {
-    if (rhs.is_zero()) throw std::invalid_argument("division by zero (polynomial)");
-    auto res = poly_long_div(*this, rhs);
-    *this = res.first;
-    cache.invalidate();
-    return *this;
-}
-
-template <class T>
-inline Polynomial<T>& Polynomial<T>::operator%=(const Polynomial<T>& rhs) {
-    if (rhs.is_zero()) throw std::invalid_argument("division by zero (polynomial)");
-
-    if (get_degree() == rhs.get_degree()) {  // simply subtract polynomial modulus
-        const size_t degree = get_degree();
-        const auto scalar = get_leading_coefficient() / rhs.get_leading_coefficient();
-        for (size_t i = 0; i < get_degree(); ++i) {
-            data[i] -= scalar * rhs[i];
-        }
-        set_coeff(get_degree(), 0);
-    } else {  // full-blown polynomial long division
-        auto res = poly_long_div(*this, rhs);
-        *this = res.second;
-        cache.invalidate();
-    }
-
-    return *this;
-}
-
-template <class T>
-inline Polynomial<T>& Polynomial<T>::operator*=(const T& s) noexcept {
-    if (s == T(0)) {
-        cache.set("weight", (size_t)0);
-        data.resize(1);
-        data.back() = T(0);
-    } else {
-        std::for_each(data.begin(), data.end(), [&s](T& v) { v *= s; });
-    }
-    return *this;
-}
-
-template <class T>
-inline Polynomial<T>& Polynomial<T>::operator/=(const T& s) {
-    if (s == T(0)) throw std::invalid_argument("division by zero (polynomial)");
-    std::for_each(data.begin(), data.end(), [&s](T& v) { v /= s; });
-    return *this;
-}
-
-template <class T>
-inline void Polynomial<T>::randomize(size_t d) noexcept {
-    static std::uniform_int_distribution<int> dist(0, d);
-    data.resize(d + 1);
-    std::for_each(data.begin(), data.end() - 1, std::mem_fn(&T::randomize));
-    do {
-        data.back().randomize();
-    } while (data.back() == T(0));
-    cache.invalidate();
-}
-
-template <class T>
-inline size_t Polynomial<T>::get_degree() const {
+template <ComponentType T>
+size_t Polynomial<T>::degree() const
+    requires ReliablyComparableType<T>
+{
     if (is_empty()) throw std::invalid_argument("calculating degree of empty polynomial");
     return (data.size() - 1);
 }
 
-template <class T>
-inline size_t Polynomial<T>::get_trailing_degree() const {
+template <ComponentType T>
+size_t Polynomial<T>::trailing_degree() const
+    requires ReliablyComparableType<T>
+{
     if (is_empty()) throw std::invalid_argument("calculating trailing degree of empty polynomial");
-    const size_t d = get_degree();
+    const size_t d = degree();
     if (d == 0) return 0;
-    size_t td = 0;
-    for (size_t i = 0; i <= d; ++i) {
-        if (data[i] == T(0))
-            ++td;
-        else
-            break;
-    }
-    return td;
+
+    const auto first_nonzero = std::find_if(data.begin(), data.end(), [](const T& coeff) { return coeff != T(0); });
+    return std::distance(data.begin(), first_nonzero);
 }
 
-template <class T>
-inline void Polynomial<T>::set_coeff(size_t i, const T& c) {
-    cache.invalidate();
-
-    if (i == data.size() - 1) {
-        data.back() = c;
-        if (c == T(0)) prune();
-        return;
-    }
-
-    if (data.size() != 0 && i < data.size() - 1) {
-        data[i] = c;
-        return;
-    }
-
-    if (c != T(0)) {
-        data.resize(i + 1);
-        data.back() = c;
-    }
-}
-
-template <class T>
-inline void Polynomial<T>::add_to_coeff(const T& c, size_t i) {
-    if (c == T(0)) return;
-
-    cache.invalidate();
-
-    if (i == data.size() - 1) {
-        data.back() += c;
-        if (data.back() == T(0)) prune();
-        return;
-    }
-
-    if (data.size() != 0 && i < data.size() - 1) {
-        data[i] += c;
-        return;
-    }
-
-    data.resize(i + 1);
-    data.back() = c;
-}
-
-template <class T>
-inline T Polynomial<T>::operator[](size_t i) const noexcept {
-    // if (i >= data.size()) throw std::invalid_argument("trying to access non-existent element");
-    if (i >= data.size()) return T(0);
-    return data[i];
-}
-
-template <class T>
-inline const T& Polynomial<T>::get_trailing_coefficient() const {
+template <ComponentType T>
+const T& Polynomial<T>::trailing_coefficient() const
+    requires ReliablyComparableType<T>
+{
     if (is_empty())
         throw std::invalid_argument(
             "trying to access non-existent element (trailing "
             "coefficient)");
-    return data[get_trailing_degree()];
+    return data[trailing_degree()];
 }
 
-template <class T>
-inline const T& Polynomial<T>::get_leading_coefficient() const {
+template <ComponentType T>
+const T& Polynomial<T>::leading_coefficient() const {
     if (is_empty())
         throw std::invalid_argument(
             "trying to access non-existent element (leading "
@@ -497,14 +1139,74 @@ inline const T& Polynomial<T>::get_leading_coefficient() const {
     return data.back();
 }
 
-template <class T>
-inline size_t Polynomial<T>::calculateWeight() noexcept {
+template <ComponentType T>
+template <typename U>
+constexpr Polynomial<T>& Polynomial<T>::add_to_coefficient(size_t i, U&& c)
+    requires std::convertible_to<std::decay_t<U>, T>
+{
+    T c_converted = std::forward<U>(c);
+    if (c_converted == T(0)) return *this;
+
+    cache.invalidate();
+    if (data.size() == 0 || i >= data.size()) {
+        // automatic growth, change zero coefficient beyond degree
+        data.resize(i + 1);
+        data.back() = std::move(c_converted);
+    } else if (i == data.size() - 1) {
+        // change MSC
+        data.back() += c_converted;
+        if (data.back() == T(0)) prune();
+    } else {
+        // change some coefficient
+        data[i] += c_converted;
+    }
+    return *this;
+}
+
+template <ComponentType T>
+template <typename U>
+constexpr Polynomial<T>& Polynomial<T>::set_coefficient(size_t i, U&& c)
+    requires std::convertible_to<std::decay_t<U>, T>
+{
+    T c_converted = std::forward<U>(c);
+    if (data.size() == 0 || i >= data.size())
+        add_to_coefficient(i, std::move(c_converted));
+    else
+        add_to_coefficient(i, c_converted - data[i]);
+    return *this;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T>& Polynomial<T>::reciprocal() noexcept {
+    std::reverse(data.begin(), data.end());
+    return *this;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T>& Polynomial<T>::normalize()
+    requires FieldType<T>
+{
+    if (is_zero() || is_monic()) return *this;
+    *this /= leading_coefficient();
+    return *this;
+}
+
+template <ComponentType T>
+constexpr T Polynomial<T>::operator[](size_t i) const noexcept {
+    if (i >= data.size()) return T(0);
+    return data[i];
+}
+
+template <ComponentType T>
+constexpr size_t Polynomial<T>::calculate_weight() const noexcept
+    requires ReliablyComparableType<T>
+{
     return data.size() - std::count(data.cbegin(), data.cend(), T(0));
 }
 
-template <class T>
-inline void Polynomial<T>::prune() noexcept {
-    if (data.size() == 0) return;
+template <ComponentType T>
+constexpr Polynomial<T>& Polynomial<T>::prune() noexcept {
+    if (data.size() == 0) return *this;
 
     const auto leading_coefficient = std::find_if(data.crbegin(), data.crend(), [](const T& e) { return e != T(0); });
     if (leading_coefficient != data.crend()) {
@@ -513,353 +1215,286 @@ inline void Polynomial<T>::prune() noexcept {
         data.resize(1);
         data.back() = T(0);
     }
+    return *this;
 }
 
 /* free functions wrt. Polynomial */
 
-/*
- * polynomial + polynomial
- */
-
-template <class T>
-Polynomial<T> operator+(Polynomial<T> lhs, const Polynomial<T>& rhs) noexcept {
-    lhs += rhs;
-    return lhs;
+template <ComponentType T>
+constexpr Polynomial<T> operator+(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept {
+    Polynomial<T> res(lhs);
+    res += rhs;
+    return res;
 }
 
-template <class T>
-Polynomial<T> operator+(const Polynomial<T>& lhs, Polynomial<T>&& rhs) noexcept {
+template <ComponentType T>
+constexpr Polynomial<T> operator+(Polynomial<T>&& lhs, const Polynomial<T>& rhs) noexcept {
+    Polynomial<T> res(std::move(lhs));
+    res += rhs;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> operator+(const Polynomial<T>& lhs, Polynomial<T>&& rhs) noexcept {
     Polynomial<T> res(std::move(rhs));
     res += lhs;
     return res;
 }
 
-/*
- * polynomial - polynomial
- */
+template <ComponentType T>
+constexpr Polynomial<T> operator+(Polynomial<T>&& lhs, Polynomial<T>&& rhs) noexcept {
+    Polynomial<T> res(std::move(lhs));
+    res += rhs;
+    return res;
+}
 
-template <class T>
-Polynomial<T> operator-(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept {
+template <ComponentType T>
+constexpr Polynomial<T> operator-(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept {
     Polynomial<T> res(lhs);
     res -= rhs;
     return res;
 }
 
-template <class T>
-Polynomial<T> operator-(const Polynomial<T>& lhs, Polynomial<T>&& rhs) noexcept {
-    Polynomial<T> res(std::move(rhs));
-    res -= lhs;
-    return -res;
-}
-
-template <class T>
-Polynomial<T> operator-(Polynomial<T>&& lhs, const Polynomial<T>& rhs) noexcept {
+template <ComponentType T>
+constexpr Polynomial<T> operator-(Polynomial<T>&& lhs, const Polynomial<T>& rhs) noexcept {
     Polynomial<T> res(std::move(lhs));
     res -= rhs;
     return res;
 }
 
-template <class T>
-Polynomial<T> operator-(Polynomial<T>&& lhs, Polynomial<T>&& rhs) noexcept {
+template <ComponentType T>
+constexpr Polynomial<T> operator-(const Polynomial<T>& lhs, Polynomial<T>&& rhs) noexcept {
+    Polynomial<T> res(std::move(rhs));
+    res = -res;
+    res += lhs;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> operator-(Polynomial<T>&& lhs, Polynomial<T>&& rhs) noexcept {
     Polynomial<T> res(std::move(lhs));
     res -= rhs;
     return res;
 }
 
-/*
- * polynomial * polynomial
- */
-
-template <class T>
-Polynomial<T> operator*(Polynomial<T> lhs, const Polynomial<T>& rhs) noexcept {
-    lhs *= rhs;
-    return lhs;
-}
-
-template <class T>
-Polynomial<T> operator*(const Polynomial<T>& lhs, Polynomial<T>&& rhs) noexcept {
-    Polynomial<T> res(std::move(rhs));
-    res *= lhs;
-    return res;
-}
-
-/*
- * polynomial * N
- */
-
-template <class T>
-Polynomial<T> operator*(const Polynomial<T>& lhs, size_t n) noexcept {
-    if (T::get_characteristic() != 0) {
-        n = n % T::get_characteristic();
-    }
-    Polynomial<T> res = {0};
-    for (size_t i = 0; i < n; ++i) {
-        res += lhs;
-    }
-    return res;
-}
-
-/*
- * N * polynomial
- */
-
-template <class T>
-Polynomial<T> operator*(size_t n, const Polynomial<T>& rhs) noexcept {
-    return rhs * n;
-}
-
-/*
- * polynomial * T
- */
-
-template <class T>
-Polynomial<T> operator*(const Polynomial<T>& lhs, const T& rhs) noexcept {
+template <ComponentType T>
+constexpr Polynomial<T> operator*(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(lhs);
     res *= rhs;
     return res;
 }
 
-template <class T>
-Polynomial<T> operator*(const Polynomial<T>& lhs, T&& rhs) noexcept {
-    Polynomial<T> res(lhs);
-    res *= rhs;
-    return res;
-}
-
-template <class T>
-Polynomial<T> operator*(Polynomial<T>&& lhs, const T& rhs) noexcept {
+template <ComponentType T>
+constexpr Polynomial<T> operator*(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(std::move(lhs));
     res *= rhs;
     return res;
 }
 
-template <class T>
-Polynomial<T> operator*(Polynomial<T>&& lhs, T&& rhs) noexcept {
+template <ComponentType T>
+constexpr Polynomial<T> operator*(const Polynomial<T>& lhs, Polynomial<T>&& rhs) {
+    Polynomial<T> res(std::move(rhs));
+    res *= lhs;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> operator*(Polynomial<T>&& lhs, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(lhs));
     res *= rhs;
     return res;
 }
 
-/*
- * T * polynomial
- */
-
-template <class T>
-Polynomial<T> operator*(const T& lhs, const Polynomial<T>& rhs) noexcept {
-    Polynomial<T> res(rhs);
-    res *= lhs;
-    return res;
-}
-
-template <class T>
-Polynomial<T> operator*(const T& lhs, Polynomial<T>&& rhs) noexcept {
-    Polynomial<T> res(std::move(rhs));
-    res *= lhs;
-    return res;
-}
-
-template <class T>
-Polynomial<T> operator*(T&& lhs, const Polynomial<T>& rhs) noexcept {
-    Polynomial<T> res(rhs);
-    res *= lhs;
-    return res;
-}
-
-template <class T>
-Polynomial<T> operator*(T&& lhs, Polynomial<T>&& rhs) noexcept {
-    Polynomial<T> res(std::move(rhs));
-    res *= lhs;
-    return res;
-}
-
-/*
- * polynomial / polynomial
- */
-
-template <class T>
-Polynomial<T> operator/(Polynomial<T> lhs, const Polynomial<T>& rhs) noexcept {
-    lhs /= rhs;
-    return lhs;
-}
-
-/*
- * polynomial % polynomial
- */
-
-template <class T>
-Polynomial<T> operator%(Polynomial<T> lhs, const Polynomial<T>& rhs) noexcept {
-    lhs %= rhs;
-    return lhs;
-}
-
-/*
- * polynomial / T
- */
-
-template <class T>
-Polynomial<T> operator/(const Polynomial<T>& lhs, const T& rhs) noexcept {
+template <ComponentType T>
+constexpr Polynomial<T> operator/(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(lhs);
     res /= rhs;
     return res;
 }
 
-template <class T>
-Polynomial<T> operator/(Polynomial<T>&& lhs, const T& rhs) noexcept {
+template <ComponentType T>
+constexpr Polynomial<T> operator/(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(std::move(lhs));
     res /= rhs;
     return res;
 }
 
-/*
- * polynomial polylongdiv polynomial
- */
+template <ComponentType T>
+constexpr Polynomial<T> operator%(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
+    Polynomial<T> res(lhs);
+    res %= rhs;
+    return res;
+}
 
-template <class T>
+template <ComponentType T>
+constexpr Polynomial<T> operator%(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
+    Polynomial<T> res(std::move(lhs));
+    res %= rhs;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> operator*(const Polynomial<T>& lhs, const T& rhs) noexcept {
+    Polynomial<T> res(lhs);
+    res *= rhs;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> operator*(Polynomial<T>&& lhs, const T& rhs) noexcept {
+    Polynomial<T> res(std::move(lhs));
+    res *= rhs;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> operator*(const T& lhs, const Polynomial<T>& rhs) noexcept {
+    Polynomial<T> res(rhs);
+    res *= lhs;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> operator*(const T& lhs, Polynomial<T>&& rhs) noexcept {
+    Polynomial<T> res(std::move(rhs));
+    res *= lhs;
+    return res;
+}
+
+// polynomial / scalar (corresponding to operator/= with T)
+template <ComponentType T>
+constexpr Polynomial<T> operator/(const Polynomial<T>& lhs, const T& rhs) {
+    Polynomial<T> res(lhs);
+    res /= rhs;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> operator/(Polynomial<T>&& lhs, const T& rhs) {
+    Polynomial<T> res(std::move(lhs));
+    res /= rhs;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> operator*(const Polynomial<T>& lhs, size_t n) noexcept {
+    Polynomial<T> res(lhs);
+    res *= n;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> operator*(Polynomial<T>&& lhs, size_t n) noexcept {
+    Polynomial<T> res(std::move(lhs));
+    res *= n;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> operator*(size_t n, const Polynomial<T>& rhs) noexcept {
+    Polynomial<T> res(rhs);
+    res *= n;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Polynomial<T> operator*(size_t n, Polynomial<T>&& rhs) noexcept {
+    Polynomial<T> res(std::move(rhs));
+    res *= n;
+    return res;
+}
+
+template <ComponentType T>
 std::pair<Polynomial<T>, Polynomial<T>> poly_long_div(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
-    if (rhs.get_degree() == 0) {
-        if (rhs[0] == T(0)) throw std::invalid_argument("polynomial long division by zero polynomial");
-        return std::make_pair(lhs / rhs[0], Polynomial<T>());
-    }
-
-    if (lhs.get_degree() == 0) return std::make_pair(Polynomial<T>(), Polynomial<T>());
-
-    if (lhs.get_degree() < rhs.get_degree()) return std::make_pair(Polynomial<T>(), rhs);
-
-    Polynomial<T> q;
-    Polynomial<T> r(lhs);
-
-    while (r.get_degree() >= rhs.get_degree()) {
-        T t = r[r.get_degree()] / rhs[rhs.get_degree()];
-        // std::cout << r[r.get_degree()] << ", " << rhs[rhs.get_degree()] << ": " << t << std::endl;
-        size_t i = r.get_degree() - rhs.get_degree();
-        q.add_to_coeff(t, i);
-        for (size_t j = 0; j <= rhs.get_degree(); ++j) {
-            r.add_to_coeff(-(t * rhs)[j], i + j);
-        }
-    }
-
-    return std::make_pair(std::move(q), std::move(r));
+    Polynomial<T> temp(lhs);
+    return temp.poly_long_div(rhs);
 }
 
-template <class T>
+template <ComponentType T>
 std::pair<Polynomial<T>, Polynomial<T>> poly_long_div(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
-    if (rhs.is_zero()) {
-        if (rhs[0] == T(0)) throw std::invalid_argument("polynomial long division by zero polynomial");
-        return std::make_pair(lhs / rhs[0], Polynomial<T>());
-    }
-
-    if (lhs.get_degree() == 0) return std::make_pair(Polynomial<T>(), Polynomial<T>());
-
-    if (lhs.get_degree() < rhs.get_degree()) return std::make_pair(Polynomial<T>(), rhs);
-
-    Polynomial<T> q;
-    Polynomial<T> r(std::move(lhs));
-
-    while (r.get_degree() >= rhs.get_degree()) {
-        T t = r[r.get_degree()] / rhs[rhs.get_degree()];
-
-        size_t i = r.get_degree() - rhs.get_degree();
-        q.add_to_coeff(t, i);
-        for (size_t j = 0; j <= rhs.get_degree(); ++j) {
-            r.add_to_coeff(-(t * rhs)[j], i + j);
-        }
-    }
-
-    return std::make_pair(std::move(q), std::move(r));
+    Polynomial<T> temp(std::move(lhs));
+    return temp.poly_long_div(rhs);
+    ;
 }
-
-/*
- * Careful: This seemingly convenient overload is actually pretty
- * dangerous:
- *
- * The usual operator precedence is violated, i.e., b*a^p is (wrongly)
- * evaluated as (b*a)^a instead of the expected b*(a^p).
- */
-template <class T>
-Polynomial<T> operator^(const Polynomial<T>& base, int exponent) noexcept {
-    return sqm<Polynomial<T>>(base, exponent);
-}
-
-template <class T>
-Polynomial<T> derivative(const Polynomial<T>& poly, size_t s) {
+template <ComponentType T>
+constexpr Polynomial<T> derivative(const Polynomial<T>& poly, size_t s)
+    requires FieldType<T>
+{
     Polynomial<T> res(poly);
     res.differentiate(s);
     return res;
 }
 
-template <class T>
-Polynomial<T> derivative(Polynomial<T>&& poly, size_t s) {
+template <ComponentType T>
+constexpr Polynomial<T> derivative(Polynomial<T>&& poly, size_t s)
+    requires FieldType<T>
+{
     Polynomial<T> res(std::move(poly));
     res.differentiate(s);
     return res;
 }
 
-template <class T>
-Polynomial<T> Hasse_derivative(const Polynomial<T>& poly, size_t s) {
+template <ComponentType T>
+constexpr Polynomial<T> Hasse_derivative(const Polynomial<T>& poly, size_t s)
+    requires FieldType<T>
+{
     Polynomial<T> res(poly);
     res.Hasse_differentiate(s);
     return res;
 }
 
-template <class T>
-Polynomial<T> Hasse_derivative(Polynomial<T>&& poly, size_t s) {
+template <ComponentType T>
+constexpr Polynomial<T> Hasse_derivative(Polynomial<T>&& poly, size_t s)
+    requires FieldType<T>
+{
     Polynomial<T> res(std::move(poly));
     res.Hasse_differentiate(s);
     return res;
 }
 
-template <class T>
-Polynomial<T> reciprocal(const Polynomial<T>& poly) {
-    Polynomial res(poly);
-    std::reverse(res.data.begin(), res.data.end());
+template <ComponentType T>
+constexpr Polynomial<T> reciprocal(const Polynomial<T>& poly) noexcept {
+    Polynomial<T> res(poly);
+    res.reciprocal();
     return res;
 }
 
-template <class T>
-Polynomial<T> reciprocal(Polynomial<T>&& poly) {
-    Polynomial res(std::move(poly));
-    std::reverse(res.data.begin(), res.data.end());
+template <ComponentType T>
+constexpr Polynomial<T> reciprocal(Polynomial<T>&& poly) noexcept {
+    Polynomial<T> res(std::move(poly));
+    res.reciprocal();
     return res;
 }
 
-template <class T>
-Polynomial<T> normalize(const Polynomial<T>& poly) {
-    if (poly.is_zero() || poly.is_monic()) return poly;
-    Polynomial res = poly / poly.get_leading_coefficient();
+template <ComponentType T>
+constexpr Polynomial<T> normalize(const Polynomial<T>& poly)
+    requires FieldType<T>
+{
+    Polynomial<T> res(poly);
+    res.normalize();
     return res;
 }
 
-template <class T>
-Polynomial<T> normalize(Polynomial<T>&& poly) {
-    if (poly.is_zero() || poly.is_monic()) return std::move(poly);
-    Polynomial res(std::move(poly));
-    res /= res.get_leading_coefficient();
+template <ComponentType T>
+constexpr Polynomial<T> normalize(Polynomial<T>&& poly)
+    requires FieldType<T>
+{
+    Polynomial<T> res(std::move(poly));
+    res.normalize();
     return res;
 }
 
-template <class T>
-bool operator==(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept {
+template <ComponentType T>
+constexpr bool operator==(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept {
     return lhs.data == rhs.data;
 }
 
-template <class T>
-bool operator!=(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept {
-    return lhs.data != rhs.data;
+template <ComponentType T>
+constexpr bool operator!=(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept {
+    return !(lhs == rhs);
 }
 
-template <class T>
-Polynomial<T> monomial(size_t i) noexcept {
-    Polynomial<T> res;
-    res.set_coeff(i, T(1));
-    return res;
-}
-
-template <class T>
-Polynomial<T> ZeroPolynomial() noexcept {
-    return Polynomial<T>(0);
-}
-
-template <class T>
+template <ComponentType T>
 std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) noexcept {
     if (rhs.data.size() == 0) {
         os << "()";
@@ -879,8 +1514,16 @@ std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) noexcept {
                 if (i > 1) os << "^" << i;
             }
             if (i < rhs.data.size() - 1) {
-                // if (rhs.data[i + 1].has_positive_sign()) {
-                if (true) {  // todo
+                bool positive_sign;
+                if constexpr (FieldType<T>) {
+                    positive_sign = rhs.data[i + 1].has_positive_sign();
+                } else if constexpr (std::is_same<T, std::complex<double>>()) {
+                    positive_sign = rhs.data[i + 1].real() >= 0 || rhs.data[i + 1].imag() >= 0;
+                } else {
+                    positive_sign = rhs.data[i + 1] >= 0;
+                }
+
+                if (positive_sign) {
                     next_negative = false;
                     os << " + ";
                 } else {
@@ -894,67 +1537,217 @@ std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) noexcept {
     return os;
 }
 
-// extended Euclidean algorithm
-template <class T>
-Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, Polynomial<T>* t = nullptr) noexcept {
-    if (a.get_degree() < b.get_degree()) {
-        auto temp = a;
-        a = b;
-        b = temp;
-    }
+/**
+ * @brief Create a monomial polynomial ax^i
+ *
+ * @tparam T Coefficient type satisfying @ref ECC::ComponentType
+ * @param i Degree of the monomial (power of x)
+ * @param a Coefficient of the monomial (defaults to 1)
+ * @return Polynomial representing ax^i
+ *
+ * Creates a monomial polynomial with single non-zero term ax^i.
+ */
+template <ComponentType T>
+constexpr Polynomial<T> Monomial(size_t i, auto&& a = T(1)) noexcept
+    requires std::convertible_to<std::decay_t<decltype(a)>, T>
+{
+    Polynomial<T> res;
+    res.set_coefficient(i, std::forward<decltype(a)>(a));
+    return res;
+}
+
+/**
+ * @brief Create the zero polynomial
+ *
+ * @tparam T Coefficient type satisfying @ref ECC::ComponentType
+ * @return Polynomial representing the constant 0
+ *
+ * Creates the polynomial p(x) = 0.
+ */
+template <ComponentType T>
+Polynomial<T> ZeroPolynomial() {
+    static const Polynomial<T> zero(0);
+    return zero;
+}
+
+/**
+ * @brief Create the one polynomial
+ *
+ * @tparam T Coefficient type satisfying @ref ECC::ComponentType
+ * @return Polynomial representing the constant 1
+ *
+ * Creates the polynomial p(x) = 1.
+ */
+template <ComponentType T>
+Polynomial<T> OnePolynomial() {
+    static const Polynomial<T> one(1);
+    return one;
+}
+
+/**
+ * @brief Compute greatest common divisor of two polynomials using Extended Euclidean Algorithm
+ *
+ * @tparam T Coefficient type satisfying @ref ECC::FieldType
+ * @param a First polynomial
+ * @param b Second polynomial
+ * @param s Optional pointer to store Bézout coefficient for polynomial a
+ * @param t Optional pointer to store Bézout coefficient for polynomial b
+ * @return Greatest common divisor polynomial gcd(a,b)
+ *
+ * Computes gcd(a,b) using the Extended Euclidean Algorithm. If s and t pointers are provided,
+ * also computes Bézout coefficients such that: gcd(a,b) = s·a + t·b
+ *
+ * @note Only available for coefficient types satisfying @ref ECC::FieldType
+ * @note Automatically handles degree ordering (larger degree polynomial processed first)
+ */
+template <ComponentType T>
+Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, Polynomial<T>* t = nullptr)
+    requires FieldType<T>
+{
+    if (a.degree() < b.degree()) std::swap(a, b);
 
     if (s != nullptr && t != nullptr) {  // extended EA
         *s = Polynomial<T>({1});
         *t = Polynomial<T>({0});
         Polynomial<T> u = Polynomial<T>({0});
         Polynomial<T> v = Polynomial<T>({1});
-        // while (b.get_degree() > 0) {
+        // while (b.degree() > 0) {
         while (b != Polynomial<T>(0)) {  // changed 25.07.2023, verify!
             const Polynomial<T> q = a / b;
-            Polynomial<T> b1 = b;
-            b = a - q * b;
+            Polynomial<T> b1 = std::move(b);
+            b = a - q * b1;
             a = std::move(b1);
-            Polynomial<T> u1 = u;
-            u = *s - q * u;
+            Polynomial<T> u1 = std::move(u);
+            u = *s - q * u1;
             *s = std::move(u1);
-            Polynomial<T> v1 = v;
-            v = *t - q * v;
+            Polynomial<T> v1 = std::move(v);
+            v = *t - q * v1;
             *t = std::move(v1);
         }
     } else {                             // "normal" EA
-                                         // while (b.get_degree() > 0) {
+                                         // while (b.degree() > 0) {
         while (b != Polynomial<T>(0)) {  // changed 25.07.2023, verify!
             const Polynomial<T> q = a / b;
-            Polynomial<T> b1 = b;
-            b = a - q * b;
+            Polynomial<T> b1 = std::move(b);
+            b = a - q * b1;
             a = std::move(b1);
         }
     }
     return a;
 }
 
-template <class T>
-Polynomial<T> GCD(const std::vector<Polynomial<T>>& polys) {
+/**
+ * @brief Compute greatest common divisor of multiple polynomials
+ *
+ * @tparam T Coefficient type satisfying @ref ECC::FieldType
+ * @param polys std::vector of polynomials to find GCD of
+ * @return Greatest common divisor of all polynomials in the std::vector
+ *
+ * Computes gcd(p₁, p₂, ..., pₙ) by iteratively applying GCD.
+ * Uses the associative property: gcd(a,b,c) = gcd(gcd(a,b), c).
+ *
+ * @throws std::invalid_argument if polys is empty
+ *
+ * @note Only available for coefficient types satisfying @ref ECC::FieldType
+ */
+template <ComponentType T>
+Polynomial<T> GCD(const std::vector<Polynomial<T>>& polys)
+    requires FieldType<T>
+{
+    if (polys.empty())
+        throw std::invalid_argument("trying to calculate polynomial GCD but didn't provide any polynomials");
+    if (polys.size() == 1) return polys[0];
+
     Polynomial<T> res = polys.front();
     for (auto it = polys.cbegin() + 1; it != polys.cend(); ++it) {
-        res = GCD<T>(res, *it);
+        res = GCD<T>(std::move(res), *it);
     }
     return res;
 }
 
-template <class T>
-Polynomial<T> LCM(Polynomial<T> a, Polynomial<T> b) noexcept {
+/**
+ * @brief Compute least common multiple of two polynomials
+ *
+ * @tparam T Coefficient type satisfying @ref ECC::FieldType
+ * @param a First polynomial
+ * @param b Second polynomial
+ * @return Least common multiple lcm(a,b)
+ *
+ * Computes lcm(a,b) using the identity: lcm(a,b) = (a·b)/gcd(a,b).
+ * The LCM is the polynomial of smallest degree divisible by both a and b.
+ *
+ * Important for polynomial ideal operations and code construction algorithms.
+ *
+ * @note Only available for coefficient types satisfying @ref ECC::FieldType
+ */
+template <ComponentType T>
+Polynomial<T> LCM(const Polynomial<T>& a, const Polynomial<T>& b)
+    requires FieldType<T>
+{
     return (a * b) / GCD(a, b);
 }
 
-template <class T>
-Polynomial<T> LCM(const std::vector<Polynomial<T>>& polys) {
+/**
+ * @brief Compute least common multiple of multiple polynomials
+ *
+ * @tparam T Coefficient type satisfying @ref ECC::FieldType
+ * @param polys Vector of polynomials to find LCM of
+ * @return Least common multiple of all polynomials in the vector
+ *
+ * Computes lcm(p₁, p₂, ..., pₙ) by iteratively applying binary LCM.
+ * Uses the associative property: lcm(a,b,c) = lcm(lcm(a,b), c).
+ *
+ * @throws std::invalid_argument if polys is empty
+ *
+ * @note Only available for coefficient types satisfying @ref ECC::FieldType
+ */
+template <ComponentType T>
+Polynomial<T> LCM(const std::vector<Polynomial<T>>& polys)
+    requires FieldType<T>
+{
+    if (polys.empty())
+        throw std::invalid_argument("trying to calculate polynomial LCM but didn't provide any polynomials");
+    if (polys.size() == 1) return polys[0];
+
     Polynomial<T> res = polys.front();
     for (auto it = polys.cbegin() + 1; it != polys.cend(); ++it) {
         res = LCM<T>(res, *it);
     }
     return res;
 }
+
+/**
+ * @brief Polynomial exponentiation operator
+ *
+ * @tparam T Coefficient type satisfying @ref ECC::ComponentType
+ * @param base Polynomial to raise to exponent
+ * @param exponent Integer exponent
+ * @return Polynomial base^exponent
+ *
+ * Computes polynomial exponentiation using square-and-multiply algorithm.
+ *
+ * @warning **DANGEROUS OPERATOR**: This operator violates usual precedence rules!
+ * Expression `b*a^p` is evaluated as `(b*a)^p` instead of expected `b*(a^p)`.
+ * Use explicit parentheses: `b*(a^p)` to ensure correct evaluation order.
+ *
+ * @note Consider using explicit function calls for clarity in complex expressions
+ */
+template <ComponentType T>
+constexpr Polynomial<T> operator^(const Polynomial<T>& base, int exponent) noexcept {
+    return sqm<Polynomial<T>>(base, exponent);
+}
+
+template <FieldType T>
+Polynomial<T> find_irreducible(size_t degree) {
+    Polynomial<T> res;
+    do {
+        res = Polynomial<T>().randomize(degree);
+    } while (!res.is_irreducible());
+
+    res.normalize();
+    return res;
+}
+
 
 }  // namespace ECC
 

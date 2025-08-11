@@ -1,33 +1,35 @@
 /*
-   Copyright 2025 Christian Senger <senger@inue.uni-stuttgart.de>
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-        http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-
-   v1.0
-*/
+ * @copyright
+ * Copyright (c) 2025, Christian Senger <senger@inue.uni-stuttgart.de>
+ *
+ * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
+ * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
+ * repository root for full terms and how to request a commercial license.
+ */
 
 #ifndef ECC_HPP
 #define ECC_HPP
 
-#include <complex>
-#include <random>
-#include <type_traits>
+/**
+ * @namespace ECC
+ * @brief Provides a framework for error correcting codes
+ */
+namespace ECC {
+/**
+ * @namespace ECC::details
+ * @brief Contains implementation details not to be exposed to the user. Functions and classes here may change without
+ * notice.
+ */
+namespace details {}
+}  // namespace ECC
 
 #include "codes.hpp"
-#include "fields.hpp"
-#include "matrices.hpp"
-#include "vectors.hpp"
-#include "blocks.hpp"
-
+// #include "field_concepts_traits.hpp" // transitive through codes.hpp
+//  #include "helpers.hpp" // transitive through codes.hpp
+//  #include "fields.hpp" // transitive through codes.hpp
+//  #include "blocks.hpp" // transitive through codes.hpp
+//  #include "vectors.hpp" // transitive through codes.hpp
+//  #include "polynomials.hpp" // transitive through codes.hpp
+//  #include "matrices.hpp" // transitive through codes.hpp
 
 #endif

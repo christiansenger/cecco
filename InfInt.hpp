@@ -1,6 +1,7 @@
 /*
  * InfInt - Arbitrary-Precision Integer Arithmetic Library
  * Copyright (C) 2013 Sercan Tutar
+ * Copyright (C) 2025 Christian Senger
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -16,7 +17,7 @@
  *      digitAt:        returns digit at index
  *      numberOfDigits: returns number of digits
  *      size:           returns size in bytes
- *      toString:       converts it to a string
+ *      to_string:       converts it to a string
  *
  *   There are also conversion methods which allow conversion to primitive types:
  *   toInt, toLong, toLongLong, toUnsignedInt, toUnsignedLong, toUnsignedLongLong.
@@ -171,7 +172,7 @@ class InfInt {
     size_t size() const;
 
     /* string conversion */
-    std::string toString() const;
+    std::string to_string() const;
 
     /* conversion to primitive types */
     int toInt() const;                              // throw
@@ -418,6 +419,7 @@ inline const InfInt& InfInt::operator=(unsigned long long l) {
 
 inline const InfInt& InfInt::operator=(const InfInt& l) {
     // PROFINY_SCOPE
+    if (this == &l) return *this;
     pos = l.pos;
     val = l.val;
     return *this;
@@ -884,7 +886,7 @@ inline size_t InfInt::numberOfDigits() const {
                                                           : (val.back() > 9 ? 2 : 1))))))));
 }
 
-inline std::string InfInt::toString() const {
+inline std::string InfInt::to_string() const {
     // PROFINY_SCOPE
     std::ostringstream oss;
     oss << *this;
@@ -1181,5 +1183,13 @@ inline std::ostream& operator<<(std::ostream& s, const InfInt& n) {
     s << std::setfill(' ');
     return s;
 }
+
+namespace std {
+inline std::string to_string(const InfInt& val) { return val.to_string(); }
+};  // namespace std
+
+struct InfIntHasher {
+    size_t operator()(const InfInt& e) const noexcept { return std::hash<unsigned long long>{}(e.toUnsignedLongLong()); }
+};
 
 #endif

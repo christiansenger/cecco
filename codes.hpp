@@ -1,20 +1,19 @@
 /*
-   Copyright 2025 Christian Senger <senger@inue.uni-stuttgart.de>
+ * @copyright
+ * Copyright (c) 2025, Christian Senger <senger@inue.uni-stuttgart.de>
+ *
+ * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
+ * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
+ * repository root for full terms and how to request a commercial license.
+ */
 
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-        http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-
-   v1.0
-*/
+/*
+ * +==============================================================+
+ * |  !!! WARNING !!!                                             |
+ * |  this file is work in progress                               |
+ * |  and not production-ready                                    |
+ * +==============================================================+
+ */
 
 /* ToDo:
     - Goppa codes (https://en.wikipedia.org/wiki/Binary_Goppa_code), not only binary
@@ -23,26 +22,25 @@
 #ifndef CODES_HPP
 #define CODES_HPP
 
-#include <algorithm>
-#include <exception>
-#include <iostream>
-#include <ranges>
-#include <vector>
-
-#include "InfInt.hpp"
 #include "blocks.hpp"
-#include "fields.hpp"
-#include "helpers.hpp"
-#include "matrices.hpp"
-#include "polynomials.hpp"
-#include "vectors.hpp"
+// #include <ranges> // transitive through blocks.hpp
+// #include <algorithm> // transitive through blocks.hpp
+// #include <vector> // transitive through blocks.hpp
+// #include <iostream> // transitive through blocks.hpp
+// #include "InfInt.hpp" // transitive through blocks.hpp
+// #include "field_concepts_traits.hpp" // transitive through blocks.hpp
+// #include "helpers.hpp" // transitive through blocks.hpp
+// #include "matrices.hpp" // transitive through blocks.hpp
+// #include "vectors.hpp" // transitive through blocks.hpp
+// #include "fields.hpp" // transitive through blocks.hpp
+// #include "polynomials.hpp" // transitive through blocks.hpp
 
 namespace ECC {
 
 namespace details {}
 using namespace details;
 
-template <class T>
+template <FiniteFieldType T>
 long double HammingUpperBound(size_t n, size_t dmin) {
     constexpr size_t q = T::get_size();
     const size_t tmax = floorl((long double)(dmin - 1) / 2);
@@ -56,7 +54,7 @@ long double HammingUpperBound(size_t n, size_t dmin) {
 
 namespace details {
 
-template <class T>
+template <FiniteFieldType T>
 static size_t A(size_t n, size_t d, size_t w) {
     if (2 * w < d) return 1;
     constexpr size_t q = T::get_size();
@@ -70,7 +68,7 @@ static size_t A(size_t n, size_t d, size_t w) {
 
 }  // namespace details
 
-template <class T>
+template <FiniteFieldType T>
 long double JohnsonUpperBound(size_t n, size_t dmin) {
     constexpr size_t q = T::get_size();
     const size_t tmax = floorl((dmin - 1) / 2.0);
@@ -87,7 +85,7 @@ long double JohnsonUpperBound(size_t n, size_t dmin) {
                    log2l(q);
 }
 
-template <class T>
+template <FiniteFieldType T>
 long double PlotkinUpperBound(size_t n, size_t dmin) {
     constexpr size_t q = T::get_size();
     if ((long double)dmin / n > (long double)(q - 1) / q) {  // conventional
@@ -99,7 +97,7 @@ long double PlotkinUpperBound(size_t n, size_t dmin) {
     }
 }
 
-template <class T>
+template <FiniteFieldType T>
 long double EliasUpperBound(size_t n, size_t dmin) {
     constexpr size_t q = T::get_size();
     const long double r = 1 - (long double)1 / q;
@@ -124,7 +122,7 @@ long double EliasUpperBound(size_t n, size_t dmin) {
 
 size_t SingletonUpperBound(size_t n, size_t dmin) { return n - dmin + 1; }
 
-template <class T>
+template <FiniteFieldType T>
 size_t GriesmerUpperBound(size_t n, size_t dmin) {
     constexpr size_t q = T::get_size();
 
@@ -145,7 +143,7 @@ size_t GriesmerUpperBound(size_t n, size_t dmin) {
     return k;
 }
 
-template <class T>
+template <FiniteFieldType T>
 double UpperBound(size_t n, size_t dmin) {
     long double min = std::numeric_limits<long double>::max();
 
@@ -163,7 +161,7 @@ double UpperBound(size_t n, size_t dmin) {
     return min;
 }
 
-template <class T>
+template <FiniteFieldType T>
 size_t GilbertVarshamovLowerBound(size_t n, size_t dmin) {
     if (dmin == 1) return n;
     if (dmin == n) return 1;
@@ -175,7 +173,7 @@ size_t GilbertVarshamovLowerBound(size_t n, size_t dmin) {
     return ceill(n - log2l(sum.toUnsignedLongLong()) / log2l(q));
 }
 
-template <class T>
+template <FiniteFieldType T>
 size_t BurstUpperBound(size_t n, size_t ell) {
     constexpr size_t q = T::get_size();
     return floorl(n - ell - log2l(1 + (q - 1) * (n - ell) / q) / log2l(q));
@@ -186,7 +184,7 @@ size_t ReigerBurstUpperBound(size_t n, size_t ell) {
     return n - 2 * ell;
 }
 
-template <class T>
+template <FiniteFieldType T>
 static Polynomial<InfInt> MacWilliamsIdentity(const Polynomial<InfInt>& A, size_t n, size_t k) {
     auto a = Vector<InfInt>(n + 1);
     for (size_t i = 0; i < n + 1; ++i) {
@@ -223,7 +221,7 @@ static Polynomial<InfInt> MacWilliamsIdentity(const Polynomial<InfInt>& A, size_
         }
     }
 
-    return Polynomial<InfInt>(a * K / sqm<InfInt>(T::get_size(), k));
+    return Polynomial<InfInt>(Vector<InfInt>(a) * Matrix<InfInt>(K) / sqm<InfInt>(T::get_size(), k));
 }
 
 namespace details {
@@ -247,13 +245,13 @@ std::ostream& showall(std::ostream& os) {
     return os;
 }
 
-template <class T, class SUPER = T>
+template <FiniteFieldType T>
 class Code;
 
-template <class T, class SUPER = T>
-Code<T, SUPER> UniverseCode(size_t n);
+template <FiniteFieldType T>
+Code<T> UniverseCode(size_t n);
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> SimplexCode(size_t s);
 
 namespace details {
@@ -269,10 +267,10 @@ class decoding_failure : public std::exception {
 
 enum BD_t : uint8_t { BD, boosted_BD };
 
-template <class T>
+template <FiniteFieldType T>
 class LinearCodeBackend;
 
-template <class T>
+template <FiniteFieldType T>
 class CodewordIterator {
     friend bool operator==(const CodewordIterator& a, const CodewordIterator& b) { return a.counter == b.counter; }
     friend bool operator!=(const CodewordIterator& a, const CodewordIterator& b) { return !(a == b); }
@@ -343,10 +341,10 @@ class EmptyCodeBackend : public Backend {
     Backend* clone() const override { return new EmptyCodeBackend(); }
 };
 
-template <class T>
+template <FiniteFieldType T>
 class PolynomialCodeBackend;
 
-template <class T>
+template <FiniteFieldType T>
 class LinearCodeBackend : public Backend {
     friend class PolynomialCodeBackend<T>;
 
@@ -389,7 +387,7 @@ class LinearCodeBackend : public Backend {
         size_t j = 0;
         for (auto it = infoset.cbegin(); it != infoset.cend(); ++it) {
             // Mi.set_col(G.get_col(i), *it);
-            Mi.set_submatrix(G.get_submatrix(0, *it, k, 1), 0, j);
+            Mi.set_submatrix(0, j, G.get_submatrix(0, *it, k, 1));
             ++j;
         }
         Mi.invert();
@@ -427,7 +425,7 @@ class LinearCodeBackend : public Backend {
                 Vector<InfInt> temp(get_n() + 1);
                 for (auto it = cbegin(); it != cend(); ++it) {
                     const size_t w = wH(*it);
-                    weight_enumerator.add_to_coeff(1, w);
+                    weight_enumerator.add_to_coefficient(1, w);
                 }
                 // weight_enumerator = Polynomial<InfInt>(temp);
             } else {  // calculate based on dual code and MacWilliams identity
@@ -448,7 +446,7 @@ class LinearCodeBackend : public Backend {
 
         // if weight enumerator is calculated, use it...
         if (!weight_enumerator.is_empty()) {
-            for (size_t i = 1; i <= weight_enumerator.get_degree(); ++i) {
+            for (size_t i = 1; i <= weight_enumerator.degree(); ++i) {
                 if (weight_enumerator[i] != 0) {
                     dmin = i;
                     return dmin;
@@ -482,7 +480,7 @@ class LinearCodeBackend : public Backend {
                     size_t i = 0;
                     for (size_t j = 0; j < n; ++j) {
                         if (selection[j] == true) {
-                            M.set_submatrix(H.get_submatrix(0, j, n - k, 1), 0, i);
+                            M.set_submatrix(0, i, H.get_submatrix(0, j, n - k, 1));
                             ++i;
                         }
                     }
@@ -545,8 +543,8 @@ class LinearCodeBackend : public Backend {
                     Vector<T> e(n);
                     for (size_t j = 0; j < n; ++j)
                         if (errpos[j]) e.set_component(j, T(1));
-                    auto s = e * HT;                           // calculate syndrome...
-                    const size_t coset_index = s.asInteger();  // ... and interpret it as binary number
+                    auto s = e * HT;                            // calculate syndrome...
+                    const size_t coset_index = s.as_integer();  // ... and interpret it as binary number
                     if (standard_array[coset_index].is_empty()) {
                         standard_array[coset_index] = std::move(e);
                         ++count;
@@ -589,8 +587,8 @@ class LinearCodeBackend : public Backend {
                             }
                         }
 
-                        auto s = e * HT;                           // calculate syndrome...
-                        const size_t coset_index = s.asInteger();  // ... and interpret it as binary number
+                        auto s = e * HT;                            // calculate syndrome...
+                        const size_t coset_index = s.as_integer();  // ... and interpret it as binary number
                         if (standard_array[coset_index].is_empty()) {
                             standard_array[coset_index] = std::move(e);
                             ++count;
@@ -629,8 +627,8 @@ class LinearCodeBackend : public Backend {
         // calculate standard array if necessary
         if (standard_array.empty()) calculate_standard_array();
 
-        auto s = r * HT;                 // calculate syndrome...
-        const size_t i = s.asInteger();  // ... and interpret it as binary number
+        auto s = r * HT;                  // calculate syndrome...
+        const size_t i = s.as_integer();  // ... and interpret it as binary number
         if (tainted[i] || (type == BD && wH(standard_array[i]) > get_tmax())) {  // decoding failure
             throw decoding_failure(
                 "Linear code decoder failed, coset of syndrome empty or tainted (ambiguous leader)!");
@@ -643,8 +641,8 @@ class LinearCodeBackend : public Backend {
         // calculate standard array if necessary
         if (standard_array.empty()) calculate_standard_array();
 
-        auto s = r * HT;                 // calculate syndrome...
-        const size_t i = s.asInteger();  // ... and interpret it as binary number
+        auto s = r * HT;                  // calculate syndrome...
+        const size_t i = s.as_integer();  // ... and interpret it as binary number
         return r - standard_array[i];
     }
 
@@ -652,9 +650,9 @@ class LinearCodeBackend : public Backend {
         // calculate standard array if necessary
         if (standard_array.empty()) calculate_standard_array();
 
-        auto s = r * HT;                 // calculate syndrome...
-        const size_t i = s.asInteger();  // ... and interpret it as binary number
-        if (tainted_burst[i]) {          // decoding failure
+        auto s = r * HT;                  // calculate syndrome...
+        const size_t i = s.as_integer();  // ... and interpret it as binary number
+        if (tainted_burst[i]) {           // decoding failure
             throw decoding_failure(
                 "Linear code decoder (burst) failed, coset of syndrome empty or tainted (ambiguous burst leader)!");
         } else {  // correct decoding or decoding error
@@ -668,7 +666,7 @@ class LinearCodeBackend : public Backend {
                                     std::to_string(std::numeric_limits<unsigned int>::max()) +
                                     " codewords) to compute all of them");
         }
-        codewords = get_G().get_span();
+        codewords = get_G().span();
     }
 
     bool is_codewords_calculated() const { return !codewords.empty(); }
@@ -742,7 +740,7 @@ class LinearCodeBackend : public Backend {
     const InfInt size;
 };
 
-template <class T>
+template <FiniteFieldType T>
 class RepetitionCodeBackend : public Backend {
    public:
     RepetitionCodeBackend(bool odd) : odd(odd) {}
@@ -770,7 +768,7 @@ class RepetitionCodeBackend : public Backend {
     const bool odd;
 };
 
-template <class T>
+template <FiniteFieldType T>
 class SingleParityCheckCodeBackend : public Backend {
    public:
     SingleParityCheckCodeBackend() = default;
@@ -783,7 +781,7 @@ class SingleParityCheckCodeBackend : public Backend {
     Backend* clone() const override { return new SingleParityCheckCodeBackend<T>(); }
 };
 
-template <class T>
+template <FiniteFieldType T>
 class HammingCodeBackend : public Backend {
    public:
     HammingCodeBackend(size_t s) : s(s) {
@@ -818,7 +816,7 @@ class HammingCodeBackend : public Backend {
     const size_t s;
 };
 
-template <class T>
+template <FiniteFieldType T>
 class SimplexCodeBackend : public Backend {
    public:
     SimplexCodeBackend(size_t s) : s(s) {};
@@ -856,21 +854,20 @@ class CordaroWagnerCodeBackend : public Backend {
     size_t r;
 };
 
-template <class T>
+template <FiniteFieldType T>
 class PolynomialCodeBackend : public Backend {
    public:
     PolynomialCodeBackend(size_t k, const Polynomial<T>& gamma, int8_t cyclic = -1)
         : k(k), gamma(gamma), cyclic(cyclic), Mi(k, k) {
-        const size_t n = k + gamma.get_degree();
-        G = ToeplitzMatrix(
-            pad_back(pad_front(Vector<T>(gamma), k + gamma.get_degree()), 2 * k + gamma.get_degree() - 1), k,
-            k + gamma.get_degree());
+        const size_t n = k + gamma.degree();
+        G = ToeplitzMatrix(pad_back(pad_front(Vector<T>(gamma), k + gamma.degree()), 2 * k + gamma.degree() - 1), k,
+                           k + gamma.degree());
         auto M = transpose(rref(G));
         size_t i = 0;
         for (size_t j = 0; j < k; ++j) {
             auto u = unit_vector<T>(k, j);
             while (M.get_row(i) != u) ++i;
-            Mi.set_submatrix(G.get_submatrix(0, i, k, 1), 0, j);
+            Mi.set_submatrix(0, j, G.get_submatrix(0, i, k, 1));
             infoset.push_back(i);
         }
         Mi.invert();
@@ -883,8 +880,8 @@ class PolynomialCodeBackend : public Backend {
     bool is_cyclic() {
         if (cyclic == -1) {
             Polynomial<T> p;
-            p.set_coeff(0, -T(1));
-            p.set_coeff(gamma.get_degree() + k, T(1));
+            p.set_coefficient(0, -T(1));
+            p.set_coefficient(gamma.degree() + k, T(1));
             p %= gamma;
             cyclic = p.is_zero();
         }
@@ -928,7 +925,7 @@ class PolynomialCodeBackend : public Backend {
     std::vector<size_t> infoset;
 };
 
-template <class T>
+template <FiniteFieldType T>
 class ExtendedCodeBackend : public Backend {
    public:
     ExtendedCodeBackend(const Code<T>& C, size_t i, const Vector<T>& v) : C(C), i(i), v(v) {}
@@ -973,7 +970,7 @@ class ExtendedCodeBackend : public Backend {
     const Vector<T> v;
 };
 
-template <class T>
+template <FiniteFieldType T>
 class AugmentedCodeBackend : public Backend {
    public:
     AugmentedCodeBackend(const Code<T>& C, size_t j, const Vector<T>& w) : C(C), j(j), w(w) {}
@@ -997,7 +994,7 @@ class AugmentedCodeBackend : public Backend {
     const Vector<T> w;
 };
 
-template <class T>
+template <FiniteFieldType T>
 class LDCCodeBackend : public Backend {
    public:
     LDCCodeBackend(const Code<T>& U, const Code<T>& V) : U(U), V(V) {}
@@ -1119,7 +1116,7 @@ class RMCodeBackend : public Backend {
     const size_t m;
 };
 
-template <class T>
+template <FiniteFieldType T>
 class GRSCodeBackend : public Backend {
    public:
     GRSCodeBackend(const Vector<T>& a, const Vector<T>& d, size_t k)
@@ -1199,7 +1196,7 @@ class GRSCodeBackend : public Backend {
     const Matrix<T> Mi;
 };
 
-template <class T>
+template <FiniteFieldType T>
 class RSCodeBackend : public Backend {
    public:
     RSCodeBackend(T alpha, size_t b) : alpha(alpha), b(b) {}
@@ -1219,6 +1216,7 @@ class RSCodeBackend : public Backend {
     const size_t b;
 };
 
+/*
 template <class T, class SUPER = T>
 class SSCodeBackend : public Backend {
    public:
@@ -1242,37 +1240,40 @@ class SSCodeBackend : public Backend {
     Code<T, SUPER> SuperC;
     const size_t d;
 };
+*/
 
 }  // namespace details
 
-template <class T, class SUPER = T>
-Code<T, SUPER> EmptyCode();
+template <FiniteFieldType T>
+Code<T> EmptyCode();
 
 Code<Fp<2>> RMCode(size_t r, size_t m);
 
-template <class T, bool t = is_finite_field<T>(), typename = std::enable_if_t<t>>
+template <FiniteFieldType T>
 Code<T> GRSCode(const Vector<T>& a, const Vector<T>& d, size_t k);
 
-template <class T, uint8_t m, bool t = is_finite_field<T>(), typename = std::enable_if_t<t>>
+/*
+template <FiniteFieldType T>
 Code<SF<T, m>, T> SSCode(const Code<T>& SuperC, const Matrix<int>& M, Matrix<T>* Bp = nullptr);
+*/
 
-template <class T, class SUPER>
-std::ostream& operator<<(std::ostream& os, Code<T, SUPER>& rhs);
+template <FiniteFieldType T>
+std::ostream& operator<<(std::ostream& os, Code<T>& rhs);
 
-template <class T, class SUPER>
+template <FiniteFieldType T>
 class Code {
-    friend std::ostream& operator<< <>(std::ostream& os, Code<T, SUPER>& rhs);
+    friend std::ostream& operator<< <>(std::ostream& os, Code<T>& rhs);
 
    public:
     Code() = default;
 
-    Code(const Code<T, SUPER>& other) {
+    Code(const Code<T>& other) {
         for (auto it = other.backend_collection.cbegin(); it != other.backend_collection.cend(); ++it) {
             backend_collection.push_back((*it)->clone());
         }
     }
 
-    Code(Code<T, SUPER>&& other) noexcept { std::swap(backend_collection, other.backend_collection); }
+    Code(Code<T>&& other) noexcept { std::swap(backend_collection, other.backend_collection); }
 
     ~Code() { clear(); }
 
@@ -1287,7 +1288,7 @@ class Code {
     }
 
     Code& operator=(Code<T>&& rhs) noexcept {
-        if (this != rhs) *this = std::move(rhs);
+        if (this != &rhs) std::swap(backend_collection, rhs.backend_collection);
         return *this;
     }
 
@@ -1428,7 +1429,7 @@ class Code {
         long double gamma = 2 * sqrt(pe * (1 - pe));
 
         long double res = 0;
-        for (size_t i = get_dmin(); i <= A.get_degree(); ++i) {
+        for (size_t i = get_dmin(); i <= A.degree(); ++i) {
             long double sum = 0;
             for (size_t j = ceill(i / 2.0); j <= i; ++j) {
                 sum += bin<unsigned long long>(i, j) * powl(pe, j) * pow(1 - pe, i - j);
@@ -1450,7 +1451,7 @@ class Code {
         long double gamma = expl(-powl(b, 2.0) / (8.0 * powl(sigma, 2.0)));
 
         long double res = 0;
-        for (size_t i = get_dmin(); i <= A.get_degree(); ++i) {
+        for (size_t i = get_dmin(); i <= A.degree(); ++i) {
             res += A[i].toUnsignedLongLong() * powl(gamma, i);
         }
 
@@ -1656,6 +1657,7 @@ class Code {
         return c_sub * backend->get_Mi();
     }
 
+    /*
     Code<SF<T, 1>, T> get_SSCode_with_dimension(size_t kp) {
         if (kp > get_k())
             throw std::invalid_argument(
@@ -1668,7 +1670,7 @@ class Code {
             throw std::invalid_argument(
                 "Trying to construct a subfield subcode with fixed dimension: code does not have GRSCodeBackend");
 
-        Matrix<uint8_t> M(T::get_m(), get_n());
+        Matrix<int> M(T::get_m(), get_n());
         for (size_t i = 0; i < get_n(); ++i) {
             M(0, i) = 1;
         }
@@ -1734,6 +1736,7 @@ class Code {
 
         return C;
     }
+    */
 
     /*
     Code<T, SUPER> get_SSCode_with_dimension(size_t kp) const {
@@ -1820,9 +1823,9 @@ class Code {
         auto d = Polynomial<T>({0});
         for (auto it = cbegin(); it != cend(); ++it) {
             d = GCD(d, Polynomial<T>(*it));
-            if (d.get_degree() < backend->get_n() - backend->get_k() && d != Polynomial<T>({0})) return false;
+            if (d.degree() < backend->get_n() - backend->get_k() && d != Polynomial<T>({0})) return false;
         }
-        if (d.get_trailing_degree() > 0) return false;
+        if (d.trailing_degree() > 0) return false;
 
         d = normalize(d);  // degree at this point can only be n-k
 
@@ -1952,6 +1955,7 @@ class Code {
         return backend->get_b();
     }
 
+    /*
     Code<SUPER> get_supercode() const {
         if (get_backend<EmptyCodeBackend>())
 
@@ -1960,14 +1964,18 @@ class Code {
         if (!backend) throw std::invalid_argument("Trying to access supercode: code does not have SSCodeBackend");
         return backend->get_supercode();
     }
+    */
 
+    /*
     size_t get_design_distance() const {
         if (get_backend<EmptyCodeBackend>()) return 0;
         auto backend = get_backend<SSCodeBackend<SUPER>>();
         if (!backend) throw std::invalid_argument("Trying to access design distance: code does not have SSCodeBackend");
         return backend->get_design_distance();
     }
+    */
 
+    /*
     template <class U = T, uint8_t m>  // "feed forward" template parameter of class template
     Code<SF<U, m>, U> get_subfield_subcode(size_t kp = 0) const {
         Matrix<int> M(U::get_m() / m, get_n());
@@ -1977,7 +1985,9 @@ class Code {
 
         return get_subfield_subcode<U, m>(kp, M);
     }
+    */
 
+    /*
     template <class U = T, uint8_t m>  // "feed forward" template parameter of class template
     Code<SF<U, m>, U> get_subfield_subcode(size_t kp, const Matrix<int>& M) const {
         const size_t n = get_n();
@@ -2007,23 +2017,23 @@ class Code {
             auto gammap = Polynomial<SF<T, m>>(temp);  // least common multiple of minimal polynomials
 
             auto quotient = temp / gamma;
-            auto B = ToeplitzMatrix(pad_back(pad_front(Vector<T>(quotient), k), 2 * k - quotient.get_degree() - 1),
-                                    k - quotient.get_degree(), k);
+            auto B = ToeplitzMatrix(pad_back(pad_front(Vector<T>(quotient), k), 2 * k - quotient.degree() - 1),
+                                    k - quotient.degree(), k);
 
-            if (n - gammap.get_degree() == 0 || kp > n - gammap.get_degree()) return EmptyCode<SF<T, m>, T>();
+            if (n - gammap.degree() == 0 || kp > n - gammap.degree()) return EmptyCode<SF<T, m>, T>();
 
-            auto C = PolynomialCode<SF<T, m>, T>(kp == 0 ? n - gammap.get_degree() : kp, gammap);
+            auto C = PolynomialCode<SF<T, m>, T>(kp == 0 ? n - gammap.degree() : kp, gammap);
 
             if constexpr (SF<T, m>::get_size() == 2) {
                 if (C.get_k() == 1) C.add_backend(new RepetitionCodeBackend<SF<T, m>>(n));
             }
 
-            const size_t s = gammap.get_degree();
+            const size_t s = gammap.degree();
             if (n == (sqm<size_t>(SF<T, m>::get_size(), s) - 1) / (SF<T, m>::get_size() - 1)) {
                 C.add_backend(new HammingCodeBackend<SF<T, m>>(s));
             }
 
-            auto SuperCp = RSCode<T>(alpha, b, n - GCD(gamma, temp).get_degree());
+            auto SuperCp = RSCode<T>(alpha, b, n - GCD(gamma, temp).degree());
             C.add_backend(new SSCodeBackend<T>(SuperCp, SuperCp.get_dmin()));
 
             // C.add_backend(new SSCodeBackend<T>(*this, n - k + 1));
@@ -2137,16 +2147,15 @@ class Code {
             throw std::invalid_argument("Can only construct subfield-subcodes of RS and GRS codes!");
         }
     }
+    */
 
    private:
     void clear() {
-        for (auto it = backend_collection.begin(); it != backend_collection.end(); ++it) {
-            delete *it;
-        }
+        for (auto it = backend_collection.begin(); it != backend_collection.end(); ++it) delete *it;
         backend_collection.clear();
     }
 
-    template <class V>
+    template <ComponentType V>
     size_t s(const Matrix<V>& M, size_t i) const {
         for (size_t j = 0; j < M.get_n(); ++j) {
             if (M(i, j) != V(0)) return j;
@@ -2154,7 +2163,7 @@ class Code {
         return 0;
     }
 
-    template <class V>
+    template <ComponentType V>
     size_t t(const Matrix<V>& M, size_t i) const {
         for (size_t j = M.get_n() - 1; j >= 0; --j) {
             if (M(i, j) != V(0)) {
@@ -2164,6 +2173,7 @@ class Code {
         return M.get_n() - 1;
     }
 
+    /*
     Matrix<SF<T, 1>> T_matrix(const T& b) const {
         const size_t q = T::get_m() / SF<T, 1>::get_m();
         auto v = Vector<SF<T, 1>>(q - 1);
@@ -2172,7 +2182,9 @@ class Code {
         auto res = ToeplitzMatrix<SF<T, 1>>(v, q, 2 * q - 1);
         return res;
     }
+    */
 
+    /*
     Matrix<SF<T, 1>> Rj_matrix(size_t j) const {
         const size_t q = T::get_m() / SF<T, 1>::get_m();
         auto I = IdentityMatrix<SF<T, 1>>(j);
@@ -2181,13 +2193,16 @@ class Code {
         auto C = transpose(CompanionMatrix<SF<T, 1>>(T::template get_modulus<SF<T, 1>>()));
         return diagonal_join(I, vertical_join(v, C));
     }
+    */
 
+    /*
     Matrix<SF<T, 1>> R_matrix() const {
         const size_t q = T::get_m() / SF<T, 1>::get_m();
         auto res = Rj_matrix(q - 2);
         for (size_t i = q - 2; i > 0; --i) res *= Rj_matrix(i - 1);
         return res;
     }
+    */
 
     InfInt N(size_t ell, size_t h, size_t s) const noexcept {
         const size_t n = get_n();
@@ -2238,8 +2253,8 @@ class Code {
     std::vector<Backend*> backend_collection;
 };
 
-template <class T, class SUPER>
-std::ostream& operator<<(std::ostream& os, Code<T, SUPER>& rhs) {
+template <FiniteFieldType T>
+std::ostream& operator<<(std::ostream& os, Code<T>& rhs) {
     if (rhs.template get_backend<EmptyCodeBackend>()) {
         os << "[F_" << T::get_size() << "; " << 0 << ", " << 0 << "]";
         return os;
@@ -2267,35 +2282,35 @@ std::ostream& operator<<(std::ostream& os, Code<T, SUPER>& rhs) {
     return os;
 }
 
-template <class T, class SUPER = T>
-std::ostream& operator<<(std::ostream& os, Code<T, SUPER>&& rhs) {
+template <ComponentType T>
+std::ostream& operator<<(std::ostream& os, Code<T>&& rhs) {
     os << rhs;
     return os;
 }
 
-template <class T, class SUPER>
-Code<T, SUPER> EmptyCode() {
-    auto C = Code<T, SUPER>();
+template <FiniteFieldType T>
+Code<T> EmptyCode() {
+    auto C = Code<T>();
     C.add_backend(new EmptyCodeBackend());
     return C;
 }
 
-template <class T, class SUPER>
-Code<T, SUPER> UniverseCode(size_t n) {
+template <FiniteFieldType T>
+Code<T> UniverseCode(size_t n) {
     auto C = Code<T>();
     auto gamma = Polynomial<T>();
-    gamma.set_coeff(0, T(1));
-    gamma.set_coeff(n, T(1));
+    gamma.set_coefficient(0, T(1));
+    gamma.set_coefficient(n, T(1));
     C.add_backend(new PolynomialCodeBackend<T>(n, gamma, 1));
     auto weight_enumerator = Polynomial<InfInt>();
-    for (size_t i = 0; i <= n; ++i) weight_enumerator.set_coeff(i, bin<InfInt>(n, i));
+    for (size_t i = 0; i <= n; ++i) weight_enumerator.set_coefficient(i, bin<InfInt>(n, i));
     C.add_backend(new LinearCodeBackend<T>(n, n, IdentityMatrix<T>(n), 1, weight_enumerator));
     return C;
 }
 
-template <class T, class SUPER = T>
-Code<T, SUPER> LinearCode(size_t n, size_t k, const Matrix<T>& X) {
-    auto C = Code<T, SUPER>();
+template <FiniteFieldType T>
+Code<T> LinearCode(size_t n, size_t k, const Matrix<T>& X) {
+    auto C = Code<T>();
     C.add_backend(new LinearCodeBackend<T>(n, k, X));
     return C;
 }
@@ -2310,24 +2325,24 @@ Code<T, SUPER> LinearCode(size_t n, size_t k, Matrix<T>&& X) {
 }
 */
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> RepetitionCode(size_t n) {
     auto C = Code<T>();
     auto G = Matrix<T>(1, n, T(1));
     auto weight_enumerator = Polynomial<InfInt>();
-    weight_enumerator.set_coeff(0, 1);
-    weight_enumerator.set_coeff(n, 1);
+    weight_enumerator.set_coefficient(0, 1);
+    weight_enumerator.set_coefficient(n, 1);
     C.add_backend(new LinearCodeBackend<T>(n, 1, G, n, weight_enumerator));
     C.add_backend(new RepetitionCodeBackend<T>(n % 2));
     return C;
 }
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> SingleParityCheckCode(size_t n) {
     return dual(RepetitionCode<T>(n));
 }
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> HammingCode(size_t s) {
     auto C = Code<T>();
     const size_t n = (sqm<size_t>(T::get_size(), s) - 1) / (T::get_size() - 1);
@@ -2339,15 +2354,15 @@ Code<T> HammingCode(size_t s) {
         const auto v = IdentityMatrix<T>(s - top - 1).rowspace();
         for (size_t j = 0; j < v.size(); ++j) {
             H(n - i - 1, top) = T(1);
-            H.set_submatrix(Matrix(v[v.size() - j - 1]), n - i - 1, top + 1);
+            H.set_submatrix(n - i - 1, top + 1, Matrix(v[v.size() - j - 1]));
             ++i;
         }
     }
     H.transpose();
     if constexpr (T::get_size() == 2) {
-        Polynomial<InfInt> temp;                                       // weight enumerator of the dual...
-        temp.set_coeff(0, 1);                                          // ... code, a binary simplex code...
-        temp.set_coeff(sqm<size_t>(2, s - 1), sqm<InfInt>(2, s) - 1);  // ... easy to calculate using ML
+        Polynomial<InfInt> temp;                                             // weight enumerator of the dual...
+        temp.set_coefficient(0, 1);                                          // ... code, a binary simplex code...
+        temp.set_coefficient(sqm<size_t>(2, s - 1), sqm<InfInt>(2, s) - 1);  // ... easy to calculate using ML
         C.add_backend(new LinearCodeBackend<T>(n, k, H, 3, MacWilliamsIdentity<T>(temp, n, n - k)));
         if (s == 2) C.add_backend(new RepetitionCodeBackend<T>(n));
     } else {
@@ -2357,7 +2372,7 @@ Code<T> HammingCode(size_t s) {
     return C;
 }
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> SimplexCode(size_t s) {
     if (s == 0)
         return EmptyCode<T>();
@@ -2385,22 +2400,22 @@ Code<Fp<2>> CordaroWagnerCode(size_t n) {
     Matrix<Fp<2>> G(2, n);
     const Matrix<Fp<2>> type1_column(2, 1, {1, 0});
     for (size_t s = 0; s < h; ++s) {
-        G.set_submatrix(type1_column, 0, s);
+        G.set_submatrix(0, s, type1_column);
     }
     const Matrix<Fp<2>> type2_column(2, 1, {0, 1});
     for (size_t s = h; s < h + i; ++s) {
-        G.set_submatrix(type2_column, 0, s);
+        G.set_submatrix(0, s, type2_column);
     }
     const Matrix<Fp<2>> type3_column(2, 1, {1, 1});
     for (size_t s = h + i; s < h + i + j; ++s) {
-        G.set_submatrix(type3_column, 0, s);
+        G.set_submatrix(0, s, type3_column);
     }
     C.add_backend(new LinearCodeBackend<Fp<2>>(n, 2, G, floor(2.0 * n / 3.0) - 1));
     C.add_backend(cwbackend);
     return C;
 }
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> dual(const Code<T>& C) {
     if (auto backend = C.template get_backend<EmptyCodeBackend>())
         throw std::invalid_argument("Trying to construct dual code of empty code!");
@@ -2422,7 +2437,7 @@ Code<T> dual(const Code<T>& C) {
         if (backend->is_weight_enumerator_known()) {
             auto A = MacWilliamsIdentity<T>(C.get_weight_enumerator(), n, k);
             size_t dmin = 1;
-            for (size_t i = 1; i <= A.get_degree(); ++i) {
+            for (size_t i = 1; i <= A.degree(); ++i) {
                 if (A[i] != 0) {
                     dmin = i;
                     break;
@@ -2437,8 +2452,8 @@ Code<T> dual(const Code<T>& C) {
             if (C.is_cyclic()) {
                 auto gamma = C.get_gamma();
                 Polynomial<T> xnm1;
-                xnm1.set_coeff(0, T(1));
-                xnm1.set_coeff(n, T(1));
+                xnm1.set_coefficient(0, T(1));
+                xnm1.set_coefficient(n, T(1));
                 D.add_backend(new PolynomialCodeBackend<T>(n - k, xnm1 / gamma, 1));
             }
         }
@@ -2478,7 +2493,7 @@ Code<T> dual(const Code<T>& C) {
     }
 }
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> puncture(const Code<T>& C, size_t i) {
     const size_t n = C.get_n();
     const size_t k = C.get_k();
@@ -2542,7 +2557,7 @@ Code<T> puncture(const Code<T>& C, size_t i) {
         return LinearCode<T>(n - 1, kp, Gp);
 }
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> extend(const Code<T>& C, size_t i, const Vector<T>& v) {
     const size_t n = C.get_n();
     const size_t k = C.get_k();
@@ -2585,7 +2600,7 @@ Code<T> extend(const Code<T>& C, size_t i, const Vector<T>& v) {
     return Cp;
 }
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> expurgate(const Code<T>& C, size_t j) {
     const size_t n = C.get_n();
     const size_t k = C.get_k();
@@ -2642,7 +2657,7 @@ Code<T> expurgate(const Code<T>& C, size_t j) {
     return LinearCode<T>(n, k - 1, Gp);
 }
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> augment(const Code<T>& C, size_t j, const Vector<T>& w) {
     const size_t n = C.get_n();
     const size_t k = C.get_k();
@@ -2703,17 +2718,17 @@ Code<T> augment(const Code<T>& C, size_t j, const Vector<T>& w) {
     return Cp;
 }
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> shorten(const Code<T>& C, size_t i, size_t j) {
     return puncture(expurgage(C, j), i);
 }
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> lengthen(const Code<T>& C, size_t i, const Vector<T>& v, size_t j, const Vector<T>& w) {
     return extend(augment(C, j, w), i, v);
 }
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> ldc(const Code<T>& U, const Code<T>& V) {
     const size_t n = U.get_n();
 
@@ -2721,9 +2736,9 @@ Code<T> ldc(const Code<T>& U, const Code<T>& V) {
         throw std::invalid_argument("Trying to apply lens-doubling construction to codes of different lengths!");
 
     Matrix<T> G(U.get_k() + V.get_k(), 2 * n);
-    G.set_submatrix(U.get_G(), 0, 0);
-    G.set_submatrix(U.get_G(), 0, n);
-    G.set_submatrix(V.get_G(), U.get_k(), n);
+    G.set_submatrix(0, 0, U.get_G());
+    G.set_submatrix(0, n, U.get_G());
+    G.set_submatrix(U.get_k(), n, V.get_G());
 
     auto C = Code<T>();
     if constexpr (T::get_size() == 2)
@@ -2752,19 +2767,18 @@ Code<Fp<2>> RMCode(size_t r, size_t m) {
     }
 }
 
-template <class T, class SUPER = T>
-Code<T, SUPER> PolynomialCode(size_t k, const Polynomial<T>& gamma) {
-    auto C = Code<T, SUPER>();
-    const size_t n = k + gamma.get_degree();
-    auto G =
-        ToeplitzMatrix(pad_back(pad_front(Vector<T>(gamma), k + gamma.get_degree()), 2 * k + gamma.get_degree() - 1), k,
-                       k + gamma.get_degree());
+template <FiniteFieldType T>
+Code<T> PolynomialCode(size_t k, const Polynomial<T>& gamma) {
+    auto C = Code<T>();
+    const size_t n = k + gamma.degree();
+    auto G = ToeplitzMatrix(pad_back(pad_front(Vector<T>(gamma), k + gamma.degree()), 2 * k + gamma.degree() - 1), k,
+                            k + gamma.degree());
     C.add_backend(new LinearCodeBackend<T>(n, k, G));
     C.add_backend(new PolynomialCodeBackend<T>(k, gamma));
     return C;
 }
 
-template <class T>
+template <FiniteFieldType T>
 Code<T> GolayCode() {
     static_assert(T::get_size() == 2 || T::get_size() == 3, "Golay codes only defined for fields of size 2 or 3");
 
@@ -2784,7 +2798,7 @@ Code<T> GolayCode() {
     return PolynomialCode<T>(k, gamma);
 }
 
-template <class T, bool t, typename>
+template <FiniteFieldType T>
 Code<T> GRSCode(const Vector<T>& a, const Vector<T>& d, size_t k) {
     auto C = Code<T>();
 
@@ -2796,7 +2810,7 @@ Code<T> GRSCode(const Vector<T>& a, const Vector<T>& d, size_t k) {
         for (size_t j = 0; j <= i - (n - k + 1); ++j) {
             s += InfInt(j % 2 ? -1 : 1) * bin<InfInt>(i - 1, j) * sqm<InfInt>(T::get_size(), i - j - (n - k + 1));
         }
-        A.set_coeff(i, bin<InfInt>(n, i) * (T::get_size() - 1) * s);
+        A.set_coefficient(i, bin<InfInt>(n, i) * (T::get_size() - 1) * s);
     }
     C.add_backend(new LinearCodeBackend<T>(n, k, G, n - k + 1, A));
 
@@ -2848,10 +2862,8 @@ Code<T> GRSCode(const Vector<T>& a, const Vector<T>& d, size_t k) {
     return C;
 }
 
-template <class T, bool t = is_finite_field<T>()>
-Code<T> RSCode(T alpha, size_t b, size_t k)
-    requires(t)
-{
+template <FiniteFieldType T>
+Code<T> RSCode(T alpha, size_t b, size_t k) {
     const size_t n = alpha.get_multiplicative_order();
     if (k > n) throw std::invalid_argument("Trying to construct RS code with k>n!");
     Vector<T> a(n);
@@ -2866,6 +2878,7 @@ Code<T> RSCode(T alpha, size_t b, size_t k)
 
 namespace details {
 
+/*
 template <class F>
 Matrix<SF<F, 1>> T_matrix(const F& b) {
     const size_t q = F::get_m() / SF<F, 1>::get_m();
@@ -2875,7 +2888,9 @@ Matrix<SF<F, 1>> T_matrix(const F& b) {
     auto res = ToeplitzMatrix<SF<F, 1>>(v, q, 2 * q - 1);
     return res;
 }
+*/
 
+/*
 template <class F>
 Matrix<SF<F, 1>> Rj_matrix(size_t j) {
     const size_t q = F::get_m() / SF<F, 1>::get_m();
@@ -2885,7 +2900,9 @@ Matrix<SF<F, 1>> Rj_matrix(size_t j) {
     auto C = transpose(CompanionMatrix<SF<F, 1>>(F::template get_modulus<SF<F, 1>>()));
     return diagonal_join(I, vertical_join(v, C));
 }
+*/
 
+/*
 template <class F>
 Matrix<SF<F, 1>> R_matrix() {
     const size_t q = F::get_m() / SF<F, 1>::get_m();
@@ -2893,9 +2910,11 @@ Matrix<SF<F, 1>> R_matrix() {
     for (size_t i = q - 2; i > 0; --i) res *= Rj_matrix<F>(i - 1);
     return res;
 }
+*/
 
 }  // namespace details
 
+/*
 // Note: For RS codes, Bp points to B matrix for polynomial encoding. For non-GRS codes it
 // points to B matrix for systematic encoding.
 template <class T, uint8_t m, bool t, typename>
@@ -2928,18 +2947,18 @@ Code<SF<T, m>, T> SSCode(const Code<T>& SuperC, const Matrix<int>& M, Matrix<T>*
         if (Bp) {
             auto b = temp / gamma;
             *Bp =
-                ToeplitzMatrix(pad_back(pad_front(Vector<T>(b), k), 2 * k - b.get_degree() - 1), k - b.get_degree(), k);
+                ToeplitzMatrix(pad_back(pad_front(Vector<T>(b), k), 2 * k - b.degree() - 1), k - b.degree(), k);
         }
 
-        if (n - gammap.get_degree() == 0) return EmptyCode<SF<T, m>, T>();
+        if (n - gammap.degree() == 0) return EmptyCode<SF<T, m>, T>();
 
-        auto C = PolynomialCode<SF<T, m>, T>(n - gammap.get_degree(), gammap);
+        auto C = PolynomialCode<SF<T, m>, T>(n - gammap.degree(), gammap);
 
         if constexpr (SF<T, m>::get_size() == 2) {
             if (C.get_k() == 1) C.add_backend(new RepetitionCodeBackend<SF<T, m>>(n));
         }
 
-        const size_t s = gammap.get_degree();
+        const size_t s = gammap.degree();
         if (n == (sqm<size_t>(SF<T, m>::get_size(), s) - 1) / (SF<T, m>::get_size() - 1)) {
             C.add_backend(new HammingCodeBackend<SF<T, m>>(s));
         }
@@ -3044,9 +3063,10 @@ Code<SF<T, m>, T> SSCode(const Code<T>& SuperC, const Matrix<int>& M, Matrix<T>*
         throw std::invalid_argument("Can only construct subfield-subcodes of RS and GRS codes!");
     }
 }
+*/
 
-template <class T>
-class Encoder : public Block<Vector<T>> {
+template <FiniteFieldType T>
+class Encoder {
    public:
     Encoder(const Code<T>& C) : C(C) {}
 
@@ -3056,8 +3076,8 @@ class Encoder : public Block<Vector<T>> {
     const Code<T>& C;
 };
 
-template <class T>
-class Dec_BD : public Block<Vector<T>> {
+template <FiniteFieldType T>
+class Dec_BD {
    public:
     Dec_BD(const Code<T>& C, BD_t type = boosted_BD) : C(C), type(type) {}
 
@@ -3068,8 +3088,8 @@ class Dec_BD : public Block<Vector<T>> {
     const BD_t type;
 };
 
-template <class T>
-class Dec_ML : public Block<Vector<T>> {
+template <FiniteFieldType T>
+class Dec_ML {
    public:
     Dec_ML(const Code<T>& C) : C(C) {}
 
@@ -3079,8 +3099,8 @@ class Dec_ML : public Block<Vector<T>> {
     const Code<T>& C;
 };
 
-template <class T>
-class Dec_ML_soft : public Block<Vector<double>, Vector<T>> {
+template <FiniteFieldType T>
+class Dec_ML_soft {
    public:
     Dec_ML_soft(const Code<T>& C) : C(C) {}
 
@@ -3090,28 +3110,28 @@ class Dec_ML_soft : public Block<Vector<double>, Vector<T>> {
     const Code<T>& C;
 };
 
-class Dec_RM : public Block<Vector<Fp<2>>> {
+class Dec_RM {
    public:
     Dec_RM(const Code<Fp<2>>& C) : C(C) {}
 
-    Vector<Fp<2>> operator()(const Vector<Fp<2>>& in) override { return C.dec_Dumer(in); }
+    Vector<Fp<2>> operator()(const Vector<Fp<2>>& in) { return C.dec_Dumer(in); }
 
    private:
     const Code<Fp<2>>& C;
 };
 
-class Dec_RM_soft : public Block<Vector<double>, Vector<Fp<2>>> {
+class Dec_RM_soft {
    public:
     Dec_RM_soft(const Code<Fp<2>>& C) : C(C) {}
 
-    Vector<Fp<2>> operator()(const Vector<double>& in) noexcept override { return C.dec_Dumer_soft(in); }
+    Vector<Fp<2>> operator()(const Vector<double>& in) noexcept { return C.dec_Dumer_soft(in); }
 
    private:
     const Code<Fp<2>>& C;
 };
 
-template <class T>
-class Encoder_Inverse : public Block<Vector<T>> {
+template <FiniteFieldType T>
+class Encoder_Inverse {
    public:
     Encoder_Inverse(const Code<T>& C) : C(C) {}
 
