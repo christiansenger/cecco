@@ -1,5 +1,5 @@
 # ecc
-Header-only library for error control coding (ECC) simulations and experiments. Can deal with arbitrary finite fields and also complex field relationships.
+Header-only library for error control coding (ECC) simulations and experiments. Can deal with arbitrary finite fields and complex field relationships.
 
 Doxygen documentation is available <a href="https://christiansenger.github.io/ecc/">here</a>.
 
