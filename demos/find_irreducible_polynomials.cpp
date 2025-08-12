@@ -1,0 +1,26 @@
+#include <iostream>
+
+// Use ECC library, compile with -std=c++20 -I../
+// Adapt -Ipath_to_hpp_files if necessary, append -O3 for performance
+#include "ecc.hpp"
+using namespace ECC;
+
+int main(void) {
+    // Start with any finite field (use only one of the following three lines)
+    using F = Fp<2>;                                                                       // F2
+    //using F = Iso<Ext<Fp<2>, {1, 0, 0, 1, 1}>, Ext<Ext<Fp<2>, {1, 1, 1}>, {2, 2, 1}> >;  // F16
+    //using F = Ext<Fp<3>, {1, 2, 0, 1}>;                                                  // F27
+
+    // Find random monic irreducible polynomial with coefficients from F of given degree m (here: m = 3)
+    size_t m = 3;
+    auto p = find_irreducible<F>(m);
+    std::cout << "Monic irreducible polynomial: " << p << std::endl;
+    std::cout << "Coefficient vector (to be used as template parameter of Ext<>): " << Vector(p) << std::endl;
+
+    /*
+     * use coefficient vector in order to construct field with |F|^m elements (as a superfield of F).
+     * See https://christiansenger.github.io/ecc/classECC_1_1Ext.html for documentation
+     */
+
+    return 0;
+}
