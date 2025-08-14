@@ -3,8 +3,7 @@
         {
             "name": "Senger, Christian",
             "orcid": "0009-0002-2122-8840",
-            "affiliation": "University of Stuttgart",
-            "type": "Author"
+            "affiliation": "University of Stuttgart"
         }
     ],
     "contributors": [],
@@ -33,7 +32,8 @@
         "error-control coding",
         "field towers"
     ],
-    "license": "https://github.com/christiansenger/ecc/blob/main/LICENSE",
+    "license": "LicenseRef-NonCommercialBasedOnBSD",
     "upload_type": "software",
-    "language": "eng"
+    "language": "eng",
+    "description": "Header-only library for error control coding (ECC) simulations and experiments. Can deal with arbitrary finite fields and complex field relationships."
 }
