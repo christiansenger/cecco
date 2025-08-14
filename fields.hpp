@@ -2140,6 +2140,8 @@ std::vector<size_t> Embedding<SUBFIELD, SUPERFIELD>::compute_embedding() {
     return embedding;
 }
 
+namespace details {
+
 /**
  * @brief Helper struct for shared isomorphism storage to avoid cyclic dependencies
  * @tparam A First field type
@@ -2239,15 +2241,17 @@ struct IsomorphismPair {
 // Static member definitions
 template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
-std::once_flag IsomorphismPair<A, B>::computed_flag;
+std::once_flag details::IsomorphismPair<A, B>::computed_flag;
 
 template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
-std::vector<size_t> IsomorphismPair<A, B>::forward_iso;
+std::vector<size_t> details::IsomorphismPair<A, B>::forward_iso;
 
 template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
-std::vector<size_t> IsomorphismPair<A, B>::reverse_iso;
+std::vector<size_t> details::IsomorphismPair<A, B>::reverse_iso;
+
+}  // namespace details
 
 /**
  * @class Isomorphism
@@ -2392,21 +2396,21 @@ template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
 Isomorphism<A, B>::Isomorphism() : iso(A::get_size()) {
     // Use runtime comparison of get_info() strings to determine canonical template parameter ordering
-    // This ensures both Isomorphism<A,B> and Isomorphism<B,A> use the same IsomorphismPair
+    // This ensures both Isomorphism<A,B> and Isomorphism<B,A> use the same details::IsomorphismPair
     if constexpr (std::is_same_v<A, B>) {
         // Same field - trivial identity mapping
         std::iota(iso.begin(), iso.end(), 0);
     } else {
         // Use get_info() strings to determine canonical ordering
         if (A::get_info() < B::get_info()) {
-            // A is "smaller" - use IsomorphismPair<A,B> forward mapping
-            IsomorphismPair<A, B>::compute_if_needed();
-            std::copy(IsomorphismPair<A, B>::forward_iso.begin(), IsomorphismPair<A, B>::forward_iso.end(),
+            // A is "smaller" - use details::IsomorphismPair<A,B> forward mapping
+            details::IsomorphismPair<A, B>::compute_if_needed();
+            std::copy(details::IsomorphismPair<A, B>::forward_iso.begin(), details::IsomorphismPair<A, B>::forward_iso.end(),
                       iso.begin());
         } else {
-            // B is "smaller" - use IsomorphismPair<B,A> reverse mapping
-            IsomorphismPair<B, A>::compute_if_needed();
-            std::copy(IsomorphismPair<B, A>::reverse_iso.begin(), IsomorphismPair<B, A>::reverse_iso.end(),
+            // B is "smaller" - use details::IsomorphismPair<B,A> reverse mapping
+            details::IsomorphismPair<B, A>::compute_if_needed();
+            std::copy(details::IsomorphismPair<B, A>::reverse_iso.begin(), details::IsomorphismPair<B, A>::reverse_iso.end(),
                       iso.begin());
         }
     }
