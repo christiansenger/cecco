@@ -2,7 +2,7 @@
 
 // Use ECC library, compile with -std=c++20 -I../
 // Adapt -Ipath_to_hpp_files if necessary, append -O3 for performance
-#include "include/ecc.hpp"
+#include "ecc.hpp"
 using namespace ECC;
 
 int main(void) {
