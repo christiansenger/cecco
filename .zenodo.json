@@ -1,0 +1,39 @@
+{
+    "creators": [
+        {
+            "name": "Senger, Christian",
+            "orcid": "0009-0002-2122-8840",
+            "affiliation": "University of Stuttgart",
+            "type": "Author"
+        }
+    ],
+    "contributors": [],
+    "title": "ECC Library",
+    "version": "2.1.0",
+    "access_right": "open",
+    "related_identifiers": [
+        {
+            "identifier": "https://doi.org/10.5281/zenodo.15685869",
+            "relation": "isSupplementTo",
+            "resource_type": "publication-article"
+        }
+    ],
+    "keywords": [
+        "linear algebra",
+        "polynomials",
+        "finite fields",
+        "error-correcting codes",
+        "forward error correctin",
+        "linear codes",
+        "lookup tables",
+        "galois fields",
+        "reed-solomon codes",
+        "cyclic codes",
+        "hamming codes",
+        "error-control coding",
+        "field towers"
+    ],
+    "license": "https://github.com/christiansenger/ecc/blob/main/LICENSE",
+    "upload_type": "software",
+    "language": "eng"
+}

@@ -1,10 +1,39 @@
-/*
+/**
+ * @file field_concepts_traits.hpp
+ * @brief Concepts, traits, and type utilities for finite field arithmetic
+ * @author Christian Senger <senger@inue.uni-stuttgart.de>
+ * @version 2.0.1
+ * @date 2025
+ *
  * @copyright
  * Copyright (c) 2025, Christian Senger <senger@inue.uni-stuttgart.de>
  *
  * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
  * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
  * repository root for full terms and how to request a commercial license.
+ *
+ *
+ * @section Description
+ *
+ * This header provides the conceptual foundation for the finite field arithmetic library.
+ * It defines concepts, type traits, and template metaprogramming utilities that enable
+ * type-safe field operations and compile-time field relationship validation.
+ *
+ * **Core Concepts Provided:**
+ * - **FiniteFieldType**: Constrains types to valid finite field implementations
+ * - **SubfieldOf**: Validates mathematical subfield relationships between field types  
+ * - **Isomorphic**: Ensures field types have the same size and characteristic for safe conversions
+ * - **SignedIntType**: Supports both standard signed integers and arbitrary precision InfInt
+ * - **UnsignedIntType**: Supports both standard unsigned integers and arbitrary precision InfInt
+ * - **Arithmetic types**: Complex number and rational number type validation
+ *
+ * **Type Traits and Utilities:**
+ * - **iso_info**: Template metaprogramming utility for Iso type introspection
+ * - **largest_common_subfield_t**: Automatically determines largest common subfield for cross-field operations
+ * - **Field relationship detection**: Compile-time validation of field tower structures
+ * - **Template parameter validation**: Ensures type safety for field construction
+ *
+ * @see fields.hpp for the main finite field implementation
  */
 
 #ifndef FIELD_CONCEPTS_TRAITS_HPP
