@@ -1,5 +1,5 @@
-# ecc
-Header-only library for error control coding (ECC) simulations and experiments. Can deal with arbitrary finite fields and complex field relationships.
+# C++ECCO
+C++ Error Control Coding Orrery: a header-only library for ECC simulations and experiments, modeling complete coding systems across arbitrary finite fields and complex inter-field relationships
 
 Check the the demos folder to get started. Detailed Doxygen documentation is available <a href="https://christiansenger.github.io/ecc/">here</a>.
 
