@@ -7,9 +7,7 @@ Check the the demos folder to get started. Detailed Doxygen documentation is ava
 
 ## License
 
-This software, authored by Christian Senger, is licensed under a Modified BSD License for **noncommercial use only**.
-
-You may use, modify, and redistribute this software for teaching, academic research, and personal non-profit purposes.  
+This software, authored by Christian Senger, is licensed under a Modified BSD License for **noncommercial use only**. You may use, modify, and redistribute this software for teaching, academic research, and personal non-profit purposes.  
 **Commercial use is strictly prohibited** without a separate commercial license.
 
 For details, see the [LICENSE](./LICENSE) file.
