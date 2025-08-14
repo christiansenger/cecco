@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0
+ * @version 2.0.1
  * @date 2025
  *
  * @copyright
@@ -1911,7 +1911,8 @@ struct LutHolder<LutType, ProviderLutType, P, F, LutMode::RunTime> {
  *
  * Constructs and represents an explicit field embedding φ: SUBFIELD → SUPERFIELD between
  * a subfield and its containing superfield. The embedding preserves field operations and
- * provides efficient forward mapping and reverse lookup capabilities.
+ * provides efficient forward mapping and reverse lookup capabilities. Supports both regular
+ * field types and Iso types with automatic component field detection for extraction.
  *
  * @warning A mathematical SUBFIELD/SUPERFIELD relationship is only necessary, not sufficient. The two fields have to be
  * in the same construction tower, that is, SUBFIELD is used in some way in the construction of SUPERFIELD!
@@ -1927,11 +1928,21 @@ struct LutHolder<LutType, ProviderLutType, P, F, LutMode::RunTime> {
  *   - φ(a * b) = φ(a) * φ(b) (multiplicativity)
  *   - φ(0_sub) = 0_super and φ(1_sub) = 1_super (identity preservation)
  *
+ * @section Iso_Type_Support
+ *
+ * When SUPERFIELD is an Iso type, the extract method automatically handles component field
+ * detection by searching through all isomorphic representations:
+ * 1. First attempts extraction from the MAIN field if SUBFIELD ⊆ MAIN
+ * 2. If unsuccessful, iterates through OTHERS components to find the correct representation
+ * 3. Uses the same pattern as cross-field constructors with template lambda and fold expressions
+ * 4. Throws exception only if SUBFIELD is not found in any component
+ *
  * @section Performance_Features
  *
  * - **Static caching**: Computed once per template instantiation using std::once_flag
  * - **O(1) forward mapping**: Direct array lookup for embedding elements
  * - **O(n) reverse lookup**: Linear search for downcast operations (optimized with std::ranges::find)
+ * - **Iso type handling**: O(k * n) where k is number of components checked
  * - **Type safety**: Template constraints ensure valid subfield relationships
  *
  * @section Usage_Example
@@ -1946,20 +1957,26 @@ struct LutHolder<LutType, ProviderLutType, P, F, LutMode::RunTime> {
  * F4 a(2);
  * F16 b = embed(a);  // Embed F4 element into F16
  *
- * // Reverse lookup (downcast validation)
- * F16 c(5);
- * if (auto result = embed.try_extract(c)) {
- *     F4 d = *result;  // Safe extraction succeeded
- * } else {
- *     // c is not in F4 subfield
+ * // Reverse extraction (downcast with validation)
+ * try {
+ *     F16 c(5);
+ *     F4 d = embed.extract(c);  // May throw if c not in F4 subfield
+ *     // Extraction succeeded
+ * } catch (const std::invalid_argument&) {
+ *     // c is not in F4 subfield - handle extraction failure
  * }
  *
- * // Throwing extraction
- * try {
- *     F4 e = embed.extract(c);  // May throw if c not in subfield
- * } catch (const std::invalid_argument&) {
- *     // Handle extraction failure
- * }
+ * // Iso type extraction (automatic component detection)
+ * using F8 = Ext<F2, {1, 0, 1, 1}>;
+ * using F64_a = Ext<F8, {6, 2, 1}>;
+ * using F64_b = Ext<F2, {1, 0, 0, 1, 0, 0, 1}>;
+ * using F64 = Iso<F64_b, F64_a>;  // F8 ⊆ F64_a but not F64_b
+ *
+ * Embedding<F8, F64> embed;
+ * F8 a(2);
+ * F64 b(a);                     // Embed F8 into F64 (via constructor)
+ * F8 c = iso_embed.extract(b);  // Extract F8 from F64 (finds F64_a component)
+ * assert(a == c);               // Round-trip preservation
  * @endcode
  *
  * @see @ref ECC::SubfieldOf for the concept constraining valid field relationships
@@ -2004,14 +2021,56 @@ class Embedding {
      * @return Corresponding SUBFIELD element
      * @throws std::invalid_argument if the superfield element is not in the embedded subfield
      *
-     * Performs reverse lookup with exception on failure.
+     * Performs reverse lookup with exception on failure. For Iso types, automatically
+     * searches through all component fields (MAIN and OTHERS) to find the one containing
+     * SUBFIELD as a subfield, using the same pattern as cross-field constructors.
      *
-     * @note Time complexity: O(|SUBFIELD|) due to linear search through embedding map
+     * @note Time complexity: 
+     *   - Regular fields: O(|SUBFIELD|) due to linear search through embedding map
+     *   - Iso types: O(k * |SUBFIELD|) where k is the number of components checked
      */
     constexpr SUBFIELD extract(const SUPERFIELD& super) const {
-        auto it = std::ranges::find(embedding_map, super.get_label());
-        if (it == embedding_map.end()) throw std::invalid_argument("superfield element is not in subfield");
-        return SUBFIELD(std::distance(embedding_map.begin(), it));
+        if constexpr (details::iso_info<SUPERFIELD>::is_iso) {
+            // SUPERFIELD is an Iso type - find the correct component containing SUBFIELD
+
+            // Try to extract from MAIN first...
+            using MainType = typename details::iso_info<SUPERFIELD>::main_type;
+            if constexpr (SubfieldOf<MainType, SUBFIELD>) {
+                auto embedding = Embedding<SUBFIELD, MainType>();
+                return embedding.extract(super.main());
+            } else {
+                // ... then extract OTHERS from SUPERFIELD
+                using OthersTuple = typename details::iso_info<SUPERFIELD>::others_tuple;
+                
+                SUBFIELD result{};
+                bool extraction_done = false;
+                auto try_extracting = [&]<typename OtherType>() {
+                    if constexpr (SubfieldOf<OtherType, SUBFIELD>) {
+                        if (!extraction_done) {
+                            auto embedding = Embedding<SUBFIELD, OtherType>();
+                            OtherType other_repr(super);
+                            result = embedding.extract(other_repr);
+                            extraction_done = true;
+                        }
+                    }
+                };
+                
+                // Apply the lambda to each type in the tuple
+                std::apply([&]<typename... Types>(Types...) {
+                    (try_extracting.template operator()<Types>(), ...);
+                }, OthersTuple{});
+                
+                if (!extraction_done) {
+                    throw std::invalid_argument("subfield not found in any Iso component");
+                }
+                return result;
+            }
+        } else {
+            // SUPERFIELD is a regular field type
+            auto it = std::ranges::find(embedding_map, super.get_label());
+            if (it == embedding_map.end()) throw std::invalid_argument("superfield element is not in subfield");
+            return SUBFIELD(std::distance(embedding_map.begin(), it));
+        }
     }
 
    private:
@@ -2080,6 +2139,115 @@ std::vector<size_t> Embedding<SUBFIELD, SUPERFIELD>::compute_embedding() {
 
     return embedding;
 }
+
+/**
+ * @brief Helper struct for shared isomorphism storage to avoid cyclic dependencies
+ * @tparam A First field type
+ * @tparam B Second field type
+ *
+ * This struct provides shared static storage for both forward (A→B) and reverse (B→A)
+ * isomorphisms. It ensures that computation happens only once and both directions
+ * can access the precomputed mappings without circular dependencies.
+ */
+template <FiniteFieldType A, FiniteFieldType B>
+    requires Isomorphic<A, B>
+struct IsomorphismPair {
+    static std::once_flag computed_flag;
+    static std::vector<size_t> forward_iso;  // A -> B mapping
+    static std::vector<size_t> reverse_iso;  // B -> A mapping
+
+    /**
+     * @brief Computes both forward and reverse isomorphisms if not already done
+     *
+     * This function performs the expensive isomorphism computation exactly once
+     * and populates both forward_iso and reverse_iso vectors.
+     */
+    static void compute_if_needed() {
+        std::call_once(computed_flag, []() {
+            const size_t size = A::get_size();
+            forward_iso.resize(size);
+            reverse_iso.resize(size);
+
+            // Compute forward isomorphism A -> B using existing algorithm
+            const size_t m = A(0).template as_vector<Fp<A::get_p()>>().get_n();
+
+            A alpha;
+            B beta;
+
+            do {
+                auto h = find_irreducible<Fp<A::get_p()>>(m);
+
+                // Find root of h in A - must be a generator
+                Polynomial<A> h_A(h);
+                for (size_t i = 1; i < size; ++i) {
+                    A a(i);
+                    if (h_A(a) == A(0) && a.get_multiplicative_order() == size - 1) {
+                        alpha = a;
+                        break;
+                    }
+                }
+
+                if (alpha == A(0)) continue;
+
+                // Find root of h in B - must be a generator
+                Polynomial<B> h_B(h);
+                for (size_t i = 1; i < size; ++i) {
+                    B b(i);
+                    if (h_B(b) == B(0)) {
+                        beta = b;
+                        break;
+                    }
+                }
+
+                if (alpha != A(0) && beta != B(0)) break;
+
+            } while (true);
+
+            // Construct new basis from generator
+            std::vector<A> basis(m);
+            A a(1);
+            for (size_t i = 0; i < m; ++i) {
+                basis[i] = a;
+                a *= alpha;
+            }
+
+            // Calculate change-of-basis matrix
+            Matrix<Fp<A::get_p()>> Mi(m, m);
+            for (size_t i = 0; i < m; ++i) {
+                Mi.set_submatrix(0, i,
+                                 transpose(Matrix<Fp<A::get_p()>>(basis[i].template as_vector<Fp<A::get_p()>>())));
+            }
+            Mi.invert();
+
+            // Compute forward mapping A -> B
+            for (size_t i = 0; i < size; ++i) {
+                A a(i);
+                auto v = a.template as_vector<Fp<A::get_p()>>();
+                Vector<B> w = v * transpose(Mi);
+                auto p = Polynomial<B>(w);
+                auto b = p(beta);
+                forward_iso[i] = b.get_label();
+            }
+
+            // Compute reverse mapping B -> A (inverse of forward mapping)
+            auto indices = std::views::iota(size_t{0}, size);
+            std::ranges::for_each(indices, [&](size_t i) { reverse_iso[forward_iso[i]] = i; });
+        });
+    }
+};
+
+// Static member definitions
+template <FiniteFieldType A, FiniteFieldType B>
+    requires Isomorphic<A, B>
+std::once_flag IsomorphismPair<A, B>::computed_flag;
+
+template <FiniteFieldType A, FiniteFieldType B>
+    requires Isomorphic<A, B>
+std::vector<size_t> IsomorphismPair<A, B>::forward_iso;
+
+template <FiniteFieldType A, FiniteFieldType B>
+    requires Isomorphic<A, B>
+std::vector<size_t> IsomorphismPair<A, B>::reverse_iso;
 
 /**
  * @class Isomorphism
@@ -2223,37 +2391,25 @@ Isomorphism member functions
 template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
 Isomorphism<A, B>::Isomorphism() : iso(A::get_size()) {
-    // Use local static cache for each specific A,B combination
-    static std::once_flag computed_flag;
-    static std::vector<size_t> cached_iso(A::get_size());
-
-    std::call_once(computed_flag, []() {
-        // Use deterministic generator-based mapping for same-size fields
-
-        // Map 0 → 0 and 1 → 1 (required for any field homomorphism)
-        cached_iso[0] = 0;
-        cached_iso[1] = 1;
-
-        A a_gen = A::get_generator();
-        B b_gen = B::get_generator();
-
-        // Map generator to generator
-        cached_iso[a_gen.get_label()] = b_gen.get_label();
-
-        // Generate the rest by mapping powers consistently
-        A a_power(1);
-        B b_power(1);
-
-        for (size_t power = 0; power < A::get_size() - 1; ++power) {
-            if (cached_iso[a_power.get_label()] == 0 && a_power.get_label() != 0)
-                cached_iso[a_power.get_label()] = b_power.get_label();
-            a_power *= a_gen;
-            b_power *= b_gen;
+    // Use runtime comparison of get_info() strings to determine canonical template parameter ordering
+    // This ensures both Isomorphism<A,B> and Isomorphism<B,A> use the same IsomorphismPair
+    if constexpr (std::is_same_v<A, B>) {
+        // Same field - trivial identity mapping
+        std::iota(iso.begin(), iso.end(), 0);
+    } else {
+        // Use get_info() strings to determine canonical ordering
+        if (A::get_info() < B::get_info()) {
+            // A is "smaller" - use IsomorphismPair<A,B> forward mapping
+            IsomorphismPair<A, B>::compute_if_needed();
+            std::copy(IsomorphismPair<A, B>::forward_iso.begin(), IsomorphismPair<A, B>::forward_iso.end(),
+                      iso.begin());
+        } else {
+            // B is "smaller" - use IsomorphismPair<B,A> reverse mapping
+            IsomorphismPair<B, A>::compute_if_needed();
+            std::copy(IsomorphismPair<B, A>::reverse_iso.begin(), IsomorphismPair<B, A>::reverse_iso.end(),
+                      iso.begin());
         }
-    });
-
-    // Copy cached result to this instance
-    std::copy(cached_iso.begin(), cached_iso.end(), iso.begin());
+    }
 }
 
 template <FiniteFieldType A, FiniteFieldType B>
@@ -2650,8 +2806,8 @@ class Fp : public details::Field<Fp<p>> {
      * @return Reference to this element after erasing
      *
      * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased field
-     * elements is the responsibility of the user!
+     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased
+     * field elements is the responsibility of the user!
      */
     constexpr Fp& erase();
 
@@ -2672,8 +2828,8 @@ class Fp : public details::Field<Fp<p>> {
      * @return true when all LUTs for this field are computed
      *
      * This function serves as a compile-time synchronization mechanism for staged template
-     * instantiation in field towers. It returns true when all lookup tables (LUTs) have been computed and are ready for
-     * use.
+     * instantiation in field towers. It returns true when all lookup tables (LUTs) have been computed and are ready
+     * for use.
      *
      * @section Purpose
      *
@@ -3233,12 +3389,13 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      * @brief Construct extension field element from coefficient vector over subfield
      * @tparam T Coefficient field type
      * @param v Vector of coefficients over the subfield
-     * @throws std::invalid_argument if vector dimension is incompatible
+     * @throws std::invalid_argument if vector dimension is incompatible or coefficients produce invalid label
      *
-     * Vector v represents polynomial starting with constant coefficient.
+     * Vector v is interpreted as base-|T| representation: label = v[0] + v[1]×|T| + v[2]×|T|² + ...
+     * Uses optimized coefficient table lookup for O(degree) performance instead of O(field_size) search.
      *
-     * @note If at least one of the components of v has the erasure flag then the resulting element of Ext will have the
-     * erasure flag as well.
+     * @note If at least one of the components of v has the erasure flag then the resulting element of Ext will have
+     * the erasure flag as well.
      */
     template <FiniteFieldType T>
     Ext(const Vector<T>& v);
@@ -3282,6 +3439,32 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      */
     template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
     Ext(const Iso<MAIN, OTHERS...>& other);
+
+    /**
+     * @brief Constructor from prime field elements
+     * @tparam p Prime characteristic of the source field
+     * @param other Prime field element to embed in this extension field
+     * @throws std::invalid_argument if embedding fails (shouldn't happen for valid subfield relationships)
+     *
+     * Embeds a prime field element into this extension field by using the cached embedding
+     * from Fp<p> to this field.
+     *
+     * @section Embedding_Strategy
+     * - Uses the cached `Embedding<Fp<p>, Ext<B, modulus, mode>>` for mathematically correct embedding
+     * - Automatically handles the case where the prime field is a (possibly indirect) subfield
+     *
+     * @code{.cpp}
+     * using F2 = Fp<2>;
+     * using F8 = Ext<F2, {1, 0, 1, 1}>;
+     * using F64 = Ext<F8, {6, 2, 1}>;  // F2 → F8 → F64 tower
+     *
+     * F2 a(1);
+     * F64 b(a);  // Direct embedding F2 → F64
+     * @endcode
+     */
+    template <uint16_t p>
+    constexpr Ext(const Fp<p>& other)
+        requires SubfieldOf<Ext<B, modulus, mode>, Fp<p>> && (!std::is_same_v<B, Fp<p>>);
 
     /* assignment operators */
 
@@ -3581,8 +3764,8 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      * @return Reference to this element after erasing
      *
      * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased field
-     * elements is the responsibility of the user!
+     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased
+     * field elements is the responsibility of the user!
      */
     constexpr Ext& erase() noexcept;
 
@@ -3882,8 +4065,8 @@ Ext<B, modulus, mode>::Ext(const Ext<S, ext_modulus, ext_mode>& other) {
         Ext result = embedding.extract(other);
         label = result.get_label();
     } else {
-        // Fields with same characteristic but not directly related - convert via largest common subfield in order to
-        // maximize
+        // Fields with same characteristic but not directly related - convert via largest common subfield in order
+        // to maximize
         std::cout << "DEBUG: First field: " << Ext<B, modulus, mode>::get_info() << ")\n";
         std::cout << "DEBUG: Second field: " << Ext<S, ext_modulus, ext_mode>::get_info() << ")\n";
         using CommonField = details::largest_common_subfield_t<Ext<B, modulus, mode>, Ext<S, ext_modulus, ext_mode>>;
@@ -3905,12 +4088,11 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
         bool erased =
             std::ranges::any_of(std::views::iota(size_t{0}, v.get_n()), [&](size_t i) { return v[i].is_erased(); });
 
-        if (erased) {
+        if (erased)
             this->erase();
-        } else {
-            label = 0;
-            for (uint8_t i = 0; i < m; ++i) *this += Ext(v[i]) * Ext(sqm(B::get_size(), i));  // monomial basis
-        }
+        else
+            label = v.as_integer();
+
     } else {
         static_assert(SubfieldOf<Ext<B, modulus, mode>, T>,
                       "extension field elements can only be constructed from vectors over subfields");
@@ -4057,6 +4239,20 @@ Ext<B, modulus, mode>::Ext(const Iso<MAIN, OTHERS...>& other) {
             *this = ExtType(intermediate);    // Use existing cross-field Ext->Ext constructor
         }
     }
+}
+
+template <FiniteFieldType B, MOD modulus, LutMode mode>
+template <uint16_t p>
+constexpr Ext<B, modulus, mode>::Ext(const Fp<p>& other)
+    requires SubfieldOf<Ext<B, modulus, mode>, Fp<p>> && (!std::is_same_v<B, Fp<p>>)
+{
+    static_assert(Ext<B, modulus, mode>::get_characteristic() == p,
+                  "Prime field characteristic must match extension field characteristic");
+
+    // Use the cached embedding for mathematically correct embedding
+    auto embedding = Embedding<Fp<p>, Ext<B, modulus, mode>>();
+    Ext<B, modulus, mode> result = embedding(other);
+    label = result.get_label();
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
@@ -4230,7 +4426,7 @@ Vector<T> Ext<B, modulus, mode>::as_vector() const noexcept {
             res.erase_components(indices);
         } else {
             const auto coeffs = lut_coeff().values[label];
-            for (uint8_t i = 0; i < m; ++i) res.set_component(i, coeffs[m - 1 - i]);
+            for (uint8_t i = 0; i < m; ++i) res.set_component(i, coeffs[i]);
         }
         return res;
     } else {
@@ -4452,12 +4648,18 @@ class Iso : public details::Base {
      * @brief Vector constructor for polynomial representations
      * @tparam T Component type of the vector (must be a field type)
      * @param v Vector representation to convert to field element
+     * @throws std::invalid_argument if no representation can construct from the vector
      *
-     * Constructs field element from vector representation by delegating to
-     * the MAIN field type's vector constructor.
+     * Constructs field element from vector representation using multi-branch strategy:
+     * 1. **Branch 1**: Try direct construction via MAIN representation (compile-time check)
+     * 2. **Branch 2**: Try construction via compatible OTHERS representations and convert via isomorphism
+     * 3. **Branch 3**: Throw if no compatible representation found
+     *
+     * This ensures round-trip correctness: Iso → as_vector<T>() → Iso(vector) preserves the element.
+     * The approach follows the established multi-branch pattern from the cross-field Iso constructor.
      */
     template <FiniteFieldType T>
-    Iso(const Vector<T>& v) : main_(v) {}
+    Iso(const Vector<T>& v);
 
     /**
      * @brief Simple constructor from Extension field using Ext constructor
@@ -4498,6 +4700,32 @@ class Iso : public details::Base {
     Iso(const Ext<B, modulus, mode>& other);
 
     /**
+     * @brief Constructor from prime field elements
+     * @tparam p Prime characteristic of the source field
+     * @param other Prime field element to embed in this Iso
+     * @throws std::invalid_argument if embedding fails (shouldn't happen for valid subfield relationships)
+     *
+     * Embeds a prime field element into this Iso representation by finding an appropriate
+     * embedding path through one of the field representations. Uses the same logic as the
+     * cross-field Iso constructor when the largest common subfield is the prime field.
+     *
+     * @section Embedding_Strategy
+     * 1. **Direct MAIN embedding**: If MAIN contains Fp<p> as subfield
+     * 2. **OTHERS embedding**: Try embedding via any OTHERS representation that contains Fp<p>
+     *
+     * @code{.cpp}
+     * using F2 = Fp<2>;
+     * using F64 = Iso<F64_a, F64_b, F64_c>;  // All have characteristic 2
+     * F2 a(1);
+     * F64 a(a);                              // Embeds F2 element into F64
+     * @endcode
+     */
+    template <uint16_t p>
+    constexpr Iso(const Fp<p>& other)
+        requires SubfieldOf<Iso<MAIN, OTHERS...>, Fp<p>> && (!std::is_same_v<MAIN, Fp<p>>) &&
+                 (!BelongsTo<Fp<p>, OTHERS...>);
+
+    /**
      * @brief Cross-field constructor between Iso fields using four-branch conversion logic
      * @tparam OTHER_MAIN Main field type of the source Iso
      * @tparam OTHER_OTHERS Alternative representation types in the source Iso
@@ -4518,7 +4746,8 @@ class Iso : public details::Base {
      *   - Output Iso ⊆ Input Iso (full Iso relationship)
      *   - Output MAIN ⊆ Input MAIN (direct MAIN relationship)
      *   - Output types ⊆ Input types (via any representation path)
-     * **Branch 4 (Cross-cast)**: Bridge through @ref details::largest_common_subfield_t with Iso preference mechanism
+     * **Branch 4 (Cross-cast)**: Bridge through @ref details::largest_common_subfield_t with Iso preference
+     * mechanism
      *
      * @section Conversion_Examples
      * @code{.cpp}
@@ -4606,8 +4835,8 @@ class Iso : public details::Base {
      * @return Reference to this element after erasing
      *
      * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased field
-     * elements is the responsibility of the user!
+     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased
+     * field elements is the responsibility of the user!
      */
     constexpr Iso& erase() noexcept;
 
@@ -4917,6 +5146,34 @@ Iso<MAIN, OTHERS...>::Iso(const Ext<B, modulus, mode>& other) {
 }
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
+template <uint16_t p>
+constexpr Iso<MAIN, OTHERS...>::Iso(const Fp<p>& other)
+    requires SubfieldOf<Iso<MAIN, OTHERS...>, Fp<p>> && (!std::is_same_v<MAIN, Fp<p>>) && (!BelongsTo<Fp<p>, OTHERS...>)
+{
+    static_assert(MAIN::get_characteristic() == p, "Prime field characteristic must match Iso field characteristic");
+
+    // Try direct embedding into MAIN first
+    if constexpr (SubfieldOf<MAIN, Fp<p>>) {
+        main_ = MAIN(other);
+    } else {
+        // Try embedding via any OTHERS representation that contains Fp<p>
+        bool conversion_done = false;
+        auto try_others_embedding = [&]<typename OtherType>() {
+            if constexpr (SubfieldOf<OtherType, Fp<p>>) {
+                if (!conversion_done) {
+                    // Embed Fp<p> -> OtherType, then convert OtherType -> MAIN via isomorphism
+                    OtherType other_elem(other);
+                    auto isomorphism = Isomorphism<OtherType, MAIN>();
+                    main_ = isomorphism(other_elem);
+                    conversion_done = true;
+                }
+            }
+        };
+        (try_others_embedding.template operator()<OTHERS>(), ...);
+    }
+}
+
+template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 template <FiniteFieldType OTHER_MAIN, FiniteFieldType... OTHER_OTHERS>
 Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
     static_assert(MAIN::get_characteristic() == OTHER_MAIN::get_characteristic(),
@@ -5100,6 +5357,36 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
 }
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
+template <FiniteFieldType T>
+Iso<MAIN, OTHERS...>::Iso(const Vector<T>& v) {
+    bool conversion_done = false;
+
+    // Branch 1: Try MAIN directly (compile-time check)
+    if constexpr (SubfieldOf<MAIN, T>) {
+        main_ = MAIN(v);
+        conversion_done = true;
+    }
+
+    // Branch 2: Try compatible OTHERS
+    if (!conversion_done && sizeof...(OTHERS) > 0) {
+        auto try_others = [&]<typename OtherType>() {
+            if constexpr (SubfieldOf<OtherType, T>) {
+                if (!conversion_done) {
+                    OtherType other_elem(v);
+                    auto isomorphism = Isomorphism<OtherType, MAIN>();
+                    main_ = isomorphism(other_elem);
+                    conversion_done = true;
+                }
+            }
+        };
+        (try_others.template operator()<OTHERS>(), ...);
+    }
+
+    // Branch 3: Error case
+    if (!conversion_done) throw std::invalid_argument("Vector incompatible with Iso stack");
+}
+
+template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator+=(const Iso& other) {
     main_ += other.main_;
     return *this;
@@ -5216,7 +5503,6 @@ constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::unerase() noexcept {
 }
 
 namespace details {
-
 template <FiniteFieldType T>
 struct FiniteFieldHasher {
     size_t operator()(const T& e) const noexcept { return std::hash<typename T::label_t>{}(e.get_label()); }

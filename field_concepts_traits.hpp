@@ -991,13 +991,17 @@ struct iso_info {
 /**
  * @brief Specialization for Iso types
  *
+ * Provides type information about Iso fields for template metaprogramming.
+ * Extracts the MAIN type and packages OTHERS types into a tuple for iteration.
+ *
  * @tparam MAIN The MAIN representation type
  * @tparam OTHERS The OTHERS representation types
  */
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 struct iso_info<Iso<MAIN, OTHERS...>> {
-    static constexpr bool is_iso = true;
-    using main_type = MAIN;
+    static constexpr bool is_iso = true;           ///< Always true for Iso specialization
+    using main_type = MAIN;                        ///< Main field representation type
+    using others_tuple = std::tuple<OTHERS...>;    ///< Tuple of other field representation types
 };
 
 /**

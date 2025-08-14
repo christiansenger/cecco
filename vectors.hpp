@@ -1348,9 +1348,7 @@ template <ComponentType T>
 size_t Vector<T>::as_integer() const noexcept
     requires FiniteFieldType<T>
 {
-    // Create index sequence for parallel processing
     auto indices = std::views::iota(size_t{0}, data.size());
-
     return std::transform_reduce(indices.begin(), indices.end(), size_t{0}, std::plus<size_t>{}, [this](size_t i) {
         return data[data.size() - i - 1].get_label() * sqm<size_t>(T::get_size(), i);
     });

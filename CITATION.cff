@@ -1,4 +1,4 @@
-abstract: <p>Second release with many improvements, especially wrt. finite fields.  Field
+abstract: <p>Second (updated) release with many improvements, especially wrt. finite fields.  Field
   towers and arbitrary finite field lattices are now supported, user can select between
   run time or compile time LUT generation. Production-ready code (everything except
   codes.hpp) now fully documented.</p>
@@ -12,7 +12,7 @@ doi: 10.5281/zenodo.16808950
 license: []
 license-url: https://github.com/christiansenger/ecc/blob/main/LICENSE
 message: If you use this software, please cite it using the metadata from this file.
-repository-code: https://github.com/christiansenger/ecc/tree/v2.0.0
+repository-code: https://github.com/christiansenger/ecc/tree/v2.1.0
 title: ECC Library
 type: software
-version: v2.0.0
+version: v2.1.0
