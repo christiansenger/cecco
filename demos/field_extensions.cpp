@@ -40,7 +40,7 @@ int main(void) {
     // Recommendation: Use compile-time LUTs for small fields (up to ~150 elements).
 
     // ** Compile-time LUT calculation is only possible if the base field also uses compile-time LUTs! **
-    using F64_b = Ext<F4, {3, 1, 2, 1}, LutMode::CompileTime>;  // possible since F4 is also CompileTime
+    using F64_b = Ext<F4, {3, 1, 2, 1}>;
     std::cout << "Show textual info about F64_b:" << std::endl;
     std::cout << F64_b::get_info() << std::endl;
 
@@ -61,7 +61,7 @@ int main(void) {
     std::cout << std::endl;
 
     // Yet another isomorphic field with 64 elements
-    using F64_c = Ext<F2, {1, 0, 0, 1, 0, 0, 1}, LutMode::CompileTime>;
+    using F64_c = Ext<F2, {1, 0, 0, 1, 0, 0, 1}>;
     std::cout << "Show textual info about F64_c:" << std::endl;
     std::cout << F64_c::get_info() << std::endl << std::endl;
 
@@ -242,8 +242,8 @@ int main(void) {
     using F3 = Fp<3>;
     using F9 = Ext<F3, {2, 2, 1}, LutMode::CompileTime>;
     using F27 = Ext<F3, {1, 2, 0, 1}, LutMode::CompileTime>;
-    using F81_a = Ext<F3, {2, 1, 0, 0, 1}, LutMode::CompileTime>;
-    using F81_b = Ext<F9, {6, 0, 1}, LutMode::CompileTime>;
+    using F81_a = Ext<F3, {2, 1, 0, 0, 1}>;
+    using F81_b = Ext<F9, {6, 0, 1}>;
     using F81 = Iso<F81_a, F81_b>;
     using F243 = Ext<F3, {2, 0, 1, 2, 1, 1}>;
     using F729_a = Ext<F3, {2, 1, 2, 0, 1, 0, 1}>;
