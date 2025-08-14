@@ -1,0 +1,19 @@
+abstract: "Second (updated) release with many improvements, especially wrt. finite fields.  Field
+  towers and arbitrary finite field lattices are now supported, user can select between
+  run time or compile time LUT generation. Production-ready code (everything except
+  codes.hpp) now fully documented.""
+authors:
+- family-names: "Senger"
+  given-names: "Christian"
+  affiliation: "University of Stuttgart"
+  orcid: 0009-0002-2122-8840
+  email: "senger@inue.uni-stuttgart.de"
+cff-version: 1.2.0
+date-released: '2025-08-14'
+doi: 10.5281/zenodo.15685869
+license-url: https://github.com/christiansenger/ecc/blob/main/LICENSE
+message: "If you use this software, please cite it using the metadata from this file."
+repository-code: https://github.com/christiansenger/ecc/tree/v2.1.0
+title: "ECC Library"
+type: software
+version: v2.1.0
