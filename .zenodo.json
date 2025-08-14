@@ -6,7 +6,6 @@
             "affiliation": "University of Stuttgart"
         }
     ],
-    "contributors": [],
     "title": "ECC Library",
     "version": "2.1.0",
     "access_right": "open",
@@ -22,7 +21,7 @@
         "polynomials",
         "finite fields",
         "error-correcting codes",
-        "forward error correctin",
+        "forward error correction",
         "linear codes",
         "lookup tables",
         "galois fields",
@@ -32,7 +31,7 @@
         "error-control coding",
         "field towers"
     ],
-    "license": "LicenseRef-NonCommercialBasedOnBSD",
+    "license": "bsd-3-clause",
     "upload_type": "software",
     "language": "eng",
     "description": "Header-only library for error control coding (ECC) simulations and experiments. Can deal with arbitrary finite fields and complex field relationships."
