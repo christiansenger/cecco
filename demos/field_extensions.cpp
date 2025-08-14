@@ -9,7 +9,7 @@ int main(void) {
     // Start with any finite field - main example here is characteristic 2 but library works for arbitrary
     // characteristic!
     using F2 = Fp<2>;
-    // Find a monic irreducible polynomial of degree m with coefficients from F2 (as shown in
+    // Find a monic irreducible polynomial of degree m with coefficients from F2 (as shown in demo
     // find_irreducible_polynomials.hpp), take its coefficient vector of length m + 1, e.g., (1, 0, 1, 1). Then define
     // degree m extension of F2:
     using F8 = Ext<F2, {1, 0, 1, 1}>;
