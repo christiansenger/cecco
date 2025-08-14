@@ -88,8 +88,8 @@
  * reducing memory by ~50%
  * - **Move semantics**: Temporaries are moved for optimal performance
  * - **Type Safety**: C++20 concepts prevent invalid operations
- *      + `ECC::FieldType`: Basic field interface requirements
- *      + `ECC::FiniteFieldType`: Additional finite field interface requirements (size, characteristic ≠ 0)
+ *      + `CECCO::FieldType`: Basic field interface requirements
+ *      + `CECCO::FiniteFieldType`: Additional finite field interface requirements (size, characteristic ≠ 0)
  * - **Type-based Dispatch**: Compile-time polymorphism using CRTP (Curiously Recurring Template Pattern), no virtual
  function tables
  *
@@ -184,7 +184,7 @@
 // #include "InfInt.hpp" // transitive through polynomials.hpp
 // #include "helpers.hpp" // transitive through polynomials.hpp
 
-namespace ECC {
+namespace CECCO {
 
 template <ComponentType T>
 class Vector;
@@ -194,9 +194,9 @@ template <ComponentType T>
 class Matrix;
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 class Iso;
-}  // namespace ECC
+}  // namespace CECCO
 
-namespace ECC {
+namespace CECCO {
 
 namespace details {
 /**
@@ -529,7 +529,7 @@ class Field : public details::Base {
 
 /**
  * @brief Field addition operator
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (const reference)
  * @param rhs Right operand (const reference)
  * @return Sum lhs + rhs in the field
@@ -543,7 +543,7 @@ constexpr T operator+(const T& lhs, const T& rhs) noexcept {
 
 /**
  * @brief Field addition operator (lvalue + rvalue)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (rvalue reference, moved)
  * @param rhs Right operand (const reference)
  * @return Sum lhs + rhs in the field
@@ -557,7 +557,7 @@ constexpr T operator+(T&& lhs, const T& rhs) noexcept {
 
 /**
  * @brief Field addition operator (lvalue + rvalue)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (const reference)
  * @param rhs Right operand (rvalue reference, moved)
  * @return Sum lhs + rhs in the field
@@ -571,7 +571,7 @@ constexpr T operator+(const T& lhs, T&& rhs) noexcept {
 
 /**
  * @brief Field addition operator (rvalue + rvalue)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (rvalue reference, moved)
  * @param rhs Right operand (rvalue reference)
  * @return Sum lhs + rhs in the field
@@ -585,7 +585,7 @@ constexpr T operator+(T&& lhs, T&& rhs) noexcept {
 
 /**
  * @brief Field subtraction operator
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (const reference)
  * @param rhs Right operand (const reference)
  * @return Difference lhs - rhs in the field
@@ -599,7 +599,7 @@ constexpr T operator-(const T& lhs, const T& rhs) noexcept {
 
 /**
  * @brief Field subtraction operator (lvalue - rvalue)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (rvalue reference, moved)
  * @param rhs Right operand (const reference)
  * @return Difference lhs - rhs in the field
@@ -613,7 +613,7 @@ constexpr T operator-(T&& lhs, const T& rhs) noexcept {
 
 /**
  * @brief Field subtraction operator (lvalue - rvalue)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (const reference)
  * @param rhs Right operand (rvalue reference, moved)
  * @return Difference lhs - rhs in the field
@@ -627,7 +627,7 @@ constexpr T operator-(const T& lhs, T&& rhs) noexcept {
 
 /**
  * @brief Field subtraction operator (rvalue - rvalue)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (rvalue reference, moved)
  * @param rhs Right operand (rvalue reference)
  * @return Difference lhs - rhs in the field.
@@ -641,7 +641,7 @@ constexpr T operator-(T&& lhs, T&& rhs) noexcept {
 
 /**
  * @brief Field multiplication operator
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (const reference)
  * @param rhs Right operand (const reference)
  * @return Product lhs * rhs in the field
@@ -655,7 +655,7 @@ constexpr T operator*(const T& lhs, const T& rhs) noexcept {
 
 /**
  * @brief Field multiplication operator (lvalue * rvalue)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (rvalue reference, moved)
  * @param rhs Right operand (const reference)
  * @return Product lhs * rhs in the field
@@ -669,7 +669,7 @@ constexpr T operator*(T&& lhs, const T& rhs) noexcept {
 
 /**
  * @brief Field multiplication operator (lvalue * rvalue)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (const)
  * @param rhs Right operand (rvalue reference, moved)
  * @return Product lhs * rhs in the field
@@ -683,7 +683,7 @@ constexpr T operator*(const T& lhs, T&& rhs) noexcept {
 
 /**
  * @brief Field multiplication operator (rvalue * rvalue)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (rvalue reference, moved)
  * @param rhs Right operand (rvalue reference)
  * @return Product lhs * rhs in the field
@@ -697,7 +697,7 @@ constexpr T operator*(T&& lhs, T&& rhs) noexcept {
 
 /**
  * @brief Field multiplication by scalar (field * integer)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Field element
  * @param rhs Integer scalar
  * @return Product lhs * rhs (repeated addition)
@@ -711,7 +711,7 @@ constexpr T operator*(const T& lhs, uint16_t rhs) noexcept {
 
 /**
  * @brief Field multiplication by scalar (integer * field)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Integer scalar
  * @param rhs Field element
  * @return Product lhs * rhs (repeated addition)
@@ -725,7 +725,7 @@ constexpr T operator*(uint16_t lhs, const T& rhs) noexcept {
 
 /**
  * @brief Field multiplication by scalar (field * integer, rvalue)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Field element (rvalue reference, moved)
  * @param rhs Integer scalar
  * @return Product lhs * rhs (repeated addition)
@@ -739,7 +739,7 @@ constexpr T operator*(T&& lhs, int rhs) noexcept {
 
 /**
  * @brief Field multiplication by scalar (integer * field, rvalue)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Integer scalar
  * @param rhs Field element (rvalue reference, moved)
  * @return Product lhs * rhs (repeated addition)
@@ -753,7 +753,7 @@ constexpr T operator*(int lhs, T&& rhs) noexcept {
 
 /**
  * @brief Field division operator
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Dividend (const reference)
  * @param rhs Divisor (must be non-zero)
  * @return Quotient lhs / rhs = lhs * rhs⁻¹
@@ -768,7 +768,7 @@ T operator/(const T& lhs, const T& rhs) {
 
 /**
  * @brief Field division operator
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Dividend (rvalue reference, moved)
  * @param rhs Divisor (must be non-zero)
  * @return Quotient lhs / rhs = lhs * rhs⁻¹
@@ -783,7 +783,7 @@ T operator/(T&& lhs, const T& rhs) {
 
 /**
  * @brief Field exponentiation operator (USE WITH CAUTION)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param base Base element
  * @param exponent Integer exponent
  * @return base^exponent computed via square-and-multiply
@@ -801,7 +801,7 @@ constexpr T operator^(const T& base, int exponent) noexcept {
 
 /**
  * @brief Field exponentiation operator for rvalue base (USE WITH CAUTION)
- * @tparam T Field type (must satisfy @ref ECC::FieldType concept)
+ * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param base Base element (rvalue reference, moved)
  * @param exponent Integer exponent
  * @return base^exponent computed via square-and-multiply
@@ -1979,9 +1979,9 @@ struct LutHolder<LutType, ProviderLutType, P, F, LutMode::RunTime> {
  * assert(a == c);               // Round-trip preservation
  * @endcode
  *
- * @see @ref ECC::SubfieldOf for the concept constraining valid field relationships
- * @see @ref ECC::FiniteFieldType for underlying field type requirements
- * @see @ref ECC::Isomorphism for mappings between same-size fields
+ * @see @ref CECCO::SubfieldOf for the concept constraining valid field relationships
+ * @see @ref CECCO::FiniteFieldType for underlying field type requirements
+ * @see @ref CECCO::Isomorphism for mappings between same-size fields
  */
 template <FiniteFieldType SUBFIELD, FiniteFieldType SUPERFIELD>
     requires SubfieldOf<SUPERFIELD, SUBFIELD>
@@ -2304,10 +2304,10 @@ std::vector<size_t> details::IsomorphismPair<A, B>::reverse_iso;
  * assert(x == phi_64.inverse()(y));
  * @endcode
  *
- * @see @ref ECC::Isomorphic for the concept constraining valid field pairs
- * @see @ref ECC::FiniteFieldType for underlying field type requirements
- * @see @ref ECC::Ext for extension field construction
- * @see @ref ECC::Fp for prime field implementation
+ * @see @ref CECCO::Isomorphic for the concept constraining valid field pairs
+ * @see @ref CECCO::FiniteFieldType for underlying field type requirements
+ * @see @ref CECCO::Ext for extension field construction
+ * @see @ref CECCO::Fp for prime field implementation
  */
 template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
@@ -2464,7 +2464,7 @@ class Fp : public details::Field<Fp<p>> {
     static_assert(is_prime(p), "p is not a prime");
 
    public:
-    using label_t = ::ECC::label_t<p>;
+    using label_t = ::CECCO::label_t<p>;
 
     /* constructors */
 
@@ -3312,7 +3312,7 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
     static constexpr size_t Q = sqm(q, m);
 
    public:
-    using label_t = ::ECC::label_t<Q>;
+    using label_t = ::CECCO::label_t<Q>;
 
    public:
     /* constructors */
@@ -5514,6 +5514,6 @@ struct FiniteFieldHasher {
 
 }  // namespace details
 
-}  // namespace ECC
+}  // namespace CECCO
 
 #endif

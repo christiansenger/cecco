@@ -6,7 +6,7 @@
             "affiliation": "University of Stuttgart"
         }
     ],
-    "title": "ECC Library",
+    "title": "C(++)ECCO --- C++ Error Control Coding Orrery",
     "version": "2.1.0",
     "access_right": "open",
     "related_identifiers": [
@@ -34,5 +34,5 @@
     "license": "bsd-3-clause",
     "upload_type": "software",
     "language": "eng",
-    "description": "Header-only library for error control coding (ECC) simulations and experiments. Can deal with arbitrary finite fields and complex field relationships."
+    "description": "A header-only library for ECC simulations and experiments, modeling complete coding systems across arbitrary finite fields and complex inter-field relationships."
 }

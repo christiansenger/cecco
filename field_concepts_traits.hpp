@@ -47,7 +47,7 @@
 #include "helpers.hpp"
 // #include "InfInt.hpp" // transitive through helpers.hpp
 
-namespace ECC {
+namespace CECCO {
 
 /**
  * @brief LUT generation mode for field operations
@@ -429,11 +429,11 @@ class Ext;
  * @endcode
  *
  * @note This concept only checks size equality. The actual isomorphism construction
- * is performed by the @ref ECC::Isomorphism class, which computes explicit
+ * is performed by the @ref CECCO::Isomorphism class, which computes explicit
  * field homomorphisms between isomorphic representations.
  *
- * @see @ref ECC::Isomorphism for explicit isomorphism construction
- * @see @ref ECC::FiniteFieldType for the underlying field type requirements
+ * @see @ref CECCO::Isomorphism for explicit isomorphism construction
+ * @see @ref CECCO::FiniteFieldType for the underlying field type requirements
  */
 template <typename A, typename B>
 concept Isomorphic = FiniteFieldType<A> && FiniteFieldType<B> && requires { requires A::get_size() == B::get_size(); };
@@ -1099,6 +1099,6 @@ class NonCopyable {
 };
 }  // namespace details
 
-}  // namespace ECC
+}  // namespace CECCO
 
 #endif

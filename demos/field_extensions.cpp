@@ -1,9 +1,9 @@
 #include <iostream>
 
-// Use ECC library, compile with -std=c++20 -I../
+// Use CECCO library, compile with -std=c++20 -I../
 // Adapt -Ipath_to_hpp_files if necessary, append -O3 for performance
 #include "ecc.hpp"
-using namespace ECC;
+using namespace CECCO;
 
 int main(void) {
     // Start with any finite field - main example here is characteristic 2 but library works for arbitrary
@@ -266,8 +266,8 @@ int main(void) {
     assert(u + v == F729(u.as_vector<F27>() + v.as_vector<F27>()));
 
     /*
-     * See https://christiansenger.github.io/ecc/classECC_1_1Ext.html and
-     * https://christiansenger.github.io/ecc/classECC_1_1Iso.html for documentation
+     * See https://christiansenger.github.io/ecc/classCECCO_1_1Ext.html and
+     * https://christiansenger.github.io/ecc/classCECCO_1_1Iso.html for documentation
      */
 
     return 0;

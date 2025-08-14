@@ -1,4 +1,4 @@
-abstract: "Header-only library for error control coding (ECC) simulations and experiments. Can deal with arbitrary finite fields and complex field relationships."
+abstract: "A header-only library for ECC simulations and experiments, modeling complete coding systems across arbitrary finite fields and complex inter-field relationships."
 authors:
 - family-names: "Senger"
   given-names: "Christian"
@@ -8,9 +8,9 @@ authors:
 cff-version: 1.2.0
 date-released: 2025-08-14
 doi: 10.5281/zenodo.15685869
-license-url: "https://github.com/christiansenger/ecc/blob/main/LICENSE"
+license-url: "https://github.com/christiansenger/cecco/blob/main/LICENSE"
 message: "If you use this software, please cite it using the metadata from this file."
-repository-code: "https://github.com/christiansenger/ecc/tree/v2.1.0"
-title: "ECC Library"
+repository-code: "https://github.com/christiansenger/cecco/tree/v2.1.0"
+title: "C(++)ECCO --- C++ Error Control Coding Orrery"
 type: software
 version: v2.1.0

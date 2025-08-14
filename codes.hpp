@@ -35,7 +35,7 @@
 // #include "fields.hpp" // transitive through blocks.hpp
 // #include "polynomials.hpp" // transitive through blocks.hpp
 
-namespace ECC {
+namespace CECCO {
 
 namespace details {}
 using namespace details;
@@ -3141,6 +3141,6 @@ class Encoder_Inverse {
     const Code<T>& C;
 };
 
-}  // namespace ECC
+}  // namespace CECCO
 
 #endif

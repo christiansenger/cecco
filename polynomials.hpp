@@ -16,12 +16,12 @@
  *
  * This header file provides an implementation of univariate polynomial arithmetic. It supports:
  *
- * - **Generic polynomial operations**: Over any @ref ECC::ComponentType including finite fields,
+ * - **Generic polynomial operations**: Over any @ref CECCO::ComponentType including finite fields,
  *   floating-point numbers, complex numbers, and signed integers
  * - **Field-specific algorithms**: Polynomial long division, GCD computation, and factorization
- *   support for @ref ECC::FieldType coefficients
+ *   support for @ref CECCO::FieldType coefficients
  * - **Cross-field compatibility**: Safe conversions between polynomials over related fields using
- *   @ref ECC::SubfieldOf, @ref ECC::ExtensionOf, and @ref ECC::largest_common_subfield_t
+ *   @ref CECCO::SubfieldOf, @ref CECCO::ExtensionOf, and @ref CECCO::largest_common_subfield_t
  * - **Performance optimizations**: High-performance O(1) caching for expensive operations, move semantics, and
  *   Horner's method for efficient evaluation
  *
@@ -56,10 +56,10 @@
  * - **Automatic pruning**: Maintains canonical form by removing leading zero coefficients
  * - **STL integration**: Uses standard algorithms for optimal compiler optimization
  * - **Type safety**: C++20 concepts prevent invalid operations:
- *   - @ref ECC::ComponentType Ensures valid coefficient types
- *   - @ref ECC::FieldType Required for division and advanced algorithms
- *   - @ref ECC::FiniteFieldType Enables specialized finite field operations
- *   - @ref ECC::largest_common_subfield_t Enables generalized cross-field conversions
+ *   - @ref CECCO::ComponentType Ensures valid coefficient types
+ *   - @ref CECCO::FieldType Required for division and advanced algorithms
+ *   - @ref CECCO::FiniteFieldType Enables specialized finite field operations
+ *   - @ref CECCO::largest_common_subfield_t Enables generalized cross-field conversions
  *
  * @see @ref fields.hpp for finite field arithmetic and extension field operations
  * @see @ref vectors.hpp for vector representations and linear algebra integration
@@ -80,7 +80,7 @@
 // #include "field_concepts_traits.hpp" // transitive through matrices.hpp
 // #include "helpers.hpp" // transitive through field_concepts_traits.hpp
 
-namespace ECC {
+namespace CECCO {
 
 template <ComponentType T>
 class Vector;
@@ -97,15 +97,15 @@ Polynomial<T> ZeroPolynomial();
 
 /**
  * @class Polynomial
- * @brief Generic univariate polynmial class for error control coding (ECC) and finite field applications 
+ * @brief Generic univariate polynmial class for error control coding (CECCO) and finite field applications 
  *
- * @tparam T Coefficient type satisfying @ref ECC::ComponentType concept. Supported types include:
- *   - **Finite field types**: @ref ECC::Fp, @ref ECC::Ext, also satisfying concept @ref ECC::FiniteFieldType
+ * @tparam T Coefficient type satisfying @ref CECCO::ComponentType concept. Supported types include:
+ *   - **Finite field types**: @ref CECCO::Fp, @ref CECCO::Ext, also satisfying concept @ref CECCO::FiniteFieldType
  *   - **Floating-point types**: `double`
  *   - **Complex types**: `std::complex<double>`
- *   - **Signed integer types**: Signed integer types including `InfInt` satisfying concept @ref ECC::SignedIntType
+ *   - **Signed integer types**: Signed integer types including `InfInt` satisfying concept @ref CECCO::SignedIntType
  *
- * This class provides comprehensive polynomial operations optimized for error-correcting codes (ECC),
+ * This class provides comprehensive polynomial operations optimized for error-correcting codes (CECCO),
  * with special support for finite field arithmetic and cross-field conversions.
  *
  * @section Implementation_Notes
@@ -146,16 +146,16 @@ Polynomial<T> ZeroPolynomial();
  * @endcode
  *
  * @note Polynomial operations require compatible types. Division operations require
- *          coefficient types satisfying @ref ECC::FieldType concept.
+ *          coefficient types satisfying @ref CECCO::FieldType concept.
  *
  * @note Additional methods available via concept constraints:
  *       - **Field types only**: poly_long_div(), normalize(), differentiate()
  *       - **Finite fields and signed integers**: degree(), wH() (Hamming weight)
  *
- * @see Concept @ref ECC::ComponentType for supported coefficient types
- * @see Concepts @ref ECC::FieldType, @ref ECC::FiniteFieldType for advanced operations
- * @see Concepts @ref ECC::SubfieldOf, @ref ECC::largest_common_subfield_t for cross-field operation constraints
- * @see @ref ECC::Vector for coefficient vector representations
+ * @see Concept @ref CECCO::ComponentType for supported coefficient types
+ * @see Concepts @ref CECCO::FieldType, @ref CECCO::FiniteFieldType for advanced operations
+ * @see Concepts @ref CECCO::SubfieldOf, @ref CECCO::largest_common_subfield_t for cross-field operation constraints
+ * @see @ref CECCO::Vector for coefficient vector representations
  */
 template <ComponentType T>
 class Polynomial {
@@ -410,7 +410,7 @@ class Polynomial {
      *
      * @throws std::invalid_argument if attempting to divide by zero polynomial
      *
-     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
      */
     Polynomial& operator/=(const Polynomial& rhs)
         requires FieldType<T>;
@@ -427,7 +427,7 @@ class Polynomial {
      *
      * @throws std::invalid_argument if attempting modulo by zero polynomial
      *
-     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
      */
     Polynomial& operator%=(const Polynomial& rhs)
         requires FieldType<T>;
@@ -466,7 +466,7 @@ class Polynomial {
      * Multiplies each coefficient by integer n, accounting for field characteristic.
      * For finite fields, reduces n modulo characteristic before multiplication.
      *
-     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
      */
     constexpr Polynomial& operator*=(size_t n) noexcept
         requires FieldType<T>;
@@ -483,7 +483,7 @@ class Polynomial {
      *
      * @throws std::invalid_argument if attempting division by zero polynomial
      *
-     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
      *
      * @code{.cpp}
      * using F7 = Fp<7>;
@@ -532,7 +532,7 @@ class Polynomial {
      *
      * @throws std::invalid_argument if attempting to differentiate empty polynomial
      *
-     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
      */
     Polynomial& differentiate(size_t s)
         requires FieldType<T>;
@@ -548,7 +548,7 @@ class Polynomial {
      *
      * @throws std::invalid_argument if attempting to Hasse differentiate empty polynomial
      *
-     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
      */
     Polynomial& Hasse_differentiate(size_t s)
         requires FieldType<T>;
@@ -781,7 +781,7 @@ class Polynomial {
      *
      * Divides all coefficients by the leading coefficient to make the polynomial monic.
      *
-     * @note Only available for coefficient types satisfying @ref ECC::FieldType
+     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
      */
     constexpr Polynomial& normalize()
         requires FieldType<T>;
@@ -1540,7 +1540,7 @@ std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) noexcept {
 /**
  * @brief Create a monomial polynomial ax^i
  *
- * @tparam T Coefficient type satisfying @ref ECC::ComponentType
+ * @tparam T Coefficient type satisfying @ref CECCO::ComponentType
  * @param i Degree of the monomial (power of x)
  * @param a Coefficient of the monomial (defaults to 1)
  * @return Polynomial representing ax^i
@@ -1559,7 +1559,7 @@ constexpr Polynomial<T> Monomial(size_t i, auto&& a = T(1)) noexcept
 /**
  * @brief Create the zero polynomial
  *
- * @tparam T Coefficient type satisfying @ref ECC::ComponentType
+ * @tparam T Coefficient type satisfying @ref CECCO::ComponentType
  * @return Polynomial representing the constant 0
  *
  * Creates the polynomial p(x) = 0.
@@ -1573,7 +1573,7 @@ Polynomial<T> ZeroPolynomial() {
 /**
  * @brief Create the one polynomial
  *
- * @tparam T Coefficient type satisfying @ref ECC::ComponentType
+ * @tparam T Coefficient type satisfying @ref CECCO::ComponentType
  * @return Polynomial representing the constant 1
  *
  * Creates the polynomial p(x) = 1.
@@ -1587,7 +1587,7 @@ Polynomial<T> OnePolynomial() {
 /**
  * @brief Compute greatest common divisor of two polynomials using Extended Euclidean Algorithm
  *
- * @tparam T Coefficient type satisfying @ref ECC::FieldType
+ * @tparam T Coefficient type satisfying @ref CECCO::FieldType
  * @param a First polynomial
  * @param b Second polynomial
  * @param s Optional pointer to store Bézout coefficient for polynomial a
@@ -1597,7 +1597,7 @@ Polynomial<T> OnePolynomial() {
  * Computes gcd(a,b) using the Extended Euclidean Algorithm. If s and t pointers are provided,
  * also computes Bézout coefficients such that: gcd(a,b) = s·a + t·b
  *
- * @note Only available for coefficient types satisfying @ref ECC::FieldType
+ * @note Only available for coefficient types satisfying @ref CECCO::FieldType
  * @note Automatically handles degree ordering (larger degree polynomial processed first)
  */
 template <ComponentType T>
@@ -1639,7 +1639,7 @@ Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, 
 /**
  * @brief Compute greatest common divisor of multiple polynomials
  *
- * @tparam T Coefficient type satisfying @ref ECC::FieldType
+ * @tparam T Coefficient type satisfying @ref CECCO::FieldType
  * @param polys std::vector of polynomials to find GCD of
  * @return Greatest common divisor of all polynomials in the std::vector
  *
@@ -1648,7 +1648,7 @@ Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, 
  *
  * @throws std::invalid_argument if polys is empty
  *
- * @note Only available for coefficient types satisfying @ref ECC::FieldType
+ * @note Only available for coefficient types satisfying @ref CECCO::FieldType
  */
 template <ComponentType T>
 Polynomial<T> GCD(const std::vector<Polynomial<T>>& polys)
@@ -1668,7 +1668,7 @@ Polynomial<T> GCD(const std::vector<Polynomial<T>>& polys)
 /**
  * @brief Compute least common multiple of two polynomials
  *
- * @tparam T Coefficient type satisfying @ref ECC::FieldType
+ * @tparam T Coefficient type satisfying @ref CECCO::FieldType
  * @param a First polynomial
  * @param b Second polynomial
  * @return Least common multiple lcm(a,b)
@@ -1678,7 +1678,7 @@ Polynomial<T> GCD(const std::vector<Polynomial<T>>& polys)
  *
  * Important for polynomial ideal operations and code construction algorithms.
  *
- * @note Only available for coefficient types satisfying @ref ECC::FieldType
+ * @note Only available for coefficient types satisfying @ref CECCO::FieldType
  */
 template <ComponentType T>
 Polynomial<T> LCM(const Polynomial<T>& a, const Polynomial<T>& b)
@@ -1690,7 +1690,7 @@ Polynomial<T> LCM(const Polynomial<T>& a, const Polynomial<T>& b)
 /**
  * @brief Compute least common multiple of multiple polynomials
  *
- * @tparam T Coefficient type satisfying @ref ECC::FieldType
+ * @tparam T Coefficient type satisfying @ref CECCO::FieldType
  * @param polys Vector of polynomials to find LCM of
  * @return Least common multiple of all polynomials in the vector
  *
@@ -1699,7 +1699,7 @@ Polynomial<T> LCM(const Polynomial<T>& a, const Polynomial<T>& b)
  *
  * @throws std::invalid_argument if polys is empty
  *
- * @note Only available for coefficient types satisfying @ref ECC::FieldType
+ * @note Only available for coefficient types satisfying @ref CECCO::FieldType
  */
 template <ComponentType T>
 Polynomial<T> LCM(const std::vector<Polynomial<T>>& polys)
@@ -1719,7 +1719,7 @@ Polynomial<T> LCM(const std::vector<Polynomial<T>>& polys)
 /**
  * @brief Polynomial exponentiation operator
  *
- * @tparam T Coefficient type satisfying @ref ECC::ComponentType
+ * @tparam T Coefficient type satisfying @ref CECCO::ComponentType
  * @param base Polynomial to raise to exponent
  * @param exponent Integer exponent
  * @return Polynomial base^exponent
@@ -1749,6 +1749,6 @@ Polynomial<T> find_irreducible(size_t degree) {
 }
 
 
-}  // namespace ECC
+}  // namespace CECCO
 
 #endif

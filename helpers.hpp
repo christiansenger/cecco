@@ -44,7 +44,7 @@
 
 #include "InfInt.hpp"
 
-namespace ECC {
+namespace CECCO {
 
 /**
  * @brief Thread-safe random number generator with configurable seeding
@@ -599,6 +599,6 @@ class Cache {
 
 }  // namespace details
 
-}  // namespace ECC
+}  // namespace CECCO
 
 #endif

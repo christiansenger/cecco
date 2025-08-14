@@ -17,10 +17,10 @@
  * This header file provides a complete implementation of vector arithmetic for
  * error control coding. It supports:
  *
- * - **Generic vector operations**: Over any @ref ECC::ComponentType including finite fields,
+ * - **Generic vector operations**: Over any @ref CECCO::ComponentType including finite fields,
  *   floating-point numbers, complex numbers, and signed integers
  * - **Cross-field constructors**: Safe conversions between vectors over related fields using
- *   @ref ECC::SubfieldOf, @ref ECC::ExtensionOf, and @ref ECC::largest_common_subfield_t
+ *   @ref CECCO::SubfieldOf, @ref CECCO::ExtensionOf, and @ref CECCO::largest_common_subfield_t
  * - **Matrix integration**: Bidirectional conversion Vector -> Matrix -> Vector
  * - **Performance optimizations**: High-performance O(1) caching, move semantics, and STL algorithm utilization
  *
@@ -52,9 +52,9 @@
  * - **Move semantics**: Optimal performance for temporary vector operations
  * - **STL integration**: Uses standard algorithms for optimal compiler optimization
  * - **Type safety**: C++20 concepts prevent invalid operations:
- *   - @ref ECC::ComponentType Ensures valid component types
- *   - @ref ECC::SubfieldOf Validates field relationship for safe conversions
- *   - @ref ECC::largest_common_subfield_t Enables generalized cross-field conversions
+ *   - @ref CECCO::ComponentType Ensures valid component types
+ *   - @ref CECCO::SubfieldOf Validates field relationship for safe conversions
+ *   - @ref CECCO::largest_common_subfield_t Enables generalized cross-field conversions
  *
  * @see @ref fields.hpp for fields and field arithmetic
  * @see @ref matrices.hpp for matrices and linear algebra
@@ -79,7 +79,7 @@
 // #include "field_concepts_traits.hpp" // transitive through matrices.hpp
 #include "matrices.hpp"
 
-namespace ECC {
+namespace CECCO {
 
 template <ComponentType T>
 class Vector;
@@ -103,22 +103,22 @@ double dE(const Vector<std::complex<double>>& lhs, const Vector<std::complex<dou
 
 /**
  * @class Vector
- * @brief Generic vector class for error control coding (ECC) and finite field applications
+ * @brief Generic vector class for error control coding (CECCO) and finite field applications
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType concept. Supported types include:
- *   - **Finite field types**: @ref ECC::Fp, @ref ECC::Ext satisfying concept @ref ECC::FiniteFieldType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType concept. Supported types include:
+ *   - **Finite field types**: @ref CECCO::Fp, @ref CECCO::Ext satisfying concept @ref CECCO::FiniteFieldType
  *   - **Floating-point types**: `double` etc.
  *   - **Complex types**: `std::complex<double>` etc.
- *   - **Signed integer types**: Signed integer types including `InfInt` satisfying concept @ref ECC::SignedIntType
+ *   - **Signed integer types**: Signed integer types including `InfInt` satisfying concept @ref CECCO::SignedIntType
  *
- * This class provides comprehensive vector operations optimized for error control coding (ECC),
+ * This class provides comprehensive vector operations optimized for error control coding (CECCO),
  * with special support for finite field arithmetic and cross-field conversions. The design
  * emphasizes performance through caching, move semantics, and STL algorithm utilization.
  *
  * @section Implementation_Notes
  *
  * - **Cross-field compatibility**: Safe conversions between related field types using concepts
- * - **ECC-specific operations**: Hamming weight, Hamming distance, burst length calculations
+ * - **CECCO-specific operations**: Hamming weight, Hamming distance, burst length calculations
  * - **Performance optimization**: Lazy evaluation with compile-time optimized O(1) caching for expensive operations
  * - **Type safety**: Compile-time validation of field relationships and operations
  *
@@ -129,7 +129,7 @@ double dE(const Vector<std::complex<double>>& lhs, const Vector<std::complex<dou
  * using F4 = Ext<Fp<2>, MOD{1, 1, 1}>;
  * Vector<F4> v = {0, 1, 2, 3};
  *
- * // ECC operations
+ * // CECCO operations
  * size_t weight = v.wH();           // Hamming weight
  * size_t burst = v.burst_length();  // Burst error length
  * // etc.
@@ -146,9 +146,9 @@ double dE(const Vector<std::complex<double>>& lhs, const Vector<std::complex<dou
  *       - **Finite fields only**: as_integer(), as_matrix()
  *       - **Finite fields and signed integers**: wH(), dH() (Hamming weight/distance)
  *
- * @see Concept @ref ECC::ComponentType for supported component types
- * @see Concepts @ref ECC::SubfieldOf, @ref ECC::largest_common_subfield_t for cross-field operation constraints
- * @see @ref ECC::Matrix for matrix representations and linear algebra operations
+ * @see Concept @ref CECCO::ComponentType for supported component types
+ * @see Concepts @ref CECCO::SubfieldOf, @ref CECCO::largest_common_subfield_t for cross-field operation constraints
+ * @see @ref CECCO::Matrix for matrix representations and linear algebra operations
  */
 template <ComponentType T>
 class Vector {
@@ -458,7 +458,7 @@ class Vector {
      *
      * @note Being the zero vector implies being non-empty.
      *
-     * @note Only for types fulfilling ECC::ReliablyComparableType.
+     * @note Only for types fulfilling CECCO::ReliablyComparableType.
      */
     constexpr bool is_zero() const noexcept
         requires ReliablyComparableType<T>;
@@ -468,7 +468,7 @@ class Vector {
      *
      * @return true if no two components have the same value, false otherwise
      *
-     * @note Only for types fulfilling ECC::ReliablyComparableType.
+     * @note Only for types fulfilling CECCO::ReliablyComparableType.
      */
     constexpr bool is_pairwisedistinct() const
         requires ReliablyComparableType<T>;
@@ -480,7 +480,7 @@ class Vector {
      *
      * Uses lazy evaluation with O(1) compile-time optimized caching for optimal performance on repeated calls.
      *
-     * @note Only for types fulfilling ECC::ReliablyComparableType.
+     * @note Only for types fulfilling CECCO::ReliablyComparableType.
      */
     size_t wH() const noexcept
         requires ReliablyComparableType<T>
@@ -1815,7 +1815,7 @@ std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) noexcept {
 /**
  * @brief Compute Hamming weight of a vector
  *
- * @tparam T Vector component type (must satisfy @ref ECC::FiniteFieldType or @ref ECC::SignedIntType)
+ * @tparam T Vector component type (must satisfy @ref CECCO::FiniteFieldType or @ref CECCO::SignedIntType)
  * @param v Vector to analyze
  * @return Number of non-zero components in the vector
  *
@@ -1832,14 +1832,14 @@ constexpr size_t wH(const Vector<T>& v) noexcept
 /**
  * @brief Compute Hamming distance between two vectors of discrete types
  *
- * @tparam T Vector component type (must satisfy @ref ECC::FiniteFieldType or @ref ECC::SignedIntType)
+ * @tparam T Vector component type (must satisfy @ref CECCO::FiniteFieldType or @ref CECCO::SignedIntType)
  * @param lhs First vector
  * @param rhs Second vector
  * @return Hamming distance dₕ(lhs, rhs) = wₕ(lhs - rhs)
  *
  * The Hamming distance is the number of positions where two vectors differ.
  *
- * @note Only for types fulfilling ECC::ReliablyComparableType.
+ * @note Only for types fulfilling CECCO::ReliablyComparableType.
  *
  * @throws std::invalid_argument if vectors have different lengths
  */
@@ -1885,7 +1885,7 @@ size_t dH(Vector<T>&& lhs, Vector<T>&& rhs) {
 /**
  * @brief Compute burst length of a vector
  *
- * @tparam T Vector component type (must satisfy @ref ECC::FiniteFieldType or @ref ECC::SignedIntType)
+ * @tparam T Vector component type (must satisfy @ref CECCO::FiniteFieldType or @ref CECCO::SignedIntType)
  * @param v Vector to analyze
  * @return Length of burst
  *
@@ -1904,7 +1904,7 @@ constexpr size_t burst_length(const Vector<T>& v) noexcept
 /**
  * @brief Compute cyclic burst length of a vector
  *
- * @tparam T Vector component type (must satisfy @ref ECC::FiniteFieldType or @ref ECC::SignedIntType)
+ * @tparam T Vector component type (must satisfy @ref CECCO::FiniteFieldType or @ref CECCO::SignedIntType)
  * @param v Vector to analyze
  * @return Length of cyclic burst
  *
@@ -1946,6 +1946,6 @@ inline double dE(const Vector<std::complex<double>>& lhs, const Vector<std::comp
 
 /** @} */
 
-}  // namespace ECC
+}  // namespace CECCO
 
 #endif

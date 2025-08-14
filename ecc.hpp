@@ -7,21 +7,21 @@
  * repository root for full terms and how to request a commercial license.
  */
 
-#ifndef ECC_HPP
-#define ECC_HPP
+#ifndef CECCO_HPP
+#define CECCO_HPP
 
 /**
- * @namespace ECC
+ * @namespace CECCO
  * @brief Provides a framework for error correcting codes
  */
-namespace ECC {
+namespace CECCO {
 /**
- * @namespace ECC::details
+ * @namespace CECCO::details
  * @brief Contains implementation details not to be exposed to the user. Functions and classes here may change without
  * notice.
  */
 namespace details {}
-}  // namespace ECC
+}  // namespace CECCO
 
 #include "codes.hpp"
 // #include "field_concepts_traits.hpp" // transitive through codes.hpp

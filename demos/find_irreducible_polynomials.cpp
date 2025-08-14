@@ -1,9 +1,9 @@
 #include <iostream>
 
-// Use ECC library, compile with -std=c++20 -I../
+// Use CECCO library, compile with -std=c++20 -I../
 // Adapt -Ipath_to_hpp_files if necessary, append -O3 for performance
 #include "ecc.hpp"
-using namespace ECC;
+using namespace CECCO;
 
 int main(void) {
     // Start with any finite field (use only one of the following three lines)
@@ -21,7 +21,7 @@ int main(void) {
 
     /*
      * Use coefficient vector in order to construct field with |F|^m elements (as a superfield of F), cf. demo
-     * field_extensions.cpp. See https://christiansenger.github.io/ecc/classECC_1_1Ext.html for documentation.
+     * field_extensions.cpp. See https://christiansenger.github.io/ecc/classCECCO_1_1Ext.html for documentation.
      */
 
     return 0;

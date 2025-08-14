@@ -59,9 +59,9 @@
  * @note All blocks are designed for finite field elements, complex numbers, and floating-point types.
  *       Channel models provide both element-wise and vector/matrix processing capabilities.
  *
- * @see Finite field concepts in @ref ECC::FiniteFieldType for field element processing
- * @see Vector/Matrix classes in @ref ECC::Vector, @ref ECC::Matrix for container operations
- * @see Field relationships in @ref ECC::SubfieldOf, @ref ECC::ExtensionOf for DEMUX/MUX usage
+ * @see Finite field concepts in @ref CECCO::FiniteFieldType for field element processing
+ * @see Vector/Matrix classes in @ref CECCO::Vector, @ref CECCO::Matrix for container operations
+ * @see Field relationships in @ref CECCO::SubfieldOf, @ref CECCO::ExtensionOf for DEMUX/MUX usage
  */
 
 #ifndef BLOCKS_HPP
@@ -76,7 +76,7 @@
 // #include "field_concepts_traits.hpp" // transitive through vectors.hpp
 // #include "matrices.hpp" // transitive through vectors.hpp
 
-namespace ECC {
+namespace CECCO {
 
 namespace details {
 
@@ -202,7 +202,7 @@ using LLRProcessor = BlockProcessor<T, std::complex<double>, double>;
  * @note For binary fields (F₂), this implements the Binary Symmetric Channel (BSC).
  *       For larger fields (F_q), this implements the q-ary Symmetric Channel.
  *
- * @see @ref ECC::BSC for convenient BSC alias (equivalent to DMC<Fp<2>>)
+ * @see @ref CECCO::BSC for convenient BSC alias (equivalent to DMC<Fp<2>>)
  */
 template <FiniteFieldType T>
 class DMC : public details::SameTypeProcessor<DMC<T>, T> {
@@ -294,8 +294,8 @@ using BSC = DMC<Fp<2>>;
  * @note This encoder assumes symbol duration Δ = 1 for energy calculations.
  *       For different symbol durations, scale energy results accordingly.
  *
- * @see @ref ECC::BPSKEncoder for convenient BPSK configuration
- * @see @ref ECC::AWGN for compatible channel model with accurate Pe calculations
+ * @see @ref CECCO::BPSKEncoder for convenient BPSK configuration
+ * @see @ref CECCO::AWGN for compatible channel model with accurate Pe calculations
  */
 class NRZEncoder : public details::EncoderProcessor<NRZEncoder> {
    public:
@@ -394,8 +394,8 @@ class NRZEncoder : public details::EncoderProcessor<NRZEncoder> {
  * double theoretical_pe = chan.get_pe();
  * @endcode
  *
- * @see @ref ECC::NRZEncoder for general constellation configuration
- * @see @ref ECC::BPSKDecoder for corresponding demodulator
+ * @see @ref CECCO::NRZEncoder for general constellation configuration
+ * @see @ref CECCO::BPSKDecoder for corresponding demodulator
  */
 class BPSKEncoder : public NRZEncoder {
    public:
@@ -447,8 +447,8 @@ class BPSKEncoder : public NRZEncoder {
  * @note The channel assumes complex-valued input symbols and adds independent
  *       Gaussian noise to both real and imaginary components.
  *
- * @see @ref ECC::NRZEncoder, @ref ECC::BPSKEncoder for compatible modulation schemes
- * @see @ref ECC::LLRCalculator for soft-decision demodulation using this channel
+ * @see @ref CECCO::NRZEncoder, @ref CECCO::BPSKEncoder for compatible modulation schemes
+ * @see @ref CECCO::LLRCalculator for soft-decision demodulation using this channel
  */
 class AWGN : public details::ChannelProcessor<AWGN> {
    public:
@@ -576,9 +576,9 @@ double AWGN::calculate_pe(double Eb, double constellation_distance, double EbNod
  * @note The decoder ignores the imaginary part of received symbols, making it
  *       suitable for real-valued modulation schemes like NRZ and BPSK.
  *
- * @see @ref ECC::NRZEncoder for the corresponding modulator
- * @see @ref ECC::BPSKDecoder for optimized BPSK demodulation
- * @see @ref ECC::LLRCalculator for soft-decision demodulation
+ * @see @ref CECCO::NRZEncoder for the corresponding modulator
+ * @see @ref CECCO::BPSKDecoder for optimized BPSK demodulation
+ * @see @ref CECCO::LLRCalculator for soft-decision demodulation
  */
 class NRZDecoder : public details::DecoderProcessor<NRZDecoder> {
    public:
@@ -645,8 +645,8 @@ class NRZDecoder : public details::DecoderProcessor<NRZDecoder> {
  * c >> enc >> chan >> dec >> c_est;
  * @endcode
  *
- * @see @ref ECC::BPSKEncoder for the corresponding BPSK modulator
- * @see @ref ECC::NRZDecoder for general NRZ demodulation
+ * @see @ref CECCO::BPSKEncoder for the corresponding BPSK modulator
+ * @see @ref CECCO::NRZDecoder for general NRZ demodulation
  */
 class BPSKDecoder : public NRZDecoder {
    public:
@@ -706,8 +706,8 @@ class BPSKDecoder : public NRZDecoder {
  * @note LLR calculation assumes perfect knowledge of channel parameters (noise variance)
  *       and constellation parameters from the encoder (constructor takes both as parameters).
  *
- * @see @ref ECC::NRZEncoder, @ref ECC::BPSKEncoder for compatible modulation schemes
- * @see @ref ECC::AWGN for noise variance estimation used in LLR computation
+ * @see @ref CECCO::NRZEncoder, @ref CECCO::BPSKEncoder for compatible modulation schemes
+ * @see @ref CECCO::AWGN for noise variance estimation used in LLR computation
  */
 class LLRCalculator : public details::LLRProcessor<LLRCalculator> {
    public:
@@ -797,8 +797,8 @@ class LLRCalculator : public details::LLRProcessor<LLRCalculator> {
  * @note The DEMUX operation is the inverse of MUX for compatible field relationships.
  *       Use with MUX to perform round-trip conversions: E → Vector&lt;S&gt; → E.
  *
- * @see @ref ECC::MUX for the inverse operation (subfield to extension field)
- * @see Field relationships in @ref ECC::SubfieldOf concept
+ * @see @ref CECCO::MUX for the inverse operation (subfield to extension field)
+ * @see Field relationships in @ref CECCO::SubfieldOf concept
  */
 template <FiniteFieldType E, FiniteFieldType S>
     requires(SubfieldOf<E, S>)
@@ -909,8 +909,8 @@ Matrix<S> DEMUX<E, S>::operator()(const Vector<E>& in) noexcept {
  * @note MUX is the exact inverse of DEMUX for compatible field relationships.
  *       Round-trip conversions preserve all field element values exactly.
  *
- * @see @ref ECC::DEMUX for the inverse operation (extension field to subfield)
- * @see Field relationships in @ref ECC::ExtensionOf concept
+ * @see @ref CECCO::DEMUX for the inverse operation (extension field to subfield)
+ * @see Field relationships in @ref CECCO::ExtensionOf concept
  */
 template <FiniteFieldType S, FiniteFieldType E>
     requires(ExtensionOf<S, E>)
@@ -1032,6 +1032,6 @@ RHS& operator>>(LHS&& lhs, RHS& dst) {
     return dst;
 }
 
-}  // namespace ECC
+}  // namespace CECCO
 
 #endif

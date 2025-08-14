@@ -17,14 +17,14 @@
  * This header file provides a complete implementation of matrix arithmetic and mandy linear algebra
  * operations. It supports:
  *
- * - **details::Generic matrix operations**: Over any @ref ECC::ComponentType including finite fields,
+ * - **details::Generic matrix operations**: Over any @ref CECCO::ComponentType including finite fields,
  *   floating-point numbers, complex numbers, and signed integers
  * - **Specialized matrix types**: details::Zero, details::Identity, details::Diagonal, details::Vandermonde, and
  * details::Toeplitz matrices with optimized operations
  * - **Optimized linear algebra operations**: REF/RREF with binary field optimizations, cached rank computation, 
  *   determinant, nullspace, characteristic polynomial, eigenvalue computation, and matrix inversion
  * - **Cross-field operations**: Safe conversions between matrices over related fields using
- *   @ref ECC::SubfieldOf, @ref ECC::ExtensionOf, and @ref ECC::largest_common_subfield_t
+ *   @ref CECCO::SubfieldOf, @ref CECCO::ExtensionOf, and @ref CECCO::largest_common_subfield_t
  * - **Vector integration**: Bidirectional conversion Matrix -> Vector -> Matrix
  * - **Performance optimizations**: STL algorithms, move semantics, and type-specific optimizations
  *
@@ -82,8 +82,8 @@
  * - **Move semantics**: Optimal performance for temporary matrix operations
  * - **STL integration**: Uses standard algorithms for optimal compiler optimization
  * - **Type safety**: C++20 concepts prevent invalid operations:
- *   - @ref ECC::ComponentType Ensures valid component types
- *   - @ref ECC::largest_common_subfield_t Enables generalized cross-field conversions
+ *   - @ref CECCO::ComponentType Ensures valid component types
+ *   - @ref CECCO::largest_common_subfield_t Enables generalized cross-field conversions
  *
  * @see @ref fields.hpp for fields and field arithmetic
  * @see @ref vectors.hpp for vectors and associated operations
@@ -107,7 +107,7 @@
 // #include "helpers.hpp" // transitive through field_concepts_traits.hpp
 // #include "InfInt.hpp" // transitive through field_concepts_traits.hpp
 
-namespace ECC {
+namespace CECCO {
 
 namespace details {
 
@@ -177,13 +177,13 @@ std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept;
 
 /**
  * @class Matrix
- * @brief Generic matrix class for error control coding (ECC) and finite field applications
+ * @brief Generic matrix class for error control coding (CECCO) and finite field applications
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType concept. Supported types include:
- *   - **Finite field types**: @ref ECC::Fp, @ref ECC::Ext satisfying @ref ECC::FiniteFieldType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType concept. Supported types include:
+ *   - **Finite field types**: @ref CECCO::Fp, @ref CECCO::Ext satisfying @ref CECCO::FiniteFieldType
  *   - **Floating-point type**: `double`
  *   - **Complex type**: `std::complex<double>`
- *   - **Signed integer types**: Signed integer types including `InfInt` satisfying @ref ECC::SignedIntType
+ *   - **Signed integer types**: Signed integer types including `InfInt` satisfying @ref CECCO::SignedIntType
  *
  * The Matrix class provides a linear algebra framework for error control
  * coding applications. It supports both dense and structured matrix types with automatic
@@ -192,7 +192,7 @@ std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept;
  * @section Implementation_Notes
  *
  * - **Cross-field compatibility**: Safe conversions between related field types using concepts
- * - **ECC-specific operations**: Hamming weight, Hamming distance, burst length calculations
+ * - **CECCO-specific operations**: Hamming weight, Hamming distance, burst length calculations
  * - **Type safety**: Compile-time validation of field relationships and operations
  *
  * - **Automatic type optimization**: Recognizes and optimizes for special matrix structures
@@ -248,10 +248,10 @@ std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept;
  *
  * @section Template Constraints
  *
- * - **Basic operations**: Available for all @ref ECC::ComponentType
- * - **Field operations**: RREF, inversion, nullspace require @ref ECC::FieldType
- * - **Cross-field operations**: Require same characteristic using @ref ECC::largest_common_subfield_t
- * - **Finite field specific**: Some operations require @ref ECC::FiniteFieldType
+ * - **Basic operations**: Available for all @ref CECCO::ComponentType
+ * - **Field operations**: RREF, inversion, nullspace require @ref CECCO::FieldType
+ * - **Cross-field operations**: Require same characteristic using @ref CECCO::largest_common_subfield_t
+ * - **Finite field specific**: Some operations require @ref CECCO::FiniteFieldType
  *
  * @warning Matrix operations assume compatible dimensions. Operations on incompatible
  *          matrices throw `std::invalid_argument` exceptions.
@@ -259,11 +259,11 @@ std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept;
  * @note The class maintains strong exception safety guarantees. Failed operations
  *       leave the matrix in its original state.
  *
- * @see @ref ECC::Vector for vector operations and matrix-vector conversions
- * @see @ref ECC::details::matrix_type_t for matrix type optimizations
- * @see @ref ECC::ComponentType for supported component types
- * @see @ref ECC::FieldType, @ref ECC::FiniteFieldType for field operation constraints
- * @see @ref ECC::largest_common_subfield_t for cross-field operation requirements
+ * @see @ref CECCO::Vector for vector operations and matrix-vector conversions
+ * @see @ref CECCO::details::matrix_type_t for matrix type optimizations
+ * @see @ref CECCO::ComponentType for supported component types
+ * @see @ref CECCO::FieldType, @ref CECCO::FiniteFieldType for field operation constraints
+ * @see @ref CECCO::largest_common_subfield_t for cross-field operation requirements
  */
 template <ComponentType T>
 class Matrix {
@@ -618,7 +618,7 @@ class Matrix {
      *
      * Counts the number of elements that are not equal to T(0).
      *
-     * @note Only for types fulfilling ECC::ReliablyComparableType.
+     * @note Only for types fulfilling CECCO::ReliablyComparableType.
      */
     constexpr size_t wH() const noexcept
         requires ReliablyComparableType<T>;
@@ -3395,7 +3395,7 @@ Vector<S> as_vector(const Matrix<T>& M) {
  * @brief Matrix equality comparison operator
  * @ingroup matrix_arithmetic
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param lhs Left-hand side matrix
  * @param rhs Right-hand side matrix
  * @return true if matrices are equal, false otherwise
@@ -3459,7 +3459,7 @@ constexpr bool operator==(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept
  * @brief Matrix inequality comparison operator
  * @ingroup matrix_arithmetic
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param lhs Left-hand side matrix
  * @param rhs Right-hand side matrix
  * @return true if matrices are not equal, false otherwise
@@ -3478,7 +3478,7 @@ constexpr bool operator!=(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept
  * @brief Matrix output stream operator
  * @ingroup matrix_utilities
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param os Output stream to write to
  * @param rhs Matrix to output
  * @return Reference to the output stream
@@ -3549,7 +3549,7 @@ std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept {
  * @brief Create a zero matrix of specified dimensions
  * @ingroup matrix_factories
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param m Number of rows
  * @param n Number of columns
  * @return m×n matrix with all elements equal to T(0)
@@ -3571,7 +3571,7 @@ constexpr Matrix<T> ZeroMatrix(size_t m, size_t n) {
  * @brief Create an identity matrix of specified size
  * @ingroup matrix_factories
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param m Dimension of the square identity matrix
  * @return m×m identity matrix with ones on diagonal and zeros elsewhere
  *
@@ -3597,7 +3597,7 @@ constexpr Matrix<T> IdentityMatrix(size_t m) {
  * @brief Create an exchange matrix (anti-diagonal identity matrix)
  * @ingroup matrix_factories
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param m Dimension of the square exchange matrix
  * @return m×m exchange matrix with ones on anti-diagonal and zeros elsewhere
  *
@@ -3621,7 +3621,7 @@ constexpr Matrix<T> ExchangeMatrix(size_t m) {
  * @brief Create a diagonal matrix from a vector
  * @ingroup matrix_factories
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param v Vector containing the diagonal elements
  * @return n×n diagonal matrix with v[i] on position (i,i)
  *
@@ -3649,7 +3649,7 @@ constexpr Matrix<T> DiagonalMatrix(const Vector<T>& v) {
  * @brief Create a Toeplitz matrix from a vector
  * @ingroup matrix_factories
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param v Vector containing the values for diagonals (length must be m+n-1)
  * @param m Number of rows
  * @param n Number of columns
@@ -3701,7 +3701,7 @@ constexpr Matrix<T> ToeplitzMatrix(const Vector<T>& v, size_t m, size_t n) {
  * @brief Create a Hankel matrix from a vector
  * @ingroup matrix_factories
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param v Vector containing the anti-diagonal values (length must be m+n-1)
  * @param m Number of rows
  * @param n Number of columns
@@ -3727,7 +3727,7 @@ constexpr Matrix<T> HankelMatrix(const Vector<T>& v, size_t m, size_t n) {
  * @brief Create a Vandermonde matrix from evaluation points
  * @ingroup matrix_factories
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param v Vector of evaluation points (must have pairwise distinct elements)
  * @param m Number of rows (degree of polynomials)
  * @return m×n Vandermonde matrix where element (i,j) = v[j]^i
@@ -3790,7 +3790,7 @@ constexpr Matrix<T> VandermondeMatrix(const Vector<T>& v, size_t m) {
  * @brief Create an upper shift matrix (superdiagonal matrix)
  * @ingroup matrix_factories
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param m Dimension of the square shift matrix
  * @return m×m upper shift matrix with ones on the superdiagonal
  *
@@ -3817,7 +3817,7 @@ constexpr Matrix<T> UpperShiftMatrix(size_t m) {
  * @brief Create a lower shift matrix (subdiagonal matrix)
  * @ingroup matrix_factories
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param m Dimension of the square shift matrix
  * @return m×m lower shift matrix with ones on the subdiagonal
  *
@@ -3839,7 +3839,7 @@ constexpr Matrix<T> LowerShiftMatrix(size_t m) {
  * @brief Create a companion matrix for a monic polynomial
  * @ingroup matrix_factories
  *
- * @tparam T Component type satisfying @ref ECC::ComponentType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param poly Monic polynomial p(x) = x^n + a_{n-1}x^{n-1} + ... + a_1x + a_0
  * @return n×n companion matrix with characteristic polynomial p(x)
  *
@@ -3867,6 +3867,6 @@ constexpr Matrix<T> CompanionMatrix(const Polynomial<T>& poly) {
     return res;
 }
 
-}  // namespace ECC
+}  // namespace CECCO
 
 #endif

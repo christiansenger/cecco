@@ -1,5 +1,5 @@
-PROJECT_NAME           = "ECC"
-PROJECT_BRIEF          = "A C++ library for research in error control coding and simulations: (finite) fields, linear algebra, polynomials, codes - Christian Senger <senger@inue.uni-stuttgart.de>"
+PROJECT_NAME           = "C(++)ECCO"
+PROJECT_BRIEF          = "C++ Error Control Coding Orrery: a header-only library for ECC simulations and experiments, modeling complete coding systems across arbitrary finite fields and complex inter-field relationships - Christian Senger <senger@inue.uni-stuttgart.de>"
 RECURSIVE              = YES
 FILE_PATTERNS          = *.hpp
 SOURCE_BROWSER         = YES

@@ -1,9 +1,9 @@
 #include <iostream>
 
-// Use ECC library, compile with -std=c++20 -I../
+// Use CECCO library, compile with -std=c++20 -I../
 // Adapt -Ipath_to_hpp_files if necessary, append -O3 for performance
 #include "ecc.hpp"
-using namespace ECC;
+using namespace CECCO;
 
 int main(void) {
     // Make prime field available under convenient name (any prime is allowed, here: p = 2):
@@ -47,7 +47,7 @@ int main(void) {
 
     /*
      * Can also query characteristic of field, get a generator of the multiplicative group, etc.
-     * See https://christiansenger.github.io/ecc/classECC_1_1Fp.html for documentation
+     * See https://christiansenger.github.io/ecc/classCECCO_1_1Fp.html for documentation
      *
      * Prime fields with three, five, seven, etc. elements work in the same manner:
      * using F3 = Fp<3>;
