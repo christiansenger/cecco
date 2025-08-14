@@ -31,8 +31,8 @@
  * @warning A field tower in the sense of this library is a sequence of finite fields that are constructed from each
  * other as a sequence of extensions. If for example 𝔽_16 is constructed directly from 𝔽_2, then 𝔽_4 is not an element
  * of the tower (while it certainly is in the mathematical sense). If however we also create 𝔽_16 as an extension of 𝔽_4
- and 𝔽_4 as an extension of 𝔽_2 then we can merge the two towers into one by creating an isomorphic 𝔽_4 (Iso) out of the
- two constructed 𝔽_4. The isomorphic 𝔽_4 then acts as the intersection between the two field towers.
+ and 𝔽_4 as an extension of 𝔽_2 then we can merge the two towers into one by creating an isomorphic 𝔽_16 (Iso) out of the
+ two constructed 𝔽_16. The isomorphic 𝔽_16 then acts as the intersection between the two field towers.
  *
  * A **finite field** 𝔽_q with q = p^m elements (p prime, m ≥ 1) is constructed as:
  * - **Prime field**: 𝔽_p ≅ ℤ_p = {0, 1, ..., p-1} with arithmetic mod p (using Fp&lt;p&gt;)
