@@ -1,6 +1,8 @@
 # C(++)ECCO
 C++ Error Control Coding Orrery: a header-only library for ECC simulations and experiments, modeling complete coding systems across arbitrary finite fields and complex inter-field relationships.
 
+![Project Logo](.github/assets/cecco.png)
+
 Check the the demos folder to get started. Detailed Doxygen documentation is available <a href="https://christiansenger.github.io/cecco/">here</a>.
 
 <a href="https://doi.org/10.5281/zenodo.15685869"><img src="https://zenodo.org/badge/1003774077.svg" alt="DOI"></a>
