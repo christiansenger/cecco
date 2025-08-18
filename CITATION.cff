@@ -6,11 +6,11 @@ authors:
   orcid: "https://orcid.org/0009-0002-2122-8840"
   email: "senger@inue.uni-stuttgart.de"
 cff-version: 1.2.0
-date-released: 2025-08-14
+date-released: 2025-08-18
 doi: 10.5281/zenodo.15685869
 license-url: "https://github.com/christiansenger/cecco/blob/main/LICENSE"
 message: "If you use this software, please cite it using the metadata from this file."
-repository-code: "https://github.com/christiansenger/cecco/tree/v2.2.0"
+repository-code: "https://github.com/christiansenger/cecco/tree/v2.3.0"
 title: "C(++)ECCO --- C++ Error Control Coding Orrery"
 type: software
-version: v2.2.0
+version: v2.3.0
