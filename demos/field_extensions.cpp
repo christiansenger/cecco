@@ -252,14 +252,14 @@ int main(void) {
     using F729 = Iso<F729_a, F729_b, F729_c>;
 
     auto s = F9().randomize();
-    std::cout << "k: " << s << std::endl;
+    std::cout << "s: " << s << std::endl;
     F729 t(s);
     std::cout << "t: " << t << std::endl;
     // In general: t will "look" different from s but still the following always succeeds:
-    std::cout << "Checking if s == F8(t): s=" << s << ", t=" << t << std::endl;
-    // F9(k) is a "down-cast" from F729 to its subfield F9
+    std::cout << "Checking if s == F9(t): s=" << s << ", t=" << t << std::endl;
+    // F9(t) is a "down-cast" from F729 to its subfield F9
     assert(s == F9(t));
-
+    
     auto u = F729().randomize();
     std::cout << u << " (from F729) as vector with components from subfield F27: " << u.as_vector<F27>() << std::endl;
     auto v = F729().randomize();

@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0
+ * @version 2.1.0
  * @date 2025
  *
  * @copyright
@@ -97,7 +97,7 @@ Polynomial<T> ZeroPolynomial();
 
 /**
  * @class Polynomial
- * @brief Generic univariate polynmial class for error control coding (CECCO) and finite field applications 
+ * @brief Generic univariate polynmial class for error control coding (CECCO) and finite field applications
  *
  * @tparam T Coefficient type satisfying @ref CECCO::ComponentType concept. Supported types include:
  *   - **Finite field types**: @ref CECCO::Fp, @ref CECCO::Ext, also satisfying concept @ref CECCO::FiniteFieldType
@@ -1748,6 +1748,191 @@ Polynomial<T> find_irreducible(size_t degree) {
     return res;
 }
 
+template <uint16_t p, size_t m>
+constexpr Vector<Fp<p>> ConwayCoefficients() {
+    if constexpr (p == 2) {
+        if constexpr (m == 1)
+            return {1, 1};
+        else if constexpr (m == 2)
+            return {1, 1, 1};
+        else if constexpr (m == 3)
+            return {1, 1, 0, 1};
+        else if constexpr (m == 4)
+            return {1, 1, 0, 0, 1};
+        else if constexpr (m == 5)
+            return {1, 0, 1, 0, 0, 1};
+        else if constexpr (m == 6)
+            return {1, 1, 0, 1, 1, 0, 1};
+        else if constexpr (m == 7)
+            return {1, 1, 0, 0, 0, 0, 0, 1};
+        else if constexpr (m == 8)
+            return {1, 0, 1, 1, 1, 0, 0, 0, 1};
+        else if constexpr (m == 9)
+            return {1, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        else if constexpr (m == 10)
+            return {1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1};
+        else if constexpr (m == 11)
+            return {1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+        else if constexpr (m == 12)
+            return {1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1};
+        else if constexpr (m == 13)
+            return {1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+    } else if constexpr (p == 3) {
+        if constexpr (m == 1)
+            return {1, 1};
+        else if constexpr (m == 2)
+            return {2, 2, 1};
+        else if constexpr (m == 3)
+            return {1, 2, 0, 1};
+        else if constexpr (m == 4)
+            return {2, 0, 0, 2, 1};
+        else if constexpr (m == 5)
+            return {1, 2, 0, 0, 0, 1};
+        else if constexpr (m == 6)
+            return {2, 2, 1, 0, 2, 0, 1};
+        else if constexpr (m == 7)
+            return {1, 0, 2, 0, 0, 0, 0, 1};
+        else if constexpr (m == 8)
+            return {2, 2, 2, 0, 1, 2, 0, 0, 1};
+    } else if constexpr (p == 5) {
+        if constexpr (m == 1)
+            return {3, 1};
+        else if constexpr (m == 2)
+            return {2, 4, 1};
+        else if constexpr (m == 3)
+            return {3, 3, 0, 1};
+        else if constexpr (m == 4)
+            return {2, 4, 4, 0, 1};
+        else if constexpr (m == 5)
+            return {3, 4, 0, 0, 0, 1};
+    } else if constexpr (p == 7) {
+        if constexpr (m == 1)
+            return {4, 1};
+        else if constexpr (m == 2)
+            return {3, 6, 1};
+        else if constexpr (m == 3)
+            return {4, 0, 6, 1};
+        else if constexpr (m == 4)
+            return {3, 4, 5, 0, 1};
+    } else if constexpr (p == 11) {
+        if constexpr (m == 1)
+            return {9, 1};
+        else if constexpr (m == 2)
+            return {2, 7, 1};
+        else if constexpr (m == 3)
+            return {9, 2, 0, 1};
+        else if constexpr (m == 4)
+            return {3, 4, 5, 0, 1};
+    } else if constexpr (p == 13) {
+        if constexpr (m == 1)
+            return {11, 1};
+        else if constexpr (m == 2)
+            return {2, 12, 1};
+        else if constexpr (m == 3)
+            return {11, 2, 0, 1};
+    } else if constexpr (p == 17) {
+        if constexpr (m == 1)
+            return {14, 1};
+        else if constexpr (m == 2)
+            return {3, 16, 1};
+        else if constexpr (m == 3)
+            return {14, 1, 0, 1};
+    } else if constexpr (p == 19) {
+        if constexpr (m == 1)
+            return {17, 1};
+        else if constexpr (m == 2)
+            return {2, 18, 1};
+        else if constexpr (m == 3)
+            return {17, 4, 0, 1};
+    } else if constexpr (p == 23) {
+        if constexpr (m == 1)
+            return {18, 1};
+        else if constexpr (m == 2)
+            return {5, 21, 1};
+    } else if constexpr (p == 29) {
+        if constexpr (m == 1)
+            return {27, 1};
+        else if constexpr (m == 2)
+            return {2, 24, 1};
+    } else if constexpr (p == 31) {
+        if constexpr (m == 1)
+            return {28, 1};
+        else if constexpr (m == 2)
+            return {3, 29, 1};
+    } else if constexpr (p == 37) {
+        if constexpr (m == 1)
+            return {35, 1};
+        else if constexpr (m == 2)
+            return {2, 33, 1};
+    } else if constexpr (p == 43) {
+        if constexpr (m == 1)
+            return {40, 1};
+        else if constexpr (m == 2)
+            return {3, 42, 1};
+    } else if constexpr (p == 47) {
+        if constexpr (m == 1)
+            return {42, 1};
+        else if constexpr (m == 2)
+            return {5, 45, 1};
+    } else if constexpr (p == 53) {
+        if constexpr (m == 1)
+            return {51, 1};
+        else if constexpr (m == 2)
+            return {2, 49, 1};
+    } else if constexpr (p == 59) {
+        if constexpr (m == 1)
+            return {57, 1};
+        else if constexpr (m == 2)
+            return {2, 58, 1};
+    } else if constexpr (p == 61) {
+        if constexpr (m == 1)
+            return {59, 1};
+        else if constexpr (m == 2)
+            return {2, 60, 1};
+    } else if constexpr (p == 67) {
+        if constexpr (m == 1)
+            return {65, 1};
+        else if constexpr (m == 2)
+            return {2, 63, 1};
+    } else if constexpr (p == 71) {
+        if constexpr (m == 1)
+            return {64, 1};
+        else if constexpr (m == 2)
+            return {7, 69, 1};
+    } else if constexpr (p == 73) {
+        if constexpr (m == 1)
+            return {68, 1};
+        else if constexpr (m == 2)
+            return {5, 70, 1};
+    } else if constexpr (p == 79) {
+        if constexpr (m == 1)
+            return {76, 1};
+        else if constexpr (m == 2)
+            return {3, 78, 1};
+    } else if constexpr (p == 83) {
+        if constexpr (m == 1)
+            return {81, 1};
+        else if constexpr (m == 2)
+            return {2, 82, 1};
+    } else if constexpr (p == 89) {
+        if constexpr (m == 1)
+            return {86, 1};
+        else if constexpr (m == 2)
+            return {3, 82, 1};
+    } else if constexpr (p == 97) {
+        if constexpr (m == 1)
+            return {92, 1};
+        else if constexpr (m == 2)
+            return {5, 96, 1};
+    }
+    // ... support all fields with less than 10k elements
+    return Vector<Fp<p>>();
+}
+
+template <uint16_t p, size_t m>
+constexpr Polynomial<Fp<p>> ConwayPolynomial() {
+    return Polynomial<Fp<p>>(ConwayCoefficients<p, m>());
+}
 
 }  // namespace CECCO
 

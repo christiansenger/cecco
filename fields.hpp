@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.1
+ * @version 2.2.0
  * @date 2025
  *
  * @copyright
@@ -31,8 +31,8 @@
  * @warning A field tower in the sense of this library is a sequence of finite fields that are constructed from each
  * other as a sequence of extensions. If for example 𝔽_16 is constructed directly from 𝔽_2, then 𝔽_4 is not an element
  * of the tower (while it certainly is in the mathematical sense). If however we also create 𝔽_16 as an extension of 𝔽_4
- and 𝔽_4 as an extension of 𝔽_2 then we can merge the two towers into one by creating an isomorphic 𝔽_16 (Iso) out of the
- two constructed 𝔽_16. The isomorphic 𝔽_16 then acts as the intersection between the two field towers.
+ and 𝔽_4 as an extension of 𝔽_2 then we can merge the two towers into one by creating an isomorphic 𝔽_16 (Iso) out of
+ the two constructed 𝔽_16. The isomorphic 𝔽_16 then acts as the intersection between the two field towers.
  *
  * A **finite field** 𝔽_q with q = p^m elements (p prime, m ≥ 1) is constructed as:
  * - **Prime field**: 𝔽_p ≅ ℤ_p = {0, 1, ..., p-1} with arithmetic mod p (using Fp&lt;p&gt;)
@@ -2025,53 +2025,11 @@ class Embedding {
      * searches through all component fields (MAIN and OTHERS) to find the one containing
      * SUBFIELD as a subfield, using the same pattern as cross-field constructors.
      *
-     * @note Time complexity: 
+     * @note Time complexity:
      *   - Regular fields: O(|SUBFIELD|) due to linear search through embedding map
      *   - Iso types: O(k * |SUBFIELD|) where k is the number of components checked
      */
-    constexpr SUBFIELD extract(const SUPERFIELD& super) const {
-        if constexpr (details::iso_info<SUPERFIELD>::is_iso) {
-            // SUPERFIELD is an Iso type - find the correct component containing SUBFIELD
-
-            // Try to extract from MAIN first...
-            using MainType = typename details::iso_info<SUPERFIELD>::main_type;
-            if constexpr (SubfieldOf<MainType, SUBFIELD>) {
-                auto embedding = Embedding<SUBFIELD, MainType>();
-                return embedding.extract(super.main());
-            } else {
-                // ... then extract OTHERS from SUPERFIELD
-                using OthersTuple = typename details::iso_info<SUPERFIELD>::others_tuple;
-                
-                SUBFIELD result{};
-                bool extraction_done = false;
-                auto try_extracting = [&]<typename OtherType>() {
-                    if constexpr (SubfieldOf<OtherType, SUBFIELD>) {
-                        if (!extraction_done) {
-                            auto embedding = Embedding<SUBFIELD, OtherType>();
-                            OtherType other_repr(super);
-                            result = embedding.extract(other_repr);
-                            extraction_done = true;
-                        }
-                    }
-                };
-                
-                // Apply the lambda to each type in the tuple
-                std::apply([&]<typename... Types>(Types...) {
-                    (try_extracting.template operator()<Types>(), ...);
-                }, OthersTuple{});
-                
-                if (!extraction_done) {
-                    throw std::invalid_argument("subfield not found in any Iso component");
-                }
-                return result;
-            }
-        } else {
-            // SUPERFIELD is a regular field type
-            auto it = std::ranges::find(embedding_map, super.get_label());
-            if (it == embedding_map.end()) throw std::invalid_argument("superfield element is not in subfield");
-            return SUBFIELD(std::distance(embedding_map.begin(), it));
-        }
-    }
+    constexpr SUBFIELD extract(const SUPERFIELD& super) const;
 
    private:
     std::vector<size_t> embedding_map;
@@ -2080,8 +2038,7 @@ class Embedding {
      * @brief Computes the embedding mapping vector
      * @return Vector where embedding_map[i] = φ(SUBFIELD(i)) for i ∈ [0, |SUBFIELD|)
      *
-     * Internal method that performs the actual embedding computation using the same
-     * algorithm as the original compute_subfield_embedding function.
+     * Internal method that performs the actual embedding computation.
      */
     static std::vector<size_t> compute_embedding();
 };
@@ -2103,6 +2060,51 @@ Embedding<SUBFIELD, SUPERFIELD>::Embedding() : embedding_map(SUBFIELD::get_size(
 
 template <FiniteFieldType SUBFIELD, FiniteFieldType SUPERFIELD>
     requires SubfieldOf<SUPERFIELD, SUBFIELD>
+constexpr SUBFIELD Embedding<SUBFIELD, SUPERFIELD>::extract(const SUPERFIELD& super) const {
+    if constexpr (details::iso_info<SUPERFIELD>::is_iso) {
+        // SUPERFIELD is an Iso type - find the correct component containing SUBFIELD
+
+        // Try to extract from MAIN first...
+        using MainType = typename details::iso_info<SUPERFIELD>::main_type;
+        if constexpr (SubfieldOf<MainType, SUBFIELD>) {
+            auto embedding = Embedding<SUBFIELD, MainType>();
+            return embedding.extract(super.main());
+        } else {
+            // ... then extract OTHERS from SUPERFIELD
+            using OthersTuple = typename details::iso_info<SUPERFIELD>::others_tuple;
+
+            SUBFIELD result{};
+            bool extraction_done = false;
+            auto try_extracting = [&]<typename OtherType>() {
+                if constexpr (SubfieldOf<OtherType, SUBFIELD>) {
+                    if (!extraction_done) {
+                        auto embedding = Embedding<SUBFIELD, OtherType>();
+                        OtherType other_repr(super);
+                        result = embedding.extract(other_repr);
+                        extraction_done = true;
+                    }
+                }
+            };
+
+            // Apply the lambda to each type in the tuple
+            std::apply([&]<typename... Types>(Types...) { (try_extracting.template operator()<Types>(), ...); },
+                       OthersTuple{});
+
+            if (!extraction_done) {
+                throw std::invalid_argument("subfield not found in any Iso component");
+            }
+            return result;
+        }
+    } else {
+        // SUPERFIELD is a regular field type
+        auto it = std::ranges::find(embedding_map, super.get_label());
+        if (it == embedding_map.end()) throw std::invalid_argument("superfield element is not in subfield");
+        return SUBFIELD(std::distance(embedding_map.begin(), it));
+    }
+}
+
+template <FiniteFieldType SUBFIELD, FiniteFieldType SUPERFIELD>
+    requires SubfieldOf<SUPERFIELD, SUBFIELD>
 std::vector<size_t> Embedding<SUBFIELD, SUPERFIELD>::compute_embedding() {
     constexpr size_t sub_size = SUBFIELD::get_size();
     constexpr size_t super_size = SUPERFIELD::get_size();
@@ -2113,8 +2115,11 @@ std::vector<size_t> Embedding<SUBFIELD, SUPERFIELD>::compute_embedding() {
     // Identity maps to identity
     embedding[1] = 1;
 
-    // for SUBFIELD = F2: that's it
-    if (sub_size <= 2) return embedding;
+    // Embedding prime field: canonical embedding, no power factor needed
+    if (sub_size == SUPERFIELD::get_characteristic()) {
+        for (size_t i = 2; i < sub_size; ++i) embedding[i] = i;
+        return embedding;
+    }
 
     // Get generators and power factor
     const auto sub_gen = SUBFIELD::get_generator();
@@ -2131,6 +2136,7 @@ std::vector<size_t> Embedding<SUBFIELD, SUPERFIELD>::compute_embedding() {
     auto sub_elem = sub_gen;                     // Start with subfield generator
     auto sup_elem = super_gen_to_power_factor;   // Start with super_gen^power_factor
     for (size_t i = 1; i < sub_size - 1; ++i) {  // Skip 0 and 1, already handled
+                                                 // for (size_t i = sub_size - 1; i < sub_size - 1; ++i) {
         embedding[sub_elem.get_label()] = sup_elem.get_label();
         // Move to next powers
         sub_elem *= sub_gen;
@@ -2176,34 +2182,27 @@ struct IsomorphismPair {
             A alpha;
             B beta;
 
-            do {
-                auto h = find_irreducible<Fp<A::get_p()>>(m);
+            const auto h = ConwayPolynomial<A::get_characteristic(), details::degree_over_prime_v<A>>();
 
-                // Find root of h in A - must be a generator
-                Polynomial<A> h_A(h);
-                for (size_t i = 1; i < size; ++i) {
-                    A a(i);
-                    if (h_A(a) == A(0) && a.get_multiplicative_order() == size - 1) {
-                        alpha = a;
-                        break;
-                    }
+            // Find root of h in A - must be a generator
+            Polynomial<A> h_A(h);
+            for (size_t i = 1; i < size; ++i) {
+                A a(i);
+                if (h_A(a) == A(0) && a.get_multiplicative_order() == size - 1) {
+                    alpha = a;
+                    break;
                 }
+            }
 
-                if (alpha == A(0)) continue;
-
-                // Find root of h in B - must be a generator
-                Polynomial<B> h_B(h);
-                for (size_t i = 1; i < size; ++i) {
-                    B b(i);
-                    if (h_B(b) == B(0)) {
-                        beta = b;
-                        break;
-                    }
+            // Find root of h in B - must be a generator
+            Polynomial<B> h_B(h);
+            for (size_t i = 1; i < size; ++i) {
+                B b(i);
+                if (h_B(b) == B(0)) {
+                    beta = b;
+                    break;
                 }
-
-                if (alpha != A(0) && beta != B(0)) break;
-
-            } while (true);
+            }
 
             // Construct new basis from generator
             std::vector<A> basis(m);
@@ -2405,13 +2404,13 @@ Isomorphism<A, B>::Isomorphism() : iso(A::get_size()) {
         if (A::get_info() < B::get_info()) {
             // A is "smaller" - use details::IsomorphismPair<A,B> forward mapping
             details::IsomorphismPair<A, B>::compute_if_needed();
-            std::copy(details::IsomorphismPair<A, B>::forward_iso.begin(), details::IsomorphismPair<A, B>::forward_iso.end(),
-                      iso.begin());
+            std::copy(details::IsomorphismPair<A, B>::forward_iso.begin(),
+                      details::IsomorphismPair<A, B>::forward_iso.end(), iso.begin());
         } else {
             // B is "smaller" - use details::IsomorphismPair<B,A> reverse mapping
             details::IsomorphismPair<B, A>::compute_if_needed();
-            std::copy(details::IsomorphismPair<B, A>::reverse_iso.begin(), details::IsomorphismPair<B, A>::reverse_iso.end(),
-                      iso.begin());
+            std::copy(details::IsomorphismPair<B, A>::reverse_iso.begin(),
+                      details::IsomorphismPair<B, A>::reverse_iso.end(), iso.begin());
         }
     }
 }
@@ -2762,12 +2761,17 @@ class Fp : public details::Field<Fp<p>> {
     }
 
     static constexpr size_t get_characteristic() noexcept { return p; }
+
     constexpr size_t get_label() const noexcept { return label; }
 
     static constexpr Fp get_generator() noexcept { return p == 2 ? Fp{1} : Fp{2}; }
+
     static constexpr size_t get_p() noexcept { return p; }
+
     static constexpr size_t get_m() noexcept { return 1; }
+
     static constexpr size_t get_q() noexcept { return p; }
+
     static constexpr size_t get_size() noexcept { return p; }
 
     /**
@@ -3724,16 +3728,29 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      */
     static constexpr Polynomial<B> get_modulus() noexcept;
 
-    static constexpr Ext get_generator() noexcept {
-#ifdef USE_PRECOMPILED_LUTS
-        return Ext(g.value);
-#else
-        return Ext(g().value);
-#endif
-    }
+    /**
+     * @brief Get a multiplicative generator for this extension field
+     * @return Multiplicative generator element with order |field| - 1
+     *
+     * Returns a generator element g such that g^(|field|-1) = 1 and g^k ≠ 1 for any
+     * 0 < k < |field|-1. The generator spans the entire multiplicative group of the field.
+     *
+     * **Conway Polynomial Priority**: For fields with ≤10,000 elements, this method first
+     * attempts to find a Conway polynomial root that is also a generator. If successful,
+     * this ensures consistent canonical field representations across different construction
+     * paths. If no Conway generator is available, falls back to a random generator.
+     *
+     * @note The computed generator is cached statically for performance
+     * @see get_conway_generator() for Conway polynomial generator selection
+     */
+    static Ext get_generator() noexcept;
+
     static constexpr size_t get_p() noexcept { return B::get_p(); }
+
     static constexpr size_t get_m() noexcept { return m; }
+
     static constexpr size_t get_q() noexcept { return Q; }
+
     static constexpr size_t get_size() noexcept { return Q; }
 
     /**
@@ -3864,6 +3881,25 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
 
    private:
     label_t label;  ///< Element label in {0, 1, ..., Q - 1}
+
+    /**
+     * @brief Attempt to find a Conway polynomial root that is also a generator
+     * @return Conway generator if available, std::nullopt otherwise
+     *
+     * This method searches for a field element that is both a root of the Conway polynomial
+     * for this field and a multiplicative generator. Conway polynomials provide canonical
+     * field representations that ensure consistent embeddings across different construction paths.
+     *
+     * **Algorithm**:
+     * 1. Retrieves the Conway polynomial for this field's size and characteristic
+     * 2. Converts the Conway polynomial to a polynomial over this field
+     * 3. Searches through all elements with multiplicative order |field|-1 (generators)
+     * 4. Returns the first generator that is also a Conway polynomial root
+     *
+     * @note Only available for fields with ≤10,000 elements where Conway polynomials are provided
+     * @note Used internally by get_generator() to prioritize Conway roots for canonical representations
+     */
+    static std::optional<Ext> get_conway_generator() noexcept;
 
     /// @brief Generator element storage
     struct Gen {
@@ -4051,31 +4087,49 @@ Ext<B, modulus, mode>::Ext(const Ext<S, ext_modulus, ext_mode>& other) {
     static_assert(Ext<B, modulus, mode>::get_characteristic() == Ext<S, ext_modulus, ext_mode>::get_characteristic(),
                   "trying to convert between fields with different characteristic");
 
+    using IN = Ext<S, ext_modulus, ext_mode>;
+    using OUT = Ext;
+#ifdef DEBUG_FIELDS_HPP
+    std::cout << std::endl << "^^^^^^^^^^^^^ Ext -> Ext" << std::endl;
+    std::cout << "IN: " << IN::get_info() << std::endl;
+    std::cout << "OUT: " << OUT::get_info() << std::endl;
+#endif
+
     // Note: same-field case handled by simple copy constructor
-    if constexpr (Isomorphic<Ext, Ext<S, ext_modulus, ext_mode>>) {
+    if constexpr (Isomorphic<OUT, IN>) {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 1 (isomorphic)" << std::endl;
+#endif
         // Isomorphic fields - use isomorphism for conversion
-        auto iso = Isomorphism<Ext<S, ext_modulus, ext_mode>, Ext>();
-        *this = iso(other);
-    } else if constexpr (SubfieldOf<Ext<B, modulus, mode>, Ext<S, ext_modulus, ext_mode>>) {
+        auto iso = Isomorphism<IN, OUT>();
+        OUT result = iso(other);
+        label = result.get_label();
+    } else if constexpr (SubfieldOf<OUT, IN>) {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 2 (upcast)" << std::endl;
+#endif
         // Upcast: Source ⊆ Target (ExtensionOf<Source, Target>) - cannot throw
         // Use cached subfield embedding for mathematically correct embedding
-        auto embedding = Embedding<Ext<S, ext_modulus, ext_mode>, Ext>();
-        Ext result = embedding(other);
+        auto embedding = Embedding<IN, OUT>();
+        OUT result = embedding(other);
         label = result.get_label();
-    } else if constexpr (SubfieldOf<Ext<S, ext_modulus, ext_mode>, Ext<B, modulus, mode>>) {
+    } else if constexpr (SubfieldOf<IN, OUT>) {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 3 (downcast)" << std::endl;
+#endif
         // Downcast: Target ⊆ Source (SubfieldOf<Target, Source>) - may throw
         // Use cached subfield embedding to find if superfield element is in subfield
-        auto embedding = Embedding<Ext, Ext<S, ext_modulus, ext_mode>>();
-        Ext result = embedding.extract(other);
+        auto embedding = Embedding<OUT, IN>();
+        OUT result = embedding.extract(other);
         label = result.get_label();
     } else {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 4 (largest_common_subfield)" << std::endl;
+#endif
         // Fields with same characteristic but not directly related - convert via largest common subfield in order
         // to maximize
-        std::cout << "DEBUG: First field: " << Ext<B, modulus, mode>::get_info() << ")\n";
-        std::cout << "DEBUG: Second field: " << Ext<S, ext_modulus, ext_mode>::get_info() << ")\n";
-        using CommonField = details::largest_common_subfield_t<Ext<B, modulus, mode>, Ext<S, ext_modulus, ext_mode>>;
-        std::cout << "DEBUG: Using common field: " << CommonField::get_info() << " (size " << CommonField::get_size()
-                  << ")\n";
+        using CommonField = details::largest_common_subfield_t<OUT, IN>;
+
         CommonField intermediate(other);  // Extract to largest common subfield, throws if not possible
         *this = Ext(intermediate);        // Embed from largest common subfield, works always
     }
@@ -4159,88 +4213,86 @@ Ext<B, modulus, mode>::Ext(const Iso<MAIN, OTHERS...>& other) {
     static_assert(Ext<B, modulus, mode>::get_characteristic() == Iso<MAIN, OTHERS...>::get_characteristic(),
                   "trying to convert between fields with different characteristic");
 
-    using ExtType = Ext<B, modulus, mode>;
-    using IsoType = Iso<MAIN, OTHERS...>;
+    using IN = Iso<MAIN, OTHERS...>;
+    using OUT = Ext;
+#ifdef DEBUG_FIELDS_HPP
+    std::cout << std::endl << "^^^^^^^^^^^^^ Iso -> Ext" << std::endl;
+    std::cout << "IN: " << IN::get_info() << std::endl;
+    std::cout << "OUT: " << OUT::get_info() << std::endl;
+#endif
 
-    // Branch 1: If Ext is isomorphic to any of MAIN or the OTHERS then use the corresponding isomorphism
-    if constexpr (Isomorphic<ExtType, MAIN>) {
-        auto isomorphism = Isomorphism<MAIN, ExtType>();
-        *this = isomorphism(other.main());
-    } else if constexpr (sizeof...(OTHERS) > 0 && (Isomorphic<ExtType, OTHERS> || ...)) {
-        // Check which OTHERS type is isomorphic to ExtType
-        bool conversion_done = false;
-        auto try_isomorphism = [&]<typename OtherType>() {
-            if constexpr (Isomorphic<ExtType, OtherType>) {
-                auto isomorphism = Isomorphism<OtherType, ExtType>();
-                *this = isomorphism(OtherType(other));
-                conversion_done = true;
-            }
-        };
-        (try_isomorphism.template operator()<OTHERS>(), ...);
+    // Branch 1: If IN is isomorphic to out -> implies IN is isomorphic to MAIN
+    if constexpr (Isomorphic<IN, OUT>) {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 1 (isomorphic)" << std::endl;
+#endif
+        auto isomorphism = Isomorphism<MAIN, OUT>();
+        OUT result = isomorphism(other.main());
+        label = result.get_label();
 
-        // Branch 2 (upcast): If Iso or any of MAIN or the OTHERS is a subfield of Ext
-    } else if constexpr (SubfieldOf<ExtType, IsoType>) {
-        // Iso ⊆ Ext - use cached embedding from Iso to Ext
-        auto embedding = Embedding<IsoType, ExtType>();
-        ExtType result = embedding(other);
-        label = result.get_label();
-    } else if constexpr (SubfieldOf<ExtType, MAIN>) {
-        // MAIN ⊆ Ext - use cached embedding from MAIN to Ext
-        auto embedding = Embedding<MAIN, ExtType>();
-        ExtType result = embedding(other.main());
-        label = result.get_label();
-    } else if constexpr (sizeof...(OTHERS) > 0 && (SubfieldOf<ExtType, OTHERS> || ...)) {
-        // Check which OTHERS type is a subfield of ExtType
-        bool conversion_done = false;
-        auto try_embedding = [&]<typename OtherType>() {
-            if constexpr (SubfieldOf<ExtType, OtherType>) {
-                auto embedding = Embedding<OtherType, ExtType>();
-                OtherType other_repr(other);
-                ExtType result = embedding(other_repr);
-                label = result.get_label();
-                conversion_done = true;
-            }
-        };
-        (try_embedding.template operator()<OTHERS>(), ...);
+        // Branch 2 (upcast): If IN is subfield of OUT
+    } else if constexpr (SubfieldOf<OUT, IN>) {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 2 (upcast)" << std::endl;
+#endif
+        if constexpr (SubfieldOf<OUT, MAIN>) {
+            auto embedding = Embedding<MAIN, OUT>();
+            OUT result = embedding(other.main());
+            label = result.get_label();
+        } else if constexpr ((SubfieldOf<OUT, OTHERS> || ...)) {
+            bool conversion_done = false;
+            auto try_embedding = [&]<typename OtherType>() {
+                if constexpr (SubfieldOf<OUT, OtherType>) {
+                    auto embedding = Embedding<OtherType, OUT>();
+                    OtherType other_repr(other);
+                    OUT result = embedding(other_repr);
+                    label = result.get_label();
+                    conversion_done = true;
+                }
+            };
+            (try_embedding.template operator()<OTHERS>(), ...);
+        }
 
-        // Branch 3 (downcast): If Ext is a subfield of Iso or any of MAIN or the OTHERS
-    } else if constexpr (SubfieldOf<IsoType, ExtType>) {
-        // Ext ⊆ Iso - use cached embedding to check if downcast is possible
-        auto embedding = Embedding<ExtType, IsoType>();
-        ExtType result = embedding.extract(other);
-        label = result.get_label();
-    } else if constexpr (SubfieldOf<MAIN, ExtType>) {
-        // Ext ⊆ MAIN - use cached embedding to check if downcast is possible
-        auto embedding = Embedding<ExtType, MAIN>();
-        ExtType result = embedding.extract(other.main());
-        label = result.get_label();
-    } else if constexpr (sizeof...(OTHERS) > 0 && (SubfieldOf<OTHERS, ExtType> || ...)) {
-        // Check which OTHERS type contains ExtType as subfield
-        bool conversion_done = false;
-        auto try_downcast = [&]<typename OtherType>() {
-            if constexpr (SubfieldOf<OtherType, ExtType>) {
-                auto embedding = Embedding<ExtType, OtherType>();
-                OtherType other_repr(other);
-                ExtType result = embedding.extract(other_repr);
-                label = result.get_label();
-                conversion_done = true;
-            }
-        };
-        (try_downcast.template operator()<OTHERS>(), ...);
+        // Branch 3 (downcast): If IN is superfield of OUT
+    } else if constexpr (SubfieldOf<IN, OUT>) {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 3 (downcast)" << std::endl;
+#endif
+        if constexpr (SubfieldOf<MAIN, OUT>) {
+            auto embedding = Embedding<OUT, MAIN>();
+            OUT result = embedding.extract(other.main());
+            label = result.get_label();
+        } else if constexpr ((SubfieldOf<OTHERS, OUT> || ...)) {
+            bool conversion_done = false;
+            auto try_downcast = [&]<typename OtherType>() {
+                if constexpr (SubfieldOf<OtherType, OUT>) {
+                    auto embedding = Embedding<OUT, OtherType>();
+                    OtherType other_repr(other);
+                    OUT result = embedding.extract(other_repr);
+                    label = result.get_label();
+                    conversion_done = true;
+                }
+            };
+            (try_downcast.template operator()<OTHERS>(), ...);
+        }
 
-    } else {
         // Branch 4 (cross-cast through largest common subfield): This is the else case
-        using CommonField = details::largest_common_subfield_t<ExtType, IsoType>;
+    } else {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 4 (largest_common_subfield)" << std::endl;
+#endif
+
+        using CommonField = details::largest_common_subfield_t<OUT, IN>;
 
         if constexpr (details::iso_info<CommonField>::is_iso) {
             // CommonField is an Iso, continue with its MAIN
             using CommonMainField = details::iso_info<CommonField>::main_type;
             CommonMainField intermediate(other);  // Downcast other to CommonField's MAIN
-            *this = ExtType(intermediate);        // Use existing cross-field Ext->Ext constructor
+            *this = OUT(intermediate);            // Use existing cross-field Ext->Ext constructor
         } else {
             // CommonField is an Ext, continue with CommonField
             CommonField intermediate(other);  // Downcast other to CommonField
-            *this = ExtType(intermediate);    // Use existing cross-field Ext->Ext constructor
+            *this = OUT(intermediate);        // Use existing cross-field Ext->Ext constructor
         }
     }
 }
@@ -4419,6 +4471,56 @@ constexpr Polynomial<B> Ext<B, modulus, mode>::get_modulus() noexcept {
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
+Ext<B, modulus, mode> Ext<B, modulus, mode>::get_generator() noexcept {
+    // Use local static cache for each specific field type
+    static std::once_flag computed_flag;
+    static Ext cached_generator{0};
+
+    std::call_once(computed_flag, []() {
+        // Try Conway generator first
+        auto conway_gen = get_conway_generator();
+        if (conway_gen.has_value()) {
+            cached_generator = conway_gen.value();
+        } else {
+            // Fallback to conventional generator
+#ifdef USE_PRECOMPILED_LUTS
+            cached_generator = Ext(g.value);
+#else
+        cached_generator = Ext(g().value);
+#endif
+        }
+    });
+
+    return cached_generator;
+}
+
+template <FiniteFieldType B, MOD modulus, LutMode mode>
+std::optional<Ext<B, modulus, mode>> Ext<B, modulus, mode>::get_conway_generator() noexcept {
+    constexpr size_t m_over_prime = details::degree_over_prime_v<Ext>;
+
+    // Get Conway polynomial for this field
+    auto conway_poly = ConwayPolynomial<get_p(), m_over_prime>();
+
+    // If no Conway polynomial available, return empty
+    if (conway_poly.is_empty()) return std::nullopt;
+
+    // Convert to polynomial over this field
+    Polynomial<Ext> poly_over_field(conway_poly);
+
+    // Find Conway root that is also a generator
+    const auto& mul_ord = lut_mul_ord();
+    for (label_t i = 2; i < Q; ++i) {
+        if (mul_ord(i) == Q - 1) {  // Must be a generator
+            Ext candidate(i);
+            if (poly_over_field(candidate) == Ext(0)) return candidate;
+        }
+    }
+
+    // No Conway root is a generator
+    return std::nullopt;
+}
+
+template <FiniteFieldType B, MOD modulus, LutMode mode>
 template <FiniteFieldType T>
     requires(SubfieldOf<Ext<B, modulus, mode>, T>) && (!std::is_same_v<Ext<B, modulus, mode>, T>)
 Vector<T> Ext<B, modulus, mode>::as_vector() const noexcept {
@@ -4582,7 +4684,8 @@ class Iso : public details::Base {
     // Ensure we have multiple representations to unify, otherwise Iso doesn't make sense
     static_assert(sizeof...(OTHERS) > 0, "Iso requires at least two field representations");
     // Ensure all fields in the  union of MAIN and OTHERS... are pairwise distinct
-    static_assert(pairwise_distinct<MAIN, OTHERS...>(), "All field representations in Iso must be pairwise distinct");
+    static_assert(details::pairwise_distinct<MAIN, OTHERS...>(),
+                  "All field representations in Iso must be pairwise distinct");
     // Comment: the last two assert that prime fields cannot occur in Isos
 
    public:
@@ -4821,17 +4924,23 @@ class Iso : public details::Base {
     constexpr const MAIN& main() const noexcept { return main_; }
 
     constexpr bool is_zero() const noexcept { return main_.is_zero(); }
+
     constexpr bool has_positive_sign() const noexcept { return main_.has_positive_sign(); }
+
     constexpr Iso& randomize() {
         main_.randomize();
         return *this;
     }
+
     constexpr Iso& randomize_force_change() {
         main_.randomize_force_change();
         return *this;
     }
+
     size_t get_multiplicative_order() const { return main_.get_multiplicative_order(); }
+
     size_t get_additive_order() const { return main_.get_additive_order(); }
+
     constexpr auto get_label() const noexcept { return main_.get_label(); }
 
     /**
@@ -4858,8 +4967,11 @@ class Iso : public details::Base {
 
     // Assignment operators
     constexpr Iso& operator=(const Iso& other);
+
     constexpr Iso& operator=(Iso&& other) noexcept = default;
+
     constexpr Iso& operator=(const MAIN& other);
+
     constexpr Iso& operator=(int other);
 
     /**
@@ -4940,8 +5052,11 @@ class Iso : public details::Base {
 
     // Equality operators
     constexpr bool operator==(const Iso& other) const noexcept { return main_ == other.main_; }
+
     constexpr bool operator==(const MAIN& other) const noexcept { return main_ == other; }
+
     constexpr bool operator!=(const Iso& other) const noexcept { return main_ != other.main_; }
+
     constexpr bool operator!=(const MAIN& other) const noexcept { return main_ != other; }
 
     // Binary arithmetic operators handled by global template functions (like Fp and Ext)
@@ -4953,10 +5068,15 @@ class Iso : public details::Base {
 
     // Static methods required by FiniteFieldType concept
     static constexpr size_t get_characteristic() noexcept { return MAIN::get_characteristic(); }
+
     static constexpr size_t get_p() noexcept { return MAIN::get_p(); }
+
     static constexpr size_t get_q() noexcept { return MAIN::get_q(); }
+
     static constexpr size_t get_m() noexcept { return MAIN::get_m(); }
+
     static constexpr size_t get_size() noexcept { return MAIN::get_size(); }
+
     static constexpr Iso get_generator() noexcept { return Iso{MAIN::get_generator()}; }
 
     /**
@@ -4985,15 +5105,21 @@ class Iso : public details::Base {
     // Simple reference forwarding to MAIN's LUTs - no copying
     // The ready() mechanism ensures proper ordering
     static constexpr auto& lut_add() { return MAIN::lut_add(); }
+
     static constexpr auto& lut_neg() { return MAIN::lut_neg(); }
+
     static constexpr auto& lut_mul() { return MAIN::lut_mul(); }
+
     static constexpr auto& lut_inv() { return MAIN::lut_inv(); }
 
     // LUT-compatible interface for use as BaseFieldType
     // These allow Iso fields to be used as base fields for higher-order extensions
     static constexpr label_t lut_add(label_t a, label_t b) noexcept { return lut_add()(a, b); }
+
     static constexpr label_t lut_mul(label_t a, label_t b) noexcept { return lut_mul()(a, b); }
+
     static constexpr label_t lut_neg(label_t a) noexcept { return lut_neg()(a); }
+
     static constexpr label_t lut_inv(label_t a) noexcept { return lut_inv()(a); }
 
     // Vector conversion method - handle different target types T
@@ -5065,76 +5191,81 @@ Iso<MAIN, OTHERS...>::Iso(const Ext<B, modulus, mode>& other) {
     static_assert(MAIN::get_characteristic() == Ext<B, modulus, mode>::get_characteristic(),
                   "trying to convert between fields with different characteristic");
 
-    using IsoType = Iso<MAIN, OTHERS...>;
-    using ExtType = Ext<B, modulus, mode>;
+    using IN = Ext<B, modulus, mode>;
+    using OUT = Iso;
+#ifdef DEBUG_FIELDS_HPP
+    std::cout << std::endl << "^^^^^^^^^^^^^ Ext -> Iso" << std::endl;
+    std::cout << "IN: " << IN::get_info() << std::endl;
+    std::cout << "OUT: " << OUT::get_info() << std::endl;
+#endif
 
     // Branch 1: If MAIN or any of the OTHERS is isomorphic to Ext then use the correct isomorphism
-    if constexpr (Isomorphic<MAIN, ExtType>) {
-        auto isomorphism = Isomorphism<ExtType, MAIN>();
+    if constexpr (Isomorphic<MAIN, IN>) {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 1 (isomorphism)" << std::endl;
+#endif
+        auto isomorphism = Isomorphism<IN, MAIN>();
         main_ = isomorphism(other);
-    } else if constexpr (sizeof...(OTHERS) > 0 && (Isomorphic<OTHERS, ExtType> || ...)) {
-        // Check which OTHERS type is isomorphic to ExtType
-        bool conversion_done = false;
-        auto try_isomorphism = [&]<typename OtherType>() {
-            if constexpr (Isomorphic<OtherType, ExtType>) {
-                auto isomorphism = Isomorphism<ExtType, OtherType>();
-                OtherType other_repr = isomorphism(other);
-                // Convert OtherType to MAIN via Iso constructor
-                IsoType temp_iso(other_repr);
-                main_ = temp_iso.main_;
-                conversion_done = true;
-            }
-        };
-        (try_isomorphism.template operator()<OTHERS>(), ...);
 
-        // Branch 2 (upcast): If Ext is a subfield to MAIN or any of the OTHERS
-    } else if constexpr (SubfieldOf<MAIN, ExtType>) {
-        // Ext ⊆ MAIN - use cached embedding from Ext to MAIN
-        auto embedding = Embedding<ExtType, MAIN>();
-        main_ = embedding(other);
-    } else if constexpr (sizeof...(OTHERS) > 0 && (SubfieldOf<OTHERS, ExtType> || ...)) {
-        // Check which OTHERS type contains ExtType as subfield
-        bool conversion_done = false;
-        auto try_embedding = [&]<typename OtherType>() {
-            if constexpr (SubfieldOf<OtherType, ExtType>) {
-                auto embedding = Embedding<ExtType, OtherType>();
-                OtherType other_repr = embedding(other);
-                // Convert OtherType to MAIN via Iso constructor
-                IsoType temp_iso(other_repr);
-                main_ = temp_iso.main_;
-                conversion_done = true;
-            }
-        };
-        (try_embedding.template operator()<OTHERS>(), ...);
-
+        // Branch 2 (upcast): If IN is a subfield to OUT
+    } else if constexpr (SubfieldOf<OUT, IN>) {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 2 (upcast)" << std::endl;
+#endif
+        if constexpr (SubfieldOf<MAIN, IN>) {
+#ifdef DEBUG_FIELDS_HPP
+            std::cout << "Branch 2a" << std::endl;
+#endif
+            // Ext ⊆ MAIN - use cached embedding from Ext to MAIN
+            auto embedding = Embedding<IN, MAIN>();
+            main_ = embedding(other);
+        } else if constexpr ((SubfieldOf<OTHERS, IN> || ...)) {
+            // Check which OTHERS type contains ExtType as subfield
+            bool conversion_done = false;
+            auto try_embedding = [&]<typename OtherType>() {
+                if constexpr (SubfieldOf<OtherType, IN>) {
+                    auto embedding = Embedding<IN, OtherType>();
+                    OtherType other_repr = embedding(other);
+                    OUT temp_iso(other_repr);
+                    main_ = temp_iso.main_;
+                    conversion_done = true;
+                }
+            };
+            (try_embedding.template operator()<OTHERS>(), ...);
+        }
         // Branch 3 (downcast): If Iso or MAIN or any of the OTHERS is a subfield of Ext
-    } else if constexpr (SubfieldOf<ExtType, IsoType>) {
-        // Iso ⊆ Ext - use cached embedding to check if downcast is possible
-        auto embedding = Embedding<IsoType, ExtType>();
-        IsoType temp_iso = embedding.extract(other);
-        main_ = temp_iso.main_;
-    } else if constexpr (SubfieldOf<ExtType, MAIN>) {
-        // MAIN ⊆ Ext - use cached embedding to check if downcast is possible
-        auto embedding = Embedding<MAIN, ExtType>();
-        main_ = embedding.extract(other);
-    } else if constexpr (sizeof...(OTHERS) > 0 && (SubfieldOf<ExtType, OTHERS> || ...)) {
-        // Check which OTHERS type is a superfield of ExtType
-        bool conversion_done = false;
-        auto try_downcast = [&]<typename OtherType>() {
-            if constexpr (SubfieldOf<ExtType, OtherType>) {
-                auto embedding = Embedding<OtherType, ExtType>();
-                OtherType other_repr = embedding.extract(other);
-                // Convert OtherType to MAIN via Iso constructor
-                IsoType temp_iso(other_repr);
-                main_ = temp_iso.main_;
-                conversion_done = true;
-            }
-        };
-        (try_downcast.template operator()<OTHERS>(), ...);
-
+    } else if constexpr (SubfieldOf<IN, OUT>) {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 3 (downcast)" << std::endl;
+#endif
+        if constexpr (SubfieldOf<IN, MAIN>) {
+#ifdef DEBUG_FIELDS_HPP
+            std::cout << "Branch 3a" << std::endl;
+#endif
+            auto embedding = Embedding<MAIN, IN>();
+            main_ = embedding.extract(other);
+        } else if constexpr ((SubfieldOf<OTHERS, IN> || ...)) {
+#ifdef DEBUG_FIELDS_HPP
+            std::cout << "Branch 3b" << std::endl;
+#endif
+            bool conversion_done = false;
+            auto try_downcast = [&]<typename OtherType>() {
+                if constexpr (SubfieldOf<OtherType, IN>) {
+                    auto embedding = Embedding<IN, OtherType>();
+                    OtherType other_repr = embedding.extract(other);
+                    OUT temp_iso(other_repr);
+                    main_ = temp_iso.main_;
+                    conversion_done = true;
+                }
+            };
+            (try_downcast.template operator()<OTHERS>(), ...);
+        }
     } else {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 4 (largest_common_subfield)" << std::endl;
+#endif
         // Branch 4 (cross-cast through largest common subfield): This is the else case
-        using CommonField = details::largest_common_subfield_t<IsoType, ExtType>;
+        using CommonField = details::largest_common_subfield_t<OUT, IN>;
 
         if constexpr (details::iso_info<CommonField>::is_iso) {
             // CommonField is an Iso, continue with its MAIN
@@ -5183,180 +5314,176 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
     static_assert(MAIN::get_characteristic() == OTHER_MAIN::get_characteristic(),
                   "trying to convert between fields with different characteristic");
 
-    using OutputIsoType = Iso<MAIN, OTHERS...>;             // Output Iso (this)
-    using InputIsoType = Iso<OTHER_MAIN, OTHER_OTHERS...>;  // Input Iso (other)
+    using IN = Iso<OTHER_MAIN, OTHER_OTHERS...>;
+    using OUT = Iso;
+#ifdef DEBUG_FIELDS_HPP
+    std::cout << std::endl << "^^^^^^^^^^^^^ Iso -> Iso" << std::endl;
+    std::cout << "IN: " << IN::get_info() << std::endl;
+    std::cout << "OUT: " << OUT::get_info() << std::endl;
+#endif
 
-    // Branch 1: If MAIN of input Iso is isomorphic to MAIN of output Iso
+    // Branch 1: IN and OUT are isomorphic (implies: MAIN and OTHER_MAIN are isomorphic)
     if constexpr (Isomorphic<OTHER_MAIN, MAIN>) {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 1 (isomorphic)" << std::endl;
+#endif
         auto isomorphism = Isomorphism<OTHER_MAIN, MAIN>();
         main_ = isomorphism(other.main());
 
-        // Branch 2 (upcast): Input types are subfields of output types
-    } else if constexpr (SubfieldOf<OutputIsoType, InputIsoType>) {
-        // Input Iso ⊆ Output Iso - embed via cached embedding
-        auto embedding = Embedding<InputIsoType, OutputIsoType>();
-        OutputIsoType temp_output = embedding(other);
-        main_ = temp_output.main_;
-    } else if constexpr (SubfieldOf<MAIN, OTHER_MAIN>) {
-        // Input MAIN ⊆ Output MAIN - embed via cached embedding
-        auto embedding = Embedding<OTHER_MAIN, MAIN>();
-        main_ = embedding(other.main());
-    } else if constexpr (sizeof...(OTHERS) > 0 && (SubfieldOf<OTHERS, InputIsoType> || ...)) {
-        // Check if any output OTHERS contains input Iso as subfield
-        bool conversion_done = false;
-        auto try_upcast_iso = [&]<typename OutputOtherType>() {
-            if constexpr (SubfieldOf<OutputOtherType, InputIsoType>) {
-                // Input Iso ⊆ Output OTHERS - embed then convert to MAIN
-                auto embedding = Embedding<InputIsoType, OutputOtherType>();
-                OutputOtherType output_other = embedding(other);
-                auto isomorphism = Isomorphism<OutputOtherType, MAIN>();
-                main_ = isomorphism(output_other);
-                conversion_done = true;
-            }
-        };
-        (try_upcast_iso.template operator()<OTHERS>(), ...);
+        // Branch 2 (upcast): IN is subfield of OUT (but not the same since this would be caught by copy constr.)
+    } else if constexpr (SubfieldOf<OUT, IN>) {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 2 (upcast)" << std::endl;
+#endif
 
-        if (!conversion_done && sizeof...(OTHERS) > 0 && (SubfieldOf<OTHERS, OTHER_MAIN> || ...)) {
-            // Check if any output OTHERS contains input MAIN as subfield
-            auto try_upcast_main = [&]<typename OutputOtherType>() {
+        // Sub-branch 2a: OTHER_MAIN is subfield of MAIN
+        if constexpr (SubfieldOf<MAIN, OTHER_MAIN>) {
+#ifdef DEBUG_FIELDS_HPP
+            std::cout << "Branch 2a" << std::endl;
+#endif
+            main_ = MAIN(other.main());  // Use existing Ext-from-Ext cross-field constructor
+
+            // Sub-branch 2b: OTHER_MAIN is subfield of one of OTHERS
+        } else if constexpr ((SubfieldOf<OTHERS, OTHER_MAIN> || ...)) {
+#ifdef DEBUG_FIELDS_HPP
+            std::cout << "Branch 2b" << std::endl;
+#endif
+            bool conversion_done = false;
+            auto try_main_to_others = [&]<typename OutputOtherType>() {
                 if constexpr (SubfieldOf<OutputOtherType, OTHER_MAIN>) {
-                    // Input MAIN ⊆ Output OTHERS - embed then convert to MAIN
-                    auto embedding = Embedding<OTHER_MAIN, OutputOtherType>();
-                    OutputOtherType output_other = embedding(other.main());
-                    auto isomorphism = Isomorphism<OutputOtherType, MAIN>();
-                    main_ = isomorphism(output_other);
-                    conversion_done = true;
+                    if (!conversion_done) {
+                        OutputOtherType intermediate(
+                            other.main());  // Use existing Ext-from-Ext cross-field constructor
+                        auto isomorphism = Isomorphism<OutputOtherType, MAIN>();
+                        main_ = isomorphism(intermediate);
+                        conversion_done = true;
+                    }
                 }
             };
-            (try_upcast_main.template operator()<OTHERS>(), ...);
-        }
+            (try_main_to_others.template operator()<OTHERS>(), ...);
 
-        if (!conversion_done && sizeof...(OTHER_OTHERS) > 0 && sizeof...(OTHERS) > 0) {
-            // Check if any output OTHERS contains any input OTHERS as subfield
-            auto try_upcast_others = [&]<typename OutputOtherType>() {
+            // Sub-branch 2c: One of OTHER_OTHERS is subfield of MAIN
+        } else if constexpr ((SubfieldOf<MAIN, OTHER_OTHERS> || ...)) {
+#ifdef DEBUG_FIELDS_HPP
+            std::cout << "Branch 2c" << std::endl;
+#endif
+            bool conversion_done = false;
+            auto try_others_to_main = [&]<typename InputOtherType>() {
+                if constexpr (SubfieldOf<MAIN, InputOtherType>) {
+                    if (!conversion_done) {
+                        InputOtherType input_other(other);  // Convert Iso to InputOtherType
+                        main_ = MAIN(input_other);          // Use existing Ext-from-Ext cross-field constructor
+                        conversion_done = true;
+                    }
+                }
+            };
+            (try_others_to_main.template operator()<OTHER_OTHERS>(), ...);
+
+            // Sub-branch 2d: One of OTHER_OTHERS is subfield of one of OTHERS
+        } else {
+#ifdef DEBUG_FIELDS_HPP
+            std::cout << "Branch 2d" << std::endl;
+#endif
+            bool conversion_done = false;
+            auto try_others_to_others = [&]<typename OutputOtherType>() {
                 if (conversion_done) return;
                 auto try_input_others = [&]<typename InputOtherType>() {
                     if constexpr (SubfieldOf<OutputOtherType, InputOtherType>) {
-                        // Input OTHERS ⊆ Output OTHERS - embed then convert to MAIN
-                        InputOtherType input_other(other);
-                        auto embedding = Embedding<InputOtherType, OutputOtherType>();
-                        OutputOtherType output_other = embedding(input_other);
-                        auto isomorphism = Isomorphism<OutputOtherType, MAIN>();
-                        main_ = isomorphism(output_other);
-                        conversion_done = true;
+                        if (!conversion_done) {
+                            InputOtherType input_other(other);  // Convert Iso to InputOtherType
+                            OutputOtherType intermediate(
+                                input_other);  // Use existing Ext-from-Ext cross-field constructor
+                            auto isomorphism = Isomorphism<OutputOtherType, MAIN>();
+                            main_ = isomorphism(intermediate);
+                            conversion_done = true;
+                        }
                     }
                 };
-                (try_input_others.template operator()<OTHER_OTHERS>(), ...);
+                (try_input_others.template operator()<OTHER_OTHERS>(), ...);  // This calls the inner lambda
             };
-            (try_upcast_others.template operator()<OTHERS>(), ...);
+            (try_others_to_others.template operator()<OTHERS>(), ...);  // This calls the outer lambda
         }
 
-        // Branch 3 (downcast): Output types are subfields of input types
-    } else if constexpr (SubfieldOf<InputIsoType, OutputIsoType>) {
-        // Output Iso ⊆ Input Iso - extract via cached embedding
-        auto embedding = Embedding<OutputIsoType, InputIsoType>();
-        OutputIsoType temp_output = embedding.extract(other);
-        main_ = temp_output.main_;
-    } else if constexpr (SubfieldOf<OTHER_MAIN, MAIN>) {
-        // Output MAIN ⊆ Input MAIN - extract via cached embedding
-        auto embedding = Embedding<MAIN, OTHER_MAIN>();
-        main_ = embedding.extract(other.main());
-    } else if constexpr (SubfieldOf<InputIsoType, MAIN> ||
-                         (sizeof...(OTHER_OTHERS) > 0 && (SubfieldOf<OTHER_OTHERS, MAIN> || ...))) {
-        // Check if output MAIN contains input types as subfield
-        bool conversion_done = false;
+        // Branch 3 (downcast): OUT is subfield of IN (but not the same since this would be caught by copy constr.)
+    } else if constexpr (SubfieldOf<IN, OUT>) {
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 3 (downcast)" << std::endl;
+#endif
+        // Sub-branch 3a: OTHER_MAIN is superfield of MAIN
+        if constexpr (SubfieldOf<OTHER_MAIN, MAIN>) {
+#ifdef DEBUG_FIELDS_HPP
+            std::cout << "Branch 3a" << std::endl;
+#endif
+            main_ = MAIN(other.main());  // Use existing Ext-from-Ext cross-field constructor
 
-        if constexpr (SubfieldOf<InputIsoType, MAIN>) {
-            // Output MAIN ⊆ Input Iso - extract via cached embedding
-            auto embedding = Embedding<MAIN, InputIsoType>();
-            main_ = embedding.extract(other);
-            conversion_done = true;
-        }
-
-        if (!conversion_done && sizeof...(OTHER_OTHERS) > 0) {
-            // Check if output MAIN contains any input OTHERS as subfield
-            auto try_downcast_others = [&]<typename InputOtherType>() {
-                if constexpr (SubfieldOf<InputOtherType, MAIN>) {
-                    InputOtherType input_other(other);
-                    auto embedding = Embedding<MAIN, InputOtherType>();
-                    main_ = embedding.extract(input_other);
-                    conversion_done = true;
+            // Sub-branch 3b: OTHER_MAIN is superfield of one of OTHERS
+        } else if constexpr ((SubfieldOf<OTHER_MAIN, OTHERS> || ...)) {
+#ifdef DEBUG_FIELDS_HPP
+            std::cout << "Branch 3b" << std::endl;
+#endif
+            bool conversion_done = false;
+            auto try_main_to_others = [&]<typename OutputOtherType>() {
+                if constexpr (SubfieldOf<OTHER_MAIN, OutputOtherType>) {
+                    if (!conversion_done) {
+                        OutputOtherType intermediate(
+                            other.main());  // Use existing Ext-from-Ext cross-field constructor
+                        auto isomorphism = Isomorphism<OutputOtherType, MAIN>();
+                        main_ = isomorphism(intermediate);
+                        conversion_done = true;
+                    }
                 }
             };
-            (try_downcast_others.template operator()<OTHER_OTHERS>(), ...);
+            (try_main_to_others.template operator()<OTHERS>(), ...);
+
+            // Sub-branch 3c: One of OTHER_OTHERS is superfield of MAIN
+        } else if constexpr ((SubfieldOf<OTHER_OTHERS, MAIN> || ...)) {
+#ifdef DEBUG_FIELDS_HPP
+            std::cout << "Branch 3c" << std::endl;
+#endif
+            bool conversion_done = false;
+            auto try_others_to_main = [&]<typename InputOtherType>() {
+                if constexpr (SubfieldOf<InputOtherType, MAIN>) {
+                    if (!conversion_done) {
+                        InputOtherType input_other(other);  // Convert Iso to InputOtherType
+                        main_ = MAIN(input_other);          // Use existing Ext-from-Ext cross-field constructor
+                        conversion_done = true;
+                    }
+                }
+            };
+            (try_others_to_main.template operator()<OTHER_OTHERS>(), ...);
+
+            // Sub-branch 3d: One of OTHER_OTHERS is superfield of one of OTHERS
+        } else {
+#ifdef DEBUG_FIELDS_HPP
+            std::cout << "Branch 3d" << std::endl;
+#endif
+            bool conversion_done = false;
+            auto try_others_to_others = [&]<typename OutputOtherType>() {
+                if (conversion_done) return;
+                auto try_input_others = [&]<typename InputOtherType>() {
+                    if constexpr (SubfieldOf<InputOtherType, OutputOtherType>) {
+                        if (!conversion_done) {
+                            InputOtherType input_other(other);          // Convert Iso to InputOtherType
+                            OutputOtherType intermediate(input_other);  // Use existing Ext-from-Ext cross-field
+                            auto isomorphism = Isomorphism<OutputOtherType, MAIN>();
+                            main_ = isomorphism(intermediate);
+                            conversion_done = true;
+                        }
+                    }
+                };
+                (try_input_others.template operator()<OTHER_OTHERS>(), ...);  // This calls the inner lambda
+            };
+            (try_others_to_others.template operator()<OTHERS>(), ...);  // This calls the outer lambda
         }
 
     } else {
-        // Branch 4 (cross-cast through largest common subfield): This is the else case
-        using CommonField = details::largest_common_subfield_t<OutputIsoType, InputIsoType>;
+#ifdef DEBUG_FIELDS_HPP
+        std::cout << "Branch 4 (largest_common_subfield)" << std::endl;
+#endif
+        // Branch 4 (cross-cast through largest common subfield): Consistent with Ext-from-Iso constructor
+        using CommonField = details::largest_common_subfield_t<OUT, IN>;
 
-        if constexpr (details::iso_info<CommonField>::is_iso) {
-            // CommonField is an Iso, continue with its MAIN
-            using CommonMainField = details::iso_info<CommonField>::main_type;
-
-            // Find which input type has CommonField as subfield and map to it
-            CommonMainField intermediate;
-            bool found_input_path = false;
-
-            if constexpr (SubfieldOf<InputIsoType, CommonMainField>) {
-                // Map input Iso to CommonMainField via downcast
-                auto embedding = Embedding<CommonMainField, InputIsoType>();
-                intermediate = embedding.extract(other);
-                found_input_path = true;
-            } else if constexpr (SubfieldOf<OTHER_MAIN, CommonMainField>) {
-                // Map input MAIN to CommonMainField via embedding
-                auto embedding = Embedding<OTHER_MAIN, CommonMainField>();
-                intermediate = embedding(other.main());
-                found_input_path = true;
-            } else if constexpr (sizeof...(OTHER_OTHERS) > 0) {
-                // Check input OTHERS
-                auto try_input_others = [&]<typename InputOtherType>() {
-                    if constexpr (SubfieldOf<InputOtherType, CommonMainField>) {
-                        InputOtherType input_other(other);
-                        auto embedding = Embedding<InputOtherType, CommonMainField>();
-                        intermediate = embedding(input_other);
-                        found_input_path = true;
-                    }
-                };
-                (try_input_others.template operator()<OTHER_OTHERS>(), ...);
-            }
-
-            // Convert CommonMainField to output MAIN
-            main_ = MAIN(intermediate);  // Use Ext->Ext constructor
-
-        } else {
-            // CommonField is an Ext, continue with CommonField
-
-            // Find which input type has CommonField as subfield and map to it
-            CommonField intermediate;
-            bool found_input_path = false;
-
-            if constexpr (SubfieldOf<InputIsoType, CommonField>) {
-                // Map input Iso to CommonField via downcast
-                auto embedding = Embedding<CommonField, InputIsoType>();
-                intermediate = embedding.extract(other);
-                found_input_path = true;
-            } else if constexpr (SubfieldOf<OTHER_MAIN, CommonField>) {
-                // Map input MAIN to CommonField via embedding
-                auto embedding = Embedding<OTHER_MAIN, CommonField>();
-                intermediate = embedding(other.main());
-                found_input_path = true;
-            } else if constexpr (sizeof...(OTHER_OTHERS) > 0) {
-                // Check input OTHERS
-                auto try_input_others = [&]<typename InputOtherType>() {
-                    if constexpr (SubfieldOf<InputOtherType, CommonField>) {
-                        InputOtherType input_other(other);
-                        auto embedding = Embedding<InputOtherType, CommonField>();
-                        intermediate = embedding(input_other);
-                        found_input_path = true;
-                    }
-                };
-                (try_input_others.template operator()<OTHER_OTHERS>(), ...);
-            }
-
-            // Convert CommonField to output MAIN
-            main_ = MAIN(intermediate);  // Use Ext->Ext constructor
-        }
+        main_ = MAIN(CommonField(other));
     }
 }
 

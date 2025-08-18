@@ -2,7 +2,7 @@
  * @file field_concepts_traits.hpp
  * @brief Concepts, traits, and type utilities for finite field arithmetic
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.1
+ * @version 2.1.0
  * @date 2025
  *
  * @copyright
@@ -21,7 +21,7 @@
  *
  * **Core Concepts Provided:**
  * - **FiniteFieldType**: Constrains types to valid finite field implementations
- * - **SubfieldOf**: Validates mathematical subfield relationships between field types  
+ * - **SubfieldOf**: Validates mathematical subfield relationships between field types
  * - **Isomorphic**: Ensures field types have the same size and characteristic for safe conversions
  * - **SignedIntType**: Supports both standard signed integers and arbitrary precision InfInt
  * - **UnsignedIntType**: Supports both standard unsigned integers and arbitrary precision InfInt
@@ -30,8 +30,6 @@
  * **Type Traits and Utilities:**
  * - **iso_info**: Template metaprogramming utility for Iso type introspection
  * - **largest_common_subfield_t**: Automatically determines largest common subfield for cross-field operations
- * - **Field relationship detection**: Compile-time validation of field tower structures
- * - **Template parameter validation**: Ensures type safety for field construction
  *
  * @see fields.hpp for the main finite field implementation
  */
@@ -97,39 +95,40 @@ class Base;
  * @note This concept is satisfied by Rationals<>, Fp&lt;&gt;, Ext<>, and Iso<>
  */
 template <typename T>
-concept FieldType = std::is_base_of_v<details::Base, T> && !std::is_same_v<details::Base, T> && requires(const T& t, T& mutable_t) {
-    // Constructors (via constructibility checks)
-    requires std::constructible_from<T>;       // Default constructor
-    requires std::copy_constructible<T>;       // Copy constructor
-    requires std::move_constructible<T>;       // Move constructor
-    requires std::constructible_from<T, int>;  // From int constructor
+concept FieldType =
+    std::is_base_of_v<details::Base, T> && !std::is_same_v<details::Base, T> && requires(const T& t, T& mutable_t) {
+        // Constructors (via constructibility checks)
+        requires std::constructible_from<T>;       // Default constructor
+        requires std::copy_constructible<T>;       // Copy constructor
+        requires std::move_constructible<T>;       // Move constructor
+        requires std::constructible_from<T, int>;  // From int constructor
 
-    // Assignment operators
-    { mutable_t = t } -> std::same_as<T&>;   // Field element assignment
-    { mutable_t = 42 } -> std::same_as<T&>;  // Integer assignment
+        // Assignment operators
+        { mutable_t = t } -> std::same_as<T&>;   // Field element assignment
+        { mutable_t = 42 } -> std::same_as<T&>;  // Integer assignment
 
-    // Compound assignment operators
-    { mutable_t += t } -> std::same_as<T&>;
-    { mutable_t -= t } -> std::same_as<T&>;
-    { mutable_t *= t } -> std::same_as<T&>;
-    { mutable_t /= t } -> std::same_as<T&>;
+        // Compound assignment operators
+        { mutable_t += t } -> std::same_as<T&>;
+        { mutable_t -= t } -> std::same_as<T&>;
+        { mutable_t *= t } -> std::same_as<T&>;
+        { mutable_t /= t } -> std::same_as<T&>;
 
-    // Comparison operators
-    { t == t } -> std::same_as<bool>;
+        // Comparison operators
+        { t == t } -> std::same_as<bool>;
 
-    // Unary - operator
-    { -t } -> std::same_as<T>;
+        // Unary - operator
+        { -t } -> std::same_as<T>;
 
-    // Element properties
-    { t.is_zero() } -> std::same_as<bool>;
-    { t.has_positive_sign() } -> std::same_as<bool>;
-    { t.get_characteristic() } -> std::convertible_to<size_t>;
-    { t.get_info() } -> std::convertible_to<std::string>;
+        // Element properties
+        { t.is_zero() } -> std::same_as<bool>;
+        { t.has_positive_sign() } -> std::same_as<bool>;
+        { t.get_characteristic() } -> std::convertible_to<size_t>;
+        { t.get_info() } -> std::convertible_to<std::string>;
 
-    // Randomization
-    requires requires { mutable_t.randomize(); };
-    requires requires { mutable_t.randomize_force_change(); };
-};
+        // Randomization
+        requires requires { mutable_t.randomize(); };
+        requires requires { mutable_t.randomize_force_change(); };
+    };
 
 /**
  * @concept FiniteFieldType
@@ -170,56 +169,57 @@ concept FieldType = std::is_base_of_v<details::Base, T> && !std::is_same_v<detai
  */
 
 template <typename T>
-concept FiniteFieldType = std::is_base_of_v<details::Base, T> && !std::is_same_v<details::Base, T> && requires(const T& t, T& mutable_t) {
-    // Basic field requirements (from FieldType, but inlined to avoid circular dependency)
-    requires std::constructible_from<T>;       // Default constructor
-    requires std::copy_constructible<T>;       // Copy constructor
-    requires std::move_constructible<T>;       // Move constructor
-    requires std::constructible_from<T, int>;  // From int constructor
+concept FiniteFieldType =
+    std::is_base_of_v<details::Base, T> && !std::is_same_v<details::Base, T> && requires(const T& t, T& mutable_t) {
+        // Basic field requirements (from FieldType, but inlined to avoid circular dependency)
+        requires std::constructible_from<T>;       // Default constructor
+        requires std::copy_constructible<T>;       // Copy constructor
+        requires std::move_constructible<T>;       // Move constructor
+        requires std::constructible_from<T, int>;  // From int constructor
 
-    // Assignment operators
-    { mutable_t = t } -> std::same_as<T&>;   // Field element assignment
-    { mutable_t = 42 } -> std::same_as<T&>;  // Integer assignment
+        // Assignment operators
+        { mutable_t = t } -> std::same_as<T&>;   // Field element assignment
+        { mutable_t = 42 } -> std::same_as<T&>;  // Integer assignment
 
-    // Compound assignment operators
-    { mutable_t += t } -> std::same_as<T&>;
-    { mutable_t -= t } -> std::same_as<T&>;
-    { mutable_t *= t } -> std::same_as<T&>;
-    { mutable_t /= t } -> std::same_as<T&>;
+        // Compound assignment operators
+        { mutable_t += t } -> std::same_as<T&>;
+        { mutable_t -= t } -> std::same_as<T&>;
+        { mutable_t *= t } -> std::same_as<T&>;
+        { mutable_t /= t } -> std::same_as<T&>;
 
-    // Comparison operators
-    { t == t } -> std::same_as<bool>;
+        // Comparison operators
+        { t == t } -> std::same_as<bool>;
 
-    // Unary - operator
-    { -t } -> std::same_as<T>;
+        // Unary - operator
+        { -t } -> std::same_as<T>;
 
-    // Element properties
-    { t.is_zero() } -> std::same_as<bool>;
-    { t.has_positive_sign() } -> std::same_as<bool>;
-    { t.get_characteristic() } -> std::convertible_to<size_t>;
-    { t.get_info() } -> std::convertible_to<std::string>;
+        // Element properties
+        { t.is_zero() } -> std::same_as<bool>;
+        { t.has_positive_sign() } -> std::same_as<bool>;
+        { t.get_characteristic() } -> std::convertible_to<size_t>;
+        { t.get_info() } -> std::convertible_to<std::string>;
 
-    // Randomization
-    requires requires { mutable_t.randomize(); };
-    requires requires { mutable_t.randomize_force_change(); };
+        // Randomization
+        requires requires { mutable_t.randomize(); };
+        requires requires { mutable_t.randomize_force_change(); };
 
-    // Finite field specific requirements
-    requires(T::get_characteristic() > 1);
-    requires is_prime(T::get_p());
+        // Finite field specific requirements
+        requires(T::get_characteristic() > 1);
+        requires is_prime(T::get_p());
 
-    // Static field structure information
-    { t.get_size() } -> std::convertible_to<size_t>;
-    { t.get_m() } -> std::convertible_to<size_t>;
-    { t.get_p() } -> std::convertible_to<size_t>;
-    { t.get_q() } -> std::convertible_to<size_t>;
+        // Static field structure information
+        { t.get_size() } -> std::convertible_to<size_t>;
+        { t.get_m() } -> std::convertible_to<size_t>;
+        { t.get_p() } -> std::convertible_to<size_t>;
+        { t.get_q() } -> std::convertible_to<size_t>;
 
-    // Generator element
-    { T::get_generator() } -> std::same_as<T>;
+        // Generator element
+        { T::get_generator() } -> std::same_as<T>;
 
-    // Element properties
-    { t.get_multiplicative_order() } -> std::convertible_to<size_t>;
-    { t.get_additive_order() } -> std::convertible_to<size_t>;
-};
+        // Element properties
+        { t.get_multiplicative_order() } -> std::convertible_to<size_t>;
+        { t.get_additive_order() } -> std::convertible_to<size_t>;
+    };
 
 /**
  * @concept SignedIntType
@@ -252,9 +252,9 @@ concept FiniteFieldType = std::is_base_of_v<details::Base, T> && !std::is_same_v
  * };
  *
  * // Valid instantiations:
- * Rationals<int> q1;           // Standard signed integer
- * Rationals<long long> q2;     // Larger standard type
- * Rationals<InfInt> q3;        // Infinite precision
+ * Rationals<int> q1;        // Standard signed integer
+ * Rationals<long long> q2;  // Larger standard type
+ * Rationals<InfInt> q3;     // Infinite precision
  * @endcode
  *
  * @note This concept is primarily used by Rationals<T> to ensure the numerator
@@ -326,10 +326,10 @@ concept ReliablyComparableType = FiniteFieldType<T> || std::is_same_v<T, Rationa
  *     return v * T(2);
  * }
  *
- * Vector<int> int_vector(10);           // Standard integer vector
- * Vector<long long> long_vector(5);     // Long integer vector
- * Vector<InfInt> big_vector(10);        // Arbitrary-precision integer vector
- * big_vector.randomize();               // Randomizes with values in range [-100, 100]
+ * Vector<int> int_vector(10);        // Standard integer vector
+ * Vector<long long> long_vector(5);  // Long integer vector
+ * Vector<InfInt> big_vector(10);     // Arbitrary-precision integer vector
+ * big_vector.randomize();            // Randomizes with values in range [-100, 100]
  * @endcode
  */
 template <typename T>
@@ -342,12 +342,9 @@ concept ComponentType =
  * @tparam Types Parameter pack to check against
  *
  * This concept evaluates to true if type T is identical to at least one of the types
- * in the Types parameter pack. It provides a clean alternative to complex requires clauses
- * involving fold expressions and is particularly useful for constrained template member functions.
+ * in the Types parameter pack.
  *
  * @section Usage
- *
- * Replaces complex requires clauses in template functions:
  *
  * @code{.cpp}
  * // Instead of:
@@ -363,9 +360,9 @@ concept ComponentType =
  * @section Examples
  *
  * @code{.cpp}
- * static_assert(BelongsTo<int, float, double>);        // true - int is one of the types
- * static_assert(!BelongsTo<char, float, double>);      // false - char is not in the pack
- * static_assert(BelongsTo<F16_a, F16_a, F16_b>);       // true - F16_a matches first type
+ * static_assert(BelongsTo<int, float, double>);    // true - int is one of the types
+ * static_assert(!BelongsTo<char, float, double>);  // false - char is not in the pack
+ * static_assert(BelongsTo<F16_a, F16_a, F16_b>);   // true - F16_a matches first type
  * @endcode
  */
 template <typename T, typename... Types>
@@ -380,12 +377,9 @@ concept BelongsTo = (std::is_same_v<T, Types> || ...);
  *
  * @section Usage_Example
  * @code{.cpp}
- * using F4 = Ext<F2, MOD{1, 1, 1}>;        // Instead of std::array<int, 3>{1, 1, 1}
- * using F16 = Ext<F4, {2, 1, 1}>;       // Shorter and more readable, don't need to use MOD
+ * using F4 = Ext<F2, {1, 1, 1}>;   // Instead of std::array<int, 3>{1, 1, 1}
+ * using F16 = Ext<F4, {2, 1, 1}>;  // Shorter and more readable, don't need to use MOD
  * @endcode
- *
- * @note The macro is defined as std::array to maintain full type safety while providing
- *       convenient syntax for polynomial coefficient specification.
  */
 #define MOD std::array
 
@@ -396,6 +390,10 @@ class Fp;
 // Forward declaration for Ext (full definition in fields.hpp)
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 class Ext;
+
+// Forward declaration for Iso (full definition in fields.hpp)
+template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
+class Iso;
 
 /**
  * @concept Isomorphic
@@ -413,12 +411,12 @@ class Ext;
  *
  * @code{.cpp}
  * using F2 = Fp<2>;
- * using F4_1 = Ext<F2, MOD{1, 1, 1}>;   // 𝔽₄ ≅ 𝔽₂[x]/(x² + x + 1)
- * using F4_2 = Ext<F2, MOD{1, 0, 1}>;   // 𝔽₄ ≅ 𝔽₂[x]/(x² + 1)
- * using F8 = Ext<F2, MOD{1, 1, 0, 1}>;  // 𝔽₈ ≅ 𝔽₂[x]/(x³ + x + 1)
+ * using F4_1 = Ext<F2, {1, 1, 1}>;   // 𝔽₄ ≅ 𝔽₂[x]/(x² + x + 1)
+ * using F4_2 = Ext<F2, {1, 0, 1}>;   // 𝔽₄ ≅ 𝔽₂[x]/(x² + 1)
+ * using F8 = Ext<F2, {1, 1, 0, 1}>;  // 𝔽₈ ≅ 𝔽₂[x]/(x³ + x + 1)
  * using F3 = Fp<3>;
- * using F64_1 = Ext<F8, MOD{7, 1, 1}>;
- * using F64_2 = Ext<F4, MOD{1, 2, 0, 1}>;
+ * using F64_1 = Ext<F8, {7, 1, 1}>;
+ * using F64_2 = Ext<F4, {1, 2, 0, 1}>;
  *
  * static_assert(Isomorphic<F64_1, F64_2>);  // true: every field is isomorphic to itself
  * static_assert(Isomorphic<F4_1, F4_2>);    // true: both have 4 elements
@@ -444,86 +442,145 @@ class Iso;
 
 namespace details {
 
-// is_subfield_of Trait: Recursive Construction-Based Field Relationships
-// is_subfield_of<SUPER, SUB> means: "SUB can be reached by recursively descending the construction tower of SUPER"
-// This implements recursive tracking down field towers through Ext<B, modulus> parameter B.
-// When an Iso occurs on the path, ALL paths through MAIN and OTHERS are traced.
+/**
+ * @struct degree_over_prime
+ * @brief Template trait to compute total extension degree over the prime field
+ * @tparam T Field type (must satisfy FiniteFieldType concept)
+ *
+ * This trait recursively computes the total extension degree from field T down to its underlying
+ * prime field by tracing through field towers and multiplying extension degrees at each level.
+ *
+ * For a field tower like F₂₅₆ = Ext<F₁₆, modulus₁> where F₁₆ = Ext<F₄, modulus₂> where F₄ = Ext<F₂, modulus₃>,
+ * the computation would be: degree_over_prime<F₂₅₆>::value = 2 × 2 × 4 = 16 (since F₂₅₆ = F₂^16).
+ *
+ * @section degree_over_prime_specializations Specializations
+ * - **Prime fields Fp<p>**: Always return 1 (base case)
+ * - **Extension fields Ext<B, modulus, mode>**: Return (modulus.size() - 1) × degree_over_prime<B>::value
+ * - **Iso fields Iso<MAIN, OTHERS...>**: Return degree_over_prime<MAIN>::value (all components isomorphic)
+ *
+ * @section degree_over_prime_usage Usage Examples
+ * @code{.cpp}
+ * using F2 = Fp<2>;
+ * using F4 = Ext<F2, {1, 1, 1}>;   // Degree 2 over F2
+ * using F16 = Ext<F4, {2, 1, 1}>;  // Degree 2 over F4, degree 4 over F2
+ *
+ * static_assert(degree_over_prime_v<F2> == 1);   // F2 has degree 1 over itself
+ * static_assert(degree_over_prime_v<F4> == 2);   // F4 has degree 2 over F2
+ * static_assert(degree_over_prime_v<F16> == 4);  // F16 has degree 4 over F2
+ * @endcode
+ */
+template <FiniteFieldType T>
+struct degree_over_prime;
 
-// Primary template: defaults to false
-template <typename SUPERFIELD, typename SUBFIELD>
+template <FiniteFieldType T>
+inline constexpr size_t degree_over_prime_v = degree_over_prime<T>::value;
+
+// Base case: Prime fields have degree 1 over themselves
+template <uint16_t p>
+struct degree_over_prime<Fp<p>> {
+    static constexpr size_t value = 1;
+};
+
+// Extension fields: multiply local extension degree by base field's total degree
+template <FiniteFieldType B, auto modulus, LutMode mode>
+struct degree_over_prime<Ext<B, modulus, mode>> {
+    static constexpr size_t value = (modulus.size() - 1) * degree_over_prime<B>::value;
+};
+
+// Iso fields: use the total degree of the main field (all components are isomorphic)
+template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
+struct degree_over_prime<Iso<MAIN, OTHERS...>> {
+    static constexpr size_t value = degree_over_prime<MAIN>::value;
+};
+
+/**
+ * @struct is_subfield_of
+ * @brief Template trait to test recursive construction-based field relationships
+ * @tparam SUPERFIELD Superfield type (must satisfy FiniteFieldType concept)
+ * @tparam SUBFIELD Subfield type (must satisfy FiniteFieldType concept)
+ *
+ * This trait determines if SUBFIELD can be reached by recursively descending the construction
+ * tower of SUPERFIELD. It implements recursive tracking down field towers through the base field
+ * parameter B in Ext<B, modulus> constructions.
+ *
+ * The relationship is **construction-based**, not mathematical containment. For example, if F16 is
+ * constructed as Ext<F2, modulus>, then is_subfield_of<F16, F2>::value is true, but is_subfield_ov<F16, F4>::value is
+ * false as the field F4 simply was not constructed (even though mathematially it is "in between" F2 and F16).
+ *
+ * @section is_subfield_of_specializations Specializations
+ * - **Prime fields**: Fp<p> contains only itself (reflexivity)
+ * - **Extension fields**: Ext<B, modulus> contains B and all subfields of B (recursive descent)
+ * - **Extension field reflexivity**: Ext<B, modulus> contains itself (reflexivity)
+ * - **Extension-to-extension**: Cross-extension relationships via base field analysis
+ * - **Iso fields**: Traces ALL paths through MAIN and OTHERS components
+ * - **Iso field reflexivity**: Iso<MAIN, OTHERS...> contains itself (reflexivity)
+ *
+ * @section is_subfield_of_usage Usage Examples
+ * @code{.cpp}
+ * using F2 = Fp<2>;
+ * using F4 = Ext<F2, {1, 1, 1}>;
+ * using F16_from_F4 = Ext<F4, {2, 1, 1}>;
+ * using F16_from_F2 = Ext<F2, {1, 1, 0, 0, 1}>;
+ *
+ * static_assert(is_subfield_of_v<F4, F2>);            // F2 ⊆ F4 (construction-based)
+ * static_assert(is_subfield_of_v<F4, F4>);            // F4 ⊆ F4 (reflexivity)
+ * static_assert(is_subfield_of_v<F16_from_F4, F4>);   // F4 ⊆ F16_from_F4
+ * static_assert(is_subfield_of_v<F16_from_F4, F2>);   // F2 ⊆ F16_from_F4 (through F4)
+ * static_assert(!is_subfield_of_v<F16_from_F2, F4>);  // F4 ⊄ F16_from_F2 (different construction)
+ * @endcode
+ */
+template <FiniteFieldType SUPERFIELD, FiniteFieldType SUBFIELD>
 struct is_subfield_of : std::false_type {};
 
-// Convenience variable template (defined early for use in requires clauses)
-template <typename SUPER, typename SUB>
+template <FiniteFieldType SUPER, FiniteFieldType SUB>
 constexpr bool is_subfield_of_v = is_subfield_of<SUPER, SUB>::value;
 
-// Base Cases: Prime Fields
 // Prime field reflexivity: Fp<p> contains only itself
 template <uint16_t p>
 struct is_subfield_of<Fp<p>, Fp<p>> : std::true_type {};
 
-// Prime field as base of extension field: Fp<p> ⊆ Ext<Fp<p>, modulus, mode>
-template <uint16_t p, MOD modulus, LutMode mode>
-struct is_subfield_of<Ext<Fp<p>, modulus, mode>, Fp<p>> : std::true_type {};
-
-// Extension Fields: Ext<B, modulus> - Recursive descent through B
-template <typename B, MOD modulus, LutMode mode, typename SUB>
+// General extension field case: SUB ⊆ Ext<B, modulus, mode> if SUB = B or SUB ⊆ B
+template <FiniteFieldType B, MOD modulus, LutMode mode, FiniteFieldType SUB>
 struct is_subfield_of<Ext<B, modulus, mode>, SUB>
     : std::bool_constant<std::is_same_v<B, SUB> || is_subfield_of_v<B, SUB>> {};
 
-// Cross-LutMode subfield relationship: check if SUB is a subfield of Ext regardless of LutMode
-template <typename B1, MOD modulus1, LutMode mode1, typename B2, MOD modulus2, LutMode mode2>
-struct is_subfield_of<Ext<B1, modulus1, mode1>, Ext<B2, modulus2, mode2>>
-    : std::bool_constant<
-          // Same field construction (B and modulus) regardless of LutMode - use template equivalence
-          (std::is_same_v<B1, B2>&& std::is_same_v<std::remove_const_t<decltype(modulus1)>,
-                                                   std::remove_const_t<decltype(modulus2)>>&& modulus1.size() ==
-               modulus2.size() &&
-           std::equal(modulus1.begin(), modulus1.end(), modulus2.begin())) ||
-          // Recursive subfield check
-          (std::is_same_v<B1, Ext<B2, modulus2, mode2>> || is_subfield_of_v<B1, Ext<B2, modulus2, mode2>>)> {};
-
-// Extension field reflexivity (more specific than general case)
-template <typename B, MOD modulus, LutMode mode>
+// Extension field reflexivity: Ext<B, modulus, mode> contains itself
+template <FiniteFieldType B, MOD modulus, LutMode mode>
 struct is_subfield_of<Ext<B, modulus, mode>, Ext<B, modulus, mode>> : std::true_type {};
 
-// Extension field reflexivity across different LutModes (same field, different implementation)
-template <typename B, MOD modulus, LutMode mode1, LutMode mode2>
-struct is_subfield_of<Ext<B, modulus, mode1>, Ext<B, modulus, mode2>> : std::true_type {};
+// Extension-to-extension: Ext<B_SUB, mod_SUB, mode_SUB> ⊆ Ext<B_SUP, mod_SUP, mode_SUP> if SUB = B_SUP or SUB ⊆ B_SUP
+template <FiniteFieldType B_SUP, MOD modulus_SUP, LutMode mode_SUP, FiniteFieldType B_SUB, MOD modulus_SUB,
+          LutMode mode_SUB>
+struct is_subfield_of<Ext<B_SUP, modulus_SUP, mode_SUP>, Ext<B_SUB, modulus_SUB, mode_SUB>>
+    : std::bool_constant<std::is_same_v<B_SUP, Ext<B_SUB, modulus_SUB, mode_SUB>> ||
+                         is_subfield_of_v<B_SUP, Ext<B_SUB, modulus_SUB, mode_SUB>>> {};
 
-// Iso Fields: Iso<MAIN, OTHERS...> - Trace ALL paths
-// Iso components are subfields of the Iso
-template <typename MAIN, typename... OTHERS>
-struct is_subfield_of<Iso<MAIN, OTHERS...>, MAIN> : std::true_type {};
-
-template <typename MAIN, typename OTHER, typename... OTHERS>
-struct is_subfield_of<Iso<MAIN, OTHER, OTHERS...>, OTHER> : std::true_type {};
-
-// More general case: any of the OTHERS (not just the first one)
-template <typename MAIN, typename... OTHERS, typename SUB>
-    requires((std::is_same_v<SUB, OTHERS>) || ...)
+// Iso components: Any component (MAIN or OTHERS) is a subfield of the Iso
+template <FiniteFieldType MAIN, FiniteFieldType... OTHERS, FiniteFieldType SUB>
+    requires(std::is_same_v<SUB, MAIN> || ((std::is_same_v<SUB, OTHERS>) || ...))
 struct is_subfield_of<Iso<MAIN, OTHERS...>, SUB> : std::true_type {};
 
-// General Iso case: recursively check all paths through MAIN and OTHERS
-template <typename MAIN, typename... OTHERS, typename SUB>
+// General Iso case: SUB ⊆ Iso if SUB is a subfield of any component
+template <FiniteFieldType MAIN, FiniteFieldType... OTHERS, FiniteFieldType SUB>
     requires(!std::is_same_v<SUB, MAIN> && !((std::is_same_v<SUB, OTHERS>) || ...))
 struct is_subfield_of<Iso<MAIN, OTHERS...>, SUB>
     : std::bool_constant<is_subfield_of_v<MAIN, SUB> || (is_subfield_of_v<OTHERS, SUB> || ...)> {};
 
-// Iso field reflexivity
-template <typename MAIN, typename... OTHERS>
+// Iso field reflexivity: Iso<MAIN, OTHERS...> contains itself
+template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 struct is_subfield_of<Iso<MAIN, OTHERS...>, Iso<MAIN, OTHERS...>> : std::true_type {};
 
 // Cross-Iso subfield relationships: Check if any representation from SubIso is a subfield of any representation in
 // SuperIso
-template <typename SUPER_MAIN, typename... SUPER_OTHERS, typename SUB_MAIN, typename... SUB_OTHERS>
-    requires(!std::is_same_v<Iso<SUPER_MAIN, SUPER_OTHERS...>, Iso<SUB_MAIN, SUB_OTHERS...>>)
-struct is_subfield_of<Iso<SUPER_MAIN, SUPER_OTHERS...>, Iso<SUB_MAIN, SUB_OTHERS...>> {
+template <FiniteFieldType SUP_MAIN, FiniteFieldType... SUP_OTHERS, FiniteFieldType SUB_MAIN,
+          FiniteFieldType... SUB_OTHERS>
+    requires(!std::is_same_v<Iso<SUP_MAIN, SUP_OTHERS...>, Iso<SUB_MAIN, SUB_OTHERS...>>)
+struct is_subfield_of<Iso<SUP_MAIN, SUP_OTHERS...>, Iso<SUB_MAIN, SUB_OTHERS...>> {
    private:
     // Helper to check if a single sub-field is a subfield of any super-field representation
-    template <typename SubField>
+    template <FiniteFieldType SubField>
     static constexpr bool is_subfield_of_any_super_repr() {
-        return is_subfield_of_v<SUPER_MAIN, SubField> || (is_subfield_of_v<SUPER_OTHERS, SubField> || ...);
+        return is_subfield_of_v<SUP_MAIN, SubField> || (is_subfield_of_v<SUP_OTHERS, SubField> || ...);
     }
 
     // Check if SUB_MAIN is a subfield of any representation in SuperIso
@@ -540,7 +597,7 @@ struct is_subfield_of<Iso<SUPER_MAIN, SUPER_OTHERS...>, Iso<SUB_MAIN, SUB_OTHERS
 
 /**
  * @concept SubfieldOf
- * @brief Enhanced concept for testing subfield relationships including Iso types
+ * @brief Concept for testing subfield relationships including Iso types
  * @tparam SUPERFIELD Extension field type (the larger field)
  * @tparam SUBFIELD Potential subfield type (the smaller field)
  *
@@ -550,7 +607,7 @@ struct is_subfield_of<Iso<SUPER_MAIN, SUPER_OTHERS...>, Iso<SUB_MAIN, SUB_OTHERS
  * - Enhanced cross-Iso relationships: any representation from SubIso ⊆ any representation in SuperIso
  * - Recursive path detection through complex field hierarchies
  *
- * @warning This validates field tower relationships in the sense of this library (nested construction of extension
+ * @warning This validates field tower relationships in the sense of construction (nested construction of extension
  * fields), not in the mathematical sense. Depending on the actual construction, the construction tower may skip one or
  * more intermediate fields from the mathematical tower.
  *
@@ -560,10 +617,10 @@ struct is_subfield_of<Iso<SUPER_MAIN, SUPER_OTHERS...>, Iso<SUB_MAIN, SUB_OTHERS
  *
  * @code{.cpp}
  * using F2 = Fp<2>;
- * using F4_1 = Ext<F2, MOD{1, 1, 1}>;     // F₄ construction 1
- * using F4_2 = Ext<F2, MOD{1, 0, 1}>;     // F₄ construction 2 (isomorphic)
- * using F4_Iso = Iso<F4_1, F4_2>;         // Intersection field
- * using F16 = Ext<F4_Iso, MOD{2, 1, 1}>;  // Extension using Iso as base
+ * using F4_1 = Ext<F2, {1, 1, 1}>;     // F₄ construction 1
+ * using F4_2 = Ext<F2, {1, 0, 1}>;     // F₄ construction 2 (isomorphic)
+ * using F4_Iso = Iso<F4_1, F4_2>;      // Intersection field
+ * using F16 = Ext<F4_Iso, {2, 1, 1}>;  // Extension using Iso as base
  *
  * // Traditional relationships
  * static_assert(SubfieldOf<F16, F16>);     // true: every field is its own subfield
@@ -571,9 +628,9 @@ struct is_subfield_of<Iso<SUPER_MAIN, SUPER_OTHERS...>, Iso<SUB_MAIN, SUB_OTHERS
  * static_assert(SubfieldOf<F4_Iso, F2>);   // true: F2 ⊆ F4_Iso (via MAIN representation)
  *
  * // Enhanced Iso relationships
- * static_assert(SubfieldOf<F16, F4_1>);    // true: F4_1 ⊆ F16 (via Iso representation)
- * static_assert(SubfieldOf<F16, F4_2>);    // true: F4_2 ⊆ F16 (via Iso representation)
- * static_assert(SubfieldOf<F16, F2>);      // true: F2 ⊆ F16 (recursive path detection)
+ * static_assert(SubfieldOf<F16, F4_1>);  // true: F4_1 ⊆ F16 (via Iso representation)
+ * static_assert(SubfieldOf<F16, F4_2>);  // true: F4_2 ⊆ F16 (via Iso representation)
+ * static_assert(SubfieldOf<F16, F2>);    // true: F2 ⊆ F16 (recursive path detection)
  * @endcode
  */
 template <typename SUPERFIELD, typename SUBFIELD>
@@ -604,21 +661,21 @@ concept SubfieldOf = details::is_subfield_of_v<SUPERFIELD, SUBFIELD>;
  *
  * @code{.cpp}
  * using F2 = Fp<2>;
- * using F4_1 = Ext<F2, MOD{1, 1, 1}>;     // F₄ construction 1
- * using F4_2 = Ext<F2, MOD{1, 0, 1}>;     // F₄ construction 2 (isomorphic)
- * using F4_Iso = Iso<F4_1, F4_2>;         // Intersection field
- * using F16 = Ext<F4_Iso, MOD{2, 1, 1}>;  // Extension using Iso as base
+ * using F4_1 = Ext<F2, {1, 1, 1}>;     // F₄ construction 1
+ * using F4_2 = Ext<F2, {1, 0, 1}>;     // F₄ construction 2 (isomorphic)
+ * using F4_Iso = Iso<F4_1, F4_2>;      // Intersection field
+ * using F16 = Ext<F4_Iso, {2, 1, 1}>;  // Extension using Iso as base
  * using F3 = Fp<3>;
  *
  * // Traditional relationships
-static_assert(Isomorphic<F16, F16>);        // true: every field is its own extension
- * static_assert(ExtensionOf<F2, F4_1>);    // true: F4_1 defined based on F2
- * static_assert(ExtensionOf<F4_1, F16>);   // true: F16 defined based on F4_Iso (which contains F4_1)
+static_assert(Isomorphic<F16, F16>);       // true: every field is its own extension
+ * static_assert(ExtensionOf<F2, F4_1>);   // true: F4_1 defined based on F2
+ * static_assert(ExtensionOf<F4_1, F16>);  // true: F16 defined based on F4_Iso (which contains F4_1)
  *
  * // Enhanced Iso relationships
- * static_assert(ExtensionOf<F4_1, F16>);   // true: via Iso representation
- * static_assert(ExtensionOf<F4_2, F16>);   // true: via Iso representation
- * static_assert(ExtensionOf<F2, F16>);     // true: recursive path detection
+ * static_assert(ExtensionOf<F4_1, F16>);  // true: via Iso representation
+ * static_assert(ExtensionOf<F4_2, F16>);  // true: via Iso representation
+ * static_assert(ExtensionOf<F2, F16>);    // true: recursive path detection
  *
  * // Negative cases
  * static_assert(!ExtensionOf<F16, F4_1>);  // false: F4_1 not defined based on F16
@@ -659,22 +716,22 @@ concept ExtensionOf = SubfieldOf<E, S>;
  * @code{.cpp}
  * using F2 = Fp<2>;
  * using F3 = Fp<3>;
- * using F4_1 = Ext<F2, MOD{1, 1, 1}>;       // F₄ construction 1
- * using F4_2 = Ext<F2, MOD{1, 0, 1}>;       // F₄ construction 2 (isomorphic)
- * using F4_Iso = Iso<F4_1, F4_2>;           // Intersection field
- * using F16 = Ext<F4_Iso, MOD{2, 1, 1}>;    // Extension using Iso as base
- * using F8 = Ext<F2, MOD{1, 1, 0, 1}>;      // Different branch from F2
+ * using F4_1 = Ext<F2, {1, 1, 1}>;     // F₄ construction 1
+ * using F4_2 = Ext<F2, {1, 0, 1}>;     // F₄ construction 2 (isomorphic)
+ * using F4_Iso = Iso<F4_1, F4_2>;      // Intersection field
+ * using F16 = Ext<F4_Iso, {2, 1, 1}>;  // Extension using Iso as base
+ * using F8 = Ext<F2, {1, 1, 0, 1}>;    // Different branch from F2
  *
  * // Traditional relationships (symmetric and reflexive)
- * static_assert(InSameTower<F2, F4_1>);     // true: F2 ⊆ F4_1
- * static_assert(InSameTower<F4_1, F2>);     // true: symmetric to above
- * static_assert(InSameTower<F4_1, F4_1>);   // true: reflexive
- * static_assert(InSameTower<F2, F16>);      // true: F2 ⊆ F16 via F4_Iso
+ * static_assert(InSameTower<F2, F4_1>);    // true: F2 ⊆ F4_1
+ * static_assert(InSameTower<F4_1, F2>);    // true: symmetric to above
+ * static_assert(InSameTower<F4_1, F4_1>);  // true: reflexive
+ * static_assert(InSameTower<F2, F16>);     // true: F2 ⊆ F16 via F4_Iso
  *
  * // Enhanced Iso relationships
- * static_assert(InSameTower<F4_1, F16>);    // true: via Iso representation
- * static_assert(InSameTower<F4_2, F16>);    // true: via Iso representation
- * static_assert(InSameTower<F16, F4_1>);    // true: symmetric to above
+ * static_assert(InSameTower<F4_1, F16>);  // true: via Iso representation
+ * static_assert(InSameTower<F4_2, F16>);  // true: via Iso representation
+ * static_assert(InSameTower<F16, F4_1>);  // true: symmetric to above
  *
  * // Negative cases (different towers)
  * static_assert(!InSameTower<F4_1, F4_2>);  // false: non-identical isomorphic fields
@@ -691,7 +748,7 @@ concept InSameTower = SubfieldOf<F, G> || SubfieldOf<G, F>;
 namespace details {
 
 /**
- * @brief Compile-time type list utility for field subfield calculations
+ * @brief Compile-time type list utility for subfield calculations
  * @tparam Types Variadic list of types
  */
 template <typename... Types>
@@ -825,9 +882,9 @@ using largest_field_in_list_t = typename largest_field_in_list<List>::type;
  * using F4 = Ext<F2, {1, 1, 1}>;
  * using F16 = Ext<F4, {2, 2, 1}>;
  *
- * using subfields_F2 = collect_subfields_t<F2>;   // type_list<Fp<2>>
- * using subfields_F4 = collect_subfields_t<F4>;   // type_list<Fp<2>, Ext<F2,{1,1,1}>>
- * using subfields_F16 = collect_subfields_t<F16>; // type_list<Fp<2>, Ext<F2,{1,1,1}>, Ext<F4,{2,2,1}>>
+ * using subfields_F2 = collect_subfields_t<F2>;    // type_list<Fp<2>>
+ * using subfields_F4 = collect_subfields_t<F4>;    // type_list<Fp<2>, Ext<F2,{1,1,1}>>
+ * using subfields_F16 = collect_subfields_t<F16>;  // type_list<Fp<2>, Ext<F2,{1,1,1}>, Ext<F4,{2,2,1}>>
  * @endcode
  *
  * @note This trait is used internally by @ref largest_common_subfield_t for cross-field conversions
@@ -916,9 +973,9 @@ using collect_subfields_t = typename collect_subfields<F>::type;
  * @code{.cpp}
  * using F3 = Fp<3>;
  * using F9 = Ext<F3, {2, 2, 1}>;
- * using F81_a = Ext<F3, {2, 1, 0, 0, 1}>;     // Direct F3 → F81
- * using F81_b = Ext<F9, {6, 0, 1}>;           // Tower F3 → F9 → F81
- * using F27 = Ext<F3, {1, 2, 0, 1}>;         // Different tower F3 → F27
+ * using F81_a = Ext<F3, {2, 1, 0, 0, 1}>;   // Direct F3 → F81
+ * using F81_b = Ext<F9, {6, 0, 1}>;         // Tower F3 → F9 → F81
+ * using F27 = Ext<F3, {1, 2, 0, 1}>;        // Different tower F3 → F27
  *
  * using common_1 = largest_common_subfield_t<F81_a, F81_b>;  // F9 (optimal bridge)
  * using common_2 = largest_common_subfield_t<F81_a, F27>;    // F3 (only common field)
@@ -1004,9 +1061,9 @@ using largest_common_subfield_t = typename largest_common_subfield<F, G>::type;
  * using F16_v2 = Ext<F4, {2, 2, 1}>;
  * using F16_Iso = Iso<F16_v1, F16_v2>;
  *
- * static_assert(is_iso_v<F16_Iso>);              // true
- * static_assert(!is_iso_v<F16_v1>);              // false
- * using main = iso_main_type_t<F16_Iso>;         // F16_v1
+ * static_assert(is_iso_v<F16_Iso>);       // true
+ * static_assert(!is_iso_v<F16_v1>);       // false
+ * using main = iso_main_type_t<F16_Iso>;  // F16_v1
  * @endcode
  *
  * @see @ref is_iso_v, @ref iso_main_type_t
@@ -1028,9 +1085,9 @@ struct iso_info {
  */
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 struct iso_info<Iso<MAIN, OTHERS...>> {
-    static constexpr bool is_iso = true;           ///< Always true for Iso specialization
-    using main_type = MAIN;                        ///< Main field representation type
-    using others_tuple = std::tuple<OTHERS...>;    ///< Tuple of other field representation types
+    static constexpr bool is_iso = true;         ///< Always true for Iso specialization
+    using main_type = MAIN;                      ///< Main field representation type
+    using others_tuple = std::tuple<OTHERS...>;  ///< Tuple of other field representation types
 };
 
 /**
@@ -1043,8 +1100,6 @@ struct iso_info<Iso<MAIN, OTHERS...>> {
  */
 template <typename T, typename... Types>
 constexpr bool is_distinct_from_all = (!std::is_same_v<T, Types> && ...);
-
-}  // namespace details
 
 /**
  * @brief Constexpr function to check pairwise distinctness of all types in a parameter pack
@@ -1077,7 +1132,6 @@ constexpr bool pairwise_distinct() {
     }
 }
 
-namespace details {
 /**
  * @brief Base class to make derived classes non-copyable
  *
