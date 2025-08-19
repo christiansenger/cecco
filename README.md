@@ -1,7 +1,7 @@
 # C(++)ECCO
-C++ Error Control Coding Orrery: a header-only library for ECC simulations and experiments, modeling complete coding systems across arbitrary finite fields and complex inter-field relationships.
+C++ Error Control Coding Orrery: a header-only library for ECC simulations and experiments, modeling complete coding systems across arbitrary finite fields and complex inter-field relationships. CECCO provides an intuitive, object-oriented interface to finite fields, vectors, polynomials, matrices, and many linear error-correcting codes. Its low-level functionalities can be used to implement arbitrary linear codes and their decoders, and its high-level functionalities are convenient for creating complete simulation chains.
 
-Check the the demos folder to get started. Detailed Doxygen documentation is available <a href="https://christiansenger.github.io/cecco/">here</a>.
+Check the files in the demos folder to get started. Detailed Doxygen documentation is available <a href="https://christiansenger.github.io/cecco/">here</a>.
 
 <a href="https://doi.org/10.5281/zenodo.15685869"><img src="https://zenodo.org/badge/1003774077.svg" alt="DOI"></a>
 
@@ -9,7 +9,7 @@ Check the the demos folder to get started. Detailed Doxygen documentation is ava
 
 ## License
 
-This software, authored by Christian Senger, is licensed under a Modified BSD License for **noncommercial use only**. You may use, modify, and redistribute this software for teaching, academic research, and personal non-profit purposes. **Commercial use is strictly prohibited** without a separate commercial license.
+This software, authored by Christian Senger, is licensed under a modified BSD License for **noncommercial use only**. You may use, modify, and redistribute this software for teaching, academic research, and personal non-profit purposes. **Commercial use is strictly prohibited** without a separate commercial license.
 
 For details, see the [LICENSE](./LICENSE) file.
 
