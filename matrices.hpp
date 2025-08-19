@@ -2,7 +2,7 @@
  * @file matrices.hpp
  * @brief Matrix arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0
+ * @version 2.1.0
  * @date 2025
  *
  * @copyright
@@ -21,7 +21,7 @@
  *   floating-point numbers, complex numbers, and signed integers
  * - **Specialized matrix types**: details::Zero, details::Identity, details::Diagonal, details::Vandermonde, and
  * details::Toeplitz matrices with optimized operations
- * - **Optimized linear algebra operations**: REF/RREF with binary field optimizations, cached rank computation, 
+ * - **Optimized linear algebra operations**: REF/RREF with binary field optimizations, cached rank computation,
  *   determinant, nullspace, characteristic polynomial, eigenvalue computation, and matrix inversion
  * - **Cross-field operations**: Safe conversions between matrices over related fields using
  *   @ref CECCO::SubfieldOf, @ref CECCO::ExtensionOf, and @ref CECCO::largest_common_subfield_t
@@ -77,7 +77,8 @@
  *
  * @section Performance_Features
  *
- * - **Optimized algorithms**: REF (Row Echelon Form) for efficient rank computation, binary field optimizations using constexpr if
+ * - **Optimized algorithms**: REF (Row Echelon Form) for efficient rank computation, binary field optimizations using
+ * constexpr if
  * - **High-performance caching**: Rank computation uses caching
  * - **Move semantics**: Optimal performance for temporary matrix operations
  * - **STL integration**: Uses standard algorithms for optimal compiler optimization
@@ -200,7 +201,7 @@ std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept;
  * performance gains
  * - **Cross-field compatibility**: Safe conversions between matrices over related fields
  *   using C++20 concepts for field tower relationships
- * - **Optimized linear algebra**: REF/RREF with binary field optimizations, cached rank computation, 
+ * - **Optimized linear algebra**: REF/RREF with binary field optimizations, cached rank computation,
  *   determinant, nullspace, eigenvalues, matrix inversion, characteristic polynomial computation
  *
  * @section Matrix_Types
@@ -628,7 +629,7 @@ class Matrix {
      *
      * @return Rank of the matrix (dimension of row/column space)
      *
-     * Computes the rank using Gaussian elimination (REF algorithm). 
+     * Computes the rank using Gaussian elimination (REF algorithm).
      * Uses caching for repeated calls.
      *
      * @note Only available for field types (requires division)
@@ -1469,6 +1470,159 @@ class Matrix {
     mutable details::Cache<details::CacheEntry<Rank, size_t>> cache;
 
     /**
+     * @brief High-performance matrix multiplication kernel with compile-time transpose dispatch
+     * @tparam this_transposed Compile-time flag: true if left matrix (*this) is transposed
+     * @tparam rhs_transposed Compile-time flag: true if right matrix (rhs) is transposed
+     * @param this_data Raw pointer to left matrix data
+     * @param rhs_data Raw pointer to right matrix data
+     * @param res_data Raw pointer to result matrix data
+     * @param M Number of rows in result
+     * @param K Inner dimension (cols of this, rows of rhs)
+     * @param N Number of columns in result
+     * @param BS Block size for cache tiling
+     */
+    template <bool this_transposed, bool rhs_transposed>
+    static void multiply_kernel(const T* __restrict__ this_data, const T* __restrict__ rhs_data,
+                                T* __restrict__ res_data, size_t M, size_t K, size_t N, size_t BS) {
+        for (size_t ii = 0; ii < M; ii += BS) {
+            const size_t imax = std::min(ii + BS, M);
+            for (size_t kk = 0; kk < K; kk += BS) {
+                const size_t kmax = std::min(kk + BS, K);
+                for (size_t jj = 0; jj < N; jj += BS) {
+                    const size_t jmax = std::min(jj + BS, N);
+                    for (size_t i = ii; i < imax; ++i) {
+                        for (size_t k = kk; k < kmax; ++k) {
+                            // Compile-time dispatch for optimal addressing
+                            const size_t this_idx = this_transposed ? (i + k * M) : (i * K + k);
+                            const T aik = this_data[this_idx];
+                            const size_t res_row_offset = i * N;
+                            for (size_t j = jj; j < jmax; ++j) {
+                                // Compile-time dispatch for optimal addressing
+                                const size_t rhs_idx = rhs_transposed ? (k + j * K) : (k * N + j);
+                                res_data[res_row_offset + j] += aik * rhs_data[rhs_idx];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * @brief High-performance elimination helper for a single row operation
+     * @tparam transposed True if matrix is transposed, false otherwise
+     * @param data Raw matrix data
+     * @param m Number of rows
+     * @param n Number of columns
+     * @param target_row Row to be eliminated
+     * @param pivot_row Row containing the pivot
+     * @param start_col Starting column for elimination
+     * @param f Scaling factor
+     */
+    template <bool transposed>
+    static void eliminate_row_kernel(T* __restrict__ data, size_t m, size_t n, size_t target_row, size_t pivot_row,
+                                     size_t start_col, const T& f) {
+        if constexpr (!transposed) {
+            // Row-major access
+            T* __restrict__ target_data = data + target_row * n;
+            const T* __restrict__ pivot_data = data + pivot_row * n;
+            for (size_t j = start_col; j < n; ++j) {
+                target_data[j] -= f * pivot_data[j];
+            }
+        } else {
+            // Column-major access
+            for (size_t j = start_col; j < n; ++j) {
+                data[target_row + j * m] -= f * data[pivot_row + j * m];
+            }
+        }
+    }
+
+    /**
+     * @brief High-performance REF elimination kernel with compile-time transpose dispatch
+     * @tparam transposed True if matrix is transposed, false otherwise
+     * @param data Raw matrix data
+     * @param m Number of rows
+     * @param n Number of columns
+     * @param h Current pivot row
+     * @param k Current pivot column
+     * @return Number of rows processed (new h value)
+     */
+    template <bool transposed>
+    size_t ref_elimination_kernel(T* __restrict__ data, size_t m, size_t n, size_t h, size_t k) {
+        while (h < m && k < n) {
+            // find pivot
+            size_t p = m;  // Default: no pivot found
+
+            for (size_t row = h; row < m; ++row) {
+                const size_t idx = transposed ? (row + k * m) : (row * n + k);
+                if (data[idx] != T(0)) {
+                    p = row;
+                    break;
+                }
+            }
+
+            if (p == m) {  // no pivot in column -> proceed to next column
+                ++k;
+            } else {
+                this->swap_rows(h, p);
+
+                const size_t pivot_idx = transposed ? (h + k * m) : (h * n + k);
+                const T pivot = data[pivot_idx];
+                this->scale_row(T(1) / pivot, h);
+
+                // Forward elimination only - eliminate entries BELOW pivot
+                for (size_t i = h + 1; i < m; ++i) {
+                    const size_t f_idx = transposed ? (i + k * m) : (i * n + k);
+                    const T f = data[f_idx];
+
+                    eliminate_row_kernel<transposed>(data, m, n, i, h, k, f);
+                }
+
+                ++h;
+                ++k;
+            }
+        }
+        return h;
+    }
+
+    /**
+     * @brief High-performance RREF backward elimination kernel with compile-time transpose dispatch
+     * @tparam transposed True if matrix is transposed, false otherwise
+     * @param data Raw matrix data
+     * @param m Number of rows
+     * @param n Number of columns
+     * @param r Matrix rank (number of pivots to process)
+     */
+    template <bool transposed>
+    void rref_backward_elimination_kernel(T* __restrict__ data, size_t m, size_t n, size_t r) {
+        for (size_t i = 0; i < r; ++i) {
+            const size_t pivot_row = r - 1 - i;  // Process from last to first
+
+            // find pivot
+            size_t pivot_col = 0;
+            while (pivot_col < n) {
+                const size_t pivot_idx = transposed ? (pivot_row + pivot_col * m) : (pivot_row * n + pivot_col);
+                if (data[pivot_idx] != T(0)) {
+                    break;
+                }
+                ++pivot_col;
+            }
+
+            if (pivot_col < n) {
+                // Backward elimination only - eliminate entries ABOVE pivot
+                for (size_t row = 0; row < pivot_row; ++row) {
+                    const size_t f_idx = transposed ? (row + pivot_col * m) : (row * n + pivot_col);
+                    const T f = data[f_idx];
+
+                    if (f != T(0)) {
+                        eliminate_row_kernel<transposed>(data, m, n, row, pivot_row, pivot_col, f);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * @brief Calculate matrix rank (private implementation for caching)
      */
     size_t calculate_rank() const
@@ -1706,21 +1860,30 @@ Matrix<T>& Matrix<T>::operator*=(const Matrix& rhs) {
             std::for_each(mu_indices.begin(), mu_indices.end(), [&](size_t mu) { (*this)(mu, nu) *= s; });
         });
     } else {
-        Matrix<T> res(m, rhs.n);
-        const auto indices = std::views::iota(size_t{0}, m * res.n);
-        std::for_each(indices.begin(), indices.end(), [this, &res, &rhs](size_t idx) {
-            size_t mu = idx / res.n;
-            size_t i = idx % res.n;
+        const size_t M = get_m();
+        const size_t K = get_n();
+        const size_t N = rhs.get_n();
+        Matrix<T> res(M, N, T(0));
 
-            auto row_start = const_cast<const Matrix&>(*this).data.begin() + mu * n;
-            auto row_end = row_start + n;
-            std::vector<T> col(n);
+        // Get raw data pointers for direct access (bypass operator())
+        const T* __restrict__ this_data = this->data.data();
+        const T* __restrict__ rhs_data = rhs.data.data();
+        T* __restrict__ res_data = res.data.data();
 
-            auto col_indices = std::views::iota(size_t{0}, n);
-            std::ranges::transform(col_indices, col.begin(), [&rhs, i](size_t k) { return rhs(k, i); });
+        // Tune this block/tile size for your arch. 48, 64, 96, 128 are common good starts
+        constexpr size_t BS = 96;
 
-            res(mu, i) = std::inner_product(row_start, row_end, col.begin(), T(0));
-        });
+        // Branch ONCE on transpose flags - dispatch to optimized kernels with zero duplication
+        if (!this->transposed && !rhs.transposed) {
+            multiply_kernel<false, false>(this_data, rhs_data, res_data, M, K, N, BS);
+        } else if (this->transposed && !rhs.transposed) {
+            multiply_kernel<true, false>(this_data, rhs_data, res_data, M, K, N, BS);
+        } else if (!this->transposed && rhs.transposed) {
+            multiply_kernel<false, true>(this_data, rhs_data, res_data, M, K, N, BS);
+        } else {
+            multiply_kernel<true, true>(this_data, rhs_data, res_data, M, K, N, BS);
+        }
+        res.type = details::Generic;
         *this = std::move(res);
     }
     if (std::all_of(this->data.cbegin(), this->data.cend(), [](const T& elem) { return elem == T(0); })) {
@@ -2512,38 +2675,11 @@ Matrix<T>& Matrix<T>::ref(size_t* rank)
         size_t h = 0;
         size_t k = 0;
 
-        auto* cthis = const_cast<const Matrix<T>*>(this);
-
-        while (h < m && k < n) {
-            // find pivot (some nonzero element in column k)
-            auto row_indices = std::views::iota(h, m);
-            auto pivot_it = std::ranges::find_if(row_indices, [&](size_t row) { return (*cthis)(row, k) != T(0); });
-            size_t p = (pivot_it != row_indices.end()) ? *pivot_it : m;
-
-            if (p == m) {  // no pivot in column -> proceed to next column
-                ++k;
-            } else {
-                this->swap_rows(h, p);
-
-                // Scale pivot row (skip for binary fields where pivots are already 1)
-                //f constexpr (!std::is_same_v<T, Fp<2>>) {
-                    const T pivot = (*cthis)(h, k);
-                    this->scale_row(T(1) / pivot, h);
-                //}
-
-                // Forward elimination only - eliminate entries BELOW pivot
-                for (size_t i = h + 1; i < m; ++i) {
-                    // scaling factor for row i
-                    const T f = (*cthis)(i, k);
-
-                    // update all components
-                    auto col_indices = std::views::iota(k, n);
-                    std::ranges::for_each(col_indices, [&](size_t j) { (*this)(i, j) -= f * (*cthis)(h, j); });
-                }
-
-                ++h;
-                ++k;
-            }
+        // Branch ONCE on transpose flag - dispatch to optimized elimination kernels
+        if (!this->transposed) {
+            h = ref_elimination_kernel<false>(this->data.data(), m, n, h, k);
+        } else {
+            h = ref_elimination_kernel<true>(this->data.data(), m, n, h, k);
         }
         cache.template set<Rank>(h);
         if (rank != nullptr) *rank = h;
@@ -2589,22 +2725,11 @@ Matrix<T>& Matrix<T>::rref(size_t* rank)
         size_t r = 0;
         this->ref(&r);
 
-        for (size_t i = 0; i < r; ++i) {
-            const size_t pivot_row = r - 1 - i;  // Process from last to first
-
-            size_t pivot_col = 0;
-            while (pivot_col < n && (*this)(pivot_row, pivot_col) == T(0)) ++pivot_col;
-
-            if (pivot_col < n) {
-                // Eliminate entries above pivot
-                for (size_t row = 0; row < pivot_row; ++row) {
-                    const T f = (*this)(row, pivot_col);
-                    if (f != T(0)) {
-                        const auto indices = std::views::iota(pivot_col, n);
-                        std::ranges::for_each(indices, [&](size_t j) { (*this)(row, j) -= f * (*this)(pivot_row, j); });
-                    }
-                }
-            }
+        // Branch ONCE on transpose flag - dispatch to optimized backward elimination kernels
+        if (!this->transposed) {
+            rref_backward_elimination_kernel<false>(this->data.data(), m, n, r);
+        } else {
+            rref_backward_elimination_kernel<true>(this->data.data(), m, n, r);
         }
 
         cache.template set<Rank>(r);

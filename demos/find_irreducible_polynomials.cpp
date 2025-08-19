@@ -2,7 +2,7 @@
 
 // Use CECCO library, compile with -std=c++20 -I../
 // Adapt -Ipath_to_hpp_files if necessary, append -O3 for performance
-#include "ecc.hpp"
+#include "cecco.hpp"
 using namespace CECCO;
 
 int main(void) {

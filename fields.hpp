@@ -164,7 +164,7 @@
 /// @def COMPRESS_LUTS_FROM_Q
 /// @brief For fields with  COMPRESS_LUTS_FROM_Q or more elements, compress 2D lookup tables to save ~50% memory by
 /// exploiting commutativity (store only upper triangle). Optimal value depends on cache size.
-#define COMPRESS_LUTS_FROM_Q 65
+#define COMPRESS_LUTS_FROM_Q 256
 
 #include <any>
 #include <memory>
