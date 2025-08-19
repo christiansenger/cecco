@@ -2184,17 +2184,17 @@ struct IsomorphismPair {
 
             const auto h = ConwayPolynomial<A::get_characteristic(), details::degree_over_prime_v<A>>();
 
-            // Find root of h in A - must be a generator
+            // Find root of h in A - is always a generator (property of Conway polynomials)
             Polynomial<A> h_A(h);
             for (size_t i = 1; i < size; ++i) {
                 A a(i);
-                if (h_A(a) == A(0) && a.get_multiplicative_order() == size - 1) {
+                if (h_A(a) == A(0)) {
                     alpha = a;
                     break;
                 }
             }
 
-            // Find root of h in B - must be a generator
+            // Find root of h in B - is always a generator (property of Conway polynomials)
             Polynomial<B> h_B(h);
             for (size_t i = 1; i < size; ++i) {
                 B b(i);
@@ -3736,7 +3736,7 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      * 0 < k < |field|-1. The generator spans the entire multiplicative group of the field.
      *
      * **Conway Polynomial Priority**: For fields with ≤10,000 elements, this method first
-     * attempts to find a Conway polynomial root that is also a generator. If successful,
+     * attempts to find a Conway polynomial root (that is always a generator/primitive). If successful,
      * this ensures consistent canonical field representations across different construction
      * paths. If no Conway generator is available, falls back to a random generator.
      *
@@ -3883,11 +3883,11 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
     label_t label;  ///< Element label in {0, 1, ..., Q - 1}
 
     /**
-     * @brief Attempt to find a Conway polynomial root that is also a generator
+     * @brief Attempt to find a Conway polynomial root (that is automatically a generator)
      * @return Conway generator if available, std::nullopt otherwise
      *
-     * This method searches for a field element that is both a root of the Conway polynomial
-     * for this field and a multiplicative generator. Conway polynomials provide canonical
+     * This method searches for a field element that is a root of the Conway polynomial
+     * and thus automatically a generator of the multiplicative group. Conway polynomials provide canonical
      * field representations that ensure consistent embeddings across different construction paths.
      *
      * **Algorithm**:
@@ -4477,7 +4477,7 @@ Ext<B, modulus, mode> Ext<B, modulus, mode>::get_generator() noexcept {
     static Ext cached_generator{0};
 
     std::call_once(computed_flag, []() {
-        // Try Conway generator first
+        // Try to find Conway generator first (if polynomial.hpp defines Conway polynomial)
         auto conway_gen = get_conway_generator();
         if (conway_gen.has_value()) {
             cached_generator = conway_gen.value();
@@ -4507,16 +4507,16 @@ std::optional<Ext<B, modulus, mode>> Ext<B, modulus, mode>::get_conway_generator
     // Convert to polynomial over this field
     Polynomial<Ext> poly_over_field(conway_poly);
 
-    // Find Conway root that is also a generator
+    // Search among generators for a Conway root
     const auto& mul_ord = lut_mul_ord();
     for (label_t i = 2; i < Q; ++i) {
-        if (mul_ord(i) == Q - 1) {  // Must be a generator
+        if (mul_ord(i) == Q - 1) {  // All roots of Conway polynomial are generators
             Ext candidate(i);
-            if (poly_over_field(candidate) == Ext(0)) return candidate;
+            if (poly_over_field(candidate).is_zero()) return candidate;
         }
     }
 
-    // No Conway root is a generator
+    // Can never be here
     return std::nullopt;
 }
 
