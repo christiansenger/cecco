@@ -1915,7 +1915,7 @@ constexpr size_t burst_length(const Vector<T>& v) noexcept
  */
 template <ComponentType T>
 constexpr size_t cyclic_burst_length(const Vector<T>& v) noexcept
-    requires FiniteFieldType<T> || std::is_same_v<T, Rationals<InfInt>> || SignedIntType<T>
+    requires ReliablyComparableType<T>
 {
     return v.cyclic_burst_length();
 }

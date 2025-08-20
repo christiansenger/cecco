@@ -1470,7 +1470,7 @@ class Matrix {
     mutable details::Cache<details::CacheEntry<Rank, size_t>> cache;
 
     /**
-     * @brief High-performance matrix multiplication kernel with compile-time transpose dispatch
+     * @brief Matrix multiplication kernel with compile-time transpose dispatch
      * @tparam this_transposed Compile-time flag: true if left matrix (*this) is transposed
      * @tparam rhs_transposed Compile-time flag: true if right matrix (rhs) is transposed
      * @param this_data Raw pointer to left matrix data
@@ -1509,7 +1509,7 @@ class Matrix {
     }
 
     /**
-     * @brief High-performance elimination helper for a single row operation
+     * @brief Elimination helper for a single row operation
      * @tparam transposed True if matrix is transposed, false otherwise
      * @param data Raw matrix data
      * @param m Number of rows
@@ -3594,7 +3594,7 @@ constexpr bool operator==(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept
  */
 template <ComponentType T>
 constexpr bool operator!=(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept
-    requires FiniteFieldType<T> || std::is_same_v<T, Rationals<InfInt>> || SignedIntType<T>
+    requires ReliablyComparableType<T>
 {
     return !(lhs == rhs);
 }

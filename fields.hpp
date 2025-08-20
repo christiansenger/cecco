@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.0
+ * @version 2.2.1
  * @date 2025
  *
  * @copyright
@@ -83,7 +83,7 @@
  (use for large fields, with more than 150 or so elements)
  *      + `LutMode::CompileTime`: All LUTs computed at compile-time via constexpr for zero initialization overhead (use
  for small fields or zero "startup time")
- * - **Compression**: For extension fields with q ≥ COMPRESS_LUTS_FROM_Q (default: 65), + and * operations use
+ * - **Compression**: For extension fields with q ≥ CECCO_COMPRESS_LUTS_FROM_Q (default: 65), + and * operations use
  compressed LUTs
  * reducing memory by ~50%
  * - **Move semantics**: Temporaries are moved for optimal performance
@@ -153,18 +153,27 @@
 #define FIELDS_HPP
 
 /**
- * @def USE_LUTS_FOR_FP
+ * @def CECCO_ERASURE_SUPPORT
+ * @brief When defined, any field element can be erased, that is, set to an invalid value. Should only be defined if
+ * erasures are actually needed since it can have a negative effect on performance.
+ */
+#ifdef DOXYGEN
+#define CECCO_ERASURE_SUPPORT
+#endif
+
+/**
+ * @def CECCO_USE_LUTS_FOR_FP
  * @brief When defined, prime fields use lookup tables instead of modular arithmetic. This is normally not a good idea
  * and leads to bad performance, so don't define the macro.
  */
 #ifdef DOXYGEN
-#define USE_LUTS_FOR_FP
+#define CECCO_USE_LUTS_FOR_FP
 #endif
 
-/// @def COMPRESS_LUTS_FROM_Q
-/// @brief For fields with  COMPRESS_LUTS_FROM_Q or more elements, compress 2D lookup tables to save ~50% memory by
-/// exploiting commutativity (store only upper triangle). Optimal value depends on cache size.
-#define COMPRESS_LUTS_FROM_Q 256
+/// @def CECCO_COMPRESS_LUTS_FROM_Q
+/// @brief For fields with  CECCO_COMPRESS_LUTS_FROM_Q or more elements, compress 2D lookup tables to save ~50% memory
+/// by exploiting commutativity (store only upper triangle). Optimal value depends on cache size.
+#define CECCO_COMPRESS_LUTS_FROM_Q 256
 
 #include <any>
 #include <memory>
@@ -988,7 +997,6 @@ class Rationals : public details::Field<Rationals<T>> {
      */
     Rationals& randomize_force_change() noexcept;
 
-#if 0
     /**
      * @brief Get multiplicative order of this rational
      * @return 1 if this rational equals 1, 0 (infinite) otherwise
@@ -997,10 +1005,8 @@ class Rationals : public details::Field<Rationals<T>> {
      * In ℚ, only 1 and -1 have finite multiplicative order (both order 1 and 2 respectively).
      * All other non-zero rationals have infinite multiplicative order.
      */
-    // size_t get_multiplicative_order() const;
-#endif
+    size_t get_multiplicative_order() const;
 
-#if 0
     /**
      * @brief Get additive order of this rational
      * @return 1 if this rational is zero, 0 (infinite) otherwise
@@ -1008,8 +1014,7 @@ class Rationals : public details::Field<Rationals<T>> {
      * In ℚ, only 0 has finite additive order (order 1). All non-zero rationals
      * have infinite additive order since ℚ has characteristic 0.
      */
-    // size_t get_additive_order() const noexcept;
-#endif
+    size_t get_additive_order() const noexcept;
 
     /**
      * @brief Get human-readable field description
@@ -1064,7 +1069,13 @@ class Rationals : public details::Field<Rationals<T>> {
      * @brief Checks whether this element is erased
      * @return true if this element is erased, false otherwise (meaning it actually is a field element)
      */
-    constexpr bool is_erased() const noexcept { return denominator == 0; }
+    constexpr bool is_erased() const noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
+        return denominator == 0;
+#else
+        return false;
+#endif
+    }
 
     /**
      * @brief Get the numerator of this rational
@@ -1198,9 +1209,8 @@ Rationals<T>& Rationals<T>::randomize_force_change() noexcept {
     return *this;
 }
 
-/*
 template <SignedIntType T>
- size_t Rationals<T>::get_multiplicative_order() const {
+size_t Rationals<T>::get_multiplicative_order() const {
     if (numerator == 0)
         throw std::invalid_argument(
             "trying to calculate multiplicative order "
@@ -1210,17 +1220,14 @@ template <SignedIntType T>
     }
     return 0;
 }
-*/
 
-/*
 template <SignedIntType T>
- size_t Rationals<T>::get_additive_order() const noexcept {
+size_t Rationals<T>::get_additive_order() const noexcept {
     if (numerator == 0) {
         return 1;
     }
     return 0;
 }
-*/
 
 template <SignedIntType T>
 constexpr Rationals<T>& Rationals<T>::erase() noexcept {
@@ -1320,19 +1327,20 @@ struct Lut1D {
 };
 
 /**
- * @brief Two-dimensional lookup table with compression (depending on COMPRESS_LUTS_FROM_Q) for commutative operations
+ * @brief Two-dimensional lookup table with compression (depending on CECCO_COMPRESS_LUTS_FROM_Q) for commutative
+ * operations
  * @tparam LabelType Integer type for field element labels
  * @tparam FieldSize Number of elements in the field
  *
- * Stores binary operation results with memory compression for large fields (depending on COMPRESS_LUTS_FROM_Q): For
- * compression it exploits commutativity (op(a,b) = op(b,a)) to reduce memory usage by ~50% when FieldSize ≥
- * COMPRESS_LUTS_FROM_Q.
+ * Stores binary operation results with memory compression for large fields (depending on
+ * CECCO_COMPRESS_LUTS_FROM_Q): For compression it exploits commutativity (op(a,b) = op(b,a)) to reduce memory usage
+ * by ~50% when FieldSize ≥ CECCO_COMPRESS_LUTS_FROM_Q.
  *
  * @section Compression_Strategy
  *
  * For large fields, only stores the upper triangle of the operation table:
- * - Small fields (< COMPRESS_LUTS_FROM_Q): Full FieldSize * FieldSize table
- * - Large fields (≥ COMPRESS_LUTS_FROM_Q): Compressed table with smart indexing
+ * - Small fields (< CECCO_COMPRESS_LUTS_FROM_Q): Full FieldSize * FieldSize table
+ * - Large fields (≥ CECCO_COMPRESS_LUTS_FROM_Q): Compressed table with smart indexing
  */
 template <typename LabelType, size_t FieldSize>
 struct Lut2D {
@@ -1344,7 +1352,7 @@ struct Lut2D {
      */
     constexpr LabelType& operator()(size_t i, size_t j) {
         if (i > j) return operator()(j, i);
-        if constexpr (FieldSize < COMPRESS_LUTS_FROM_Q) {
+        if constexpr (FieldSize < CECCO_COMPRESS_LUTS_FROM_Q) {
             return values[i][j];
         } else {
             if (i > floor_constexpr(FieldSize / 2.0)) {
@@ -1363,7 +1371,7 @@ struct Lut2D {
      */
     constexpr LabelType operator()(size_t i, size_t j) const noexcept {
         if (i > j) return operator()(j, i);
-        if constexpr (FieldSize < COMPRESS_LUTS_FROM_Q) {
+        if constexpr (FieldSize < CECCO_COMPRESS_LUTS_FROM_Q) {
             return values[i][j];
         } else {
             if (i > floor_constexpr(FieldSize / 2.0)) {
@@ -1374,9 +1382,10 @@ struct Lut2D {
         }
     }
 
-    /// @brief Compressed storage array (size depends on field size and compression threshold COMPRESS_LUTS_FROM_Q)
+    /// @brief Compressed storage array (size depends on field size and compression threshold
+    /// CECCO_COMPRESS_LUTS_FROM_Q)
     std::array < std::array<LabelType, FieldSize>,
-        FieldSize<COMPRESS_LUTS_FROM_Q ? FieldSize : static_cast<size_t>(floor_constexpr(FieldSize / 2.0) + 1)>
+        FieldSize<CECCO_COMPRESS_LUTS_FROM_Q ? FieldSize : static_cast<size_t>(floor_constexpr(FieldSize / 2.0) + 1)>
             values{};
 };
 
@@ -1914,8 +1923,8 @@ struct LutHolder<LutType, ProviderLutType, P, F, LutMode::RunTime> {
  * provides efficient forward mapping and reverse lookup capabilities. Supports both regular
  * field types and Iso types with automatic component field detection for extraction.
  *
- * @warning A mathematical SUBFIELD/SUPERFIELD relationship is only necessary, not sufficient. The two fields have to be
- * in the same construction tower, that is, SUBFIELD is used in some way in the construction of SUPERFIELD!
+ * @warning A mathematical SUBFIELD/SUPERFIELD relationship is only necessary, not sufficient. The two fields have
+ * to be in the same construction tower, that is, SUBFIELD is used in some way in the construction of SUPERFIELD!
  *
  * @section Mathematical_Foundation
  *
@@ -2262,8 +2271,8 @@ std::vector<size_t> details::IsomorphismPair<A, B>::reverse_iso;
  * Constructs and represents an explicit field isomorphism φ: A → B between two isomorphic
  * finite fields. The isomorphism preserves field operations: φ(a + b) = φ(a) + φ(b) and
  * φ(ab) = φ(a)φ(b) for all a, b ∈ A. This enables seamless conversion of field elements
- * between different representations of the same abstract finite field (for example the fields stacked together in an
- * Iso).
+ * between different representations of the same abstract finite field (for example the fields stacked together in
+ * an Iso).
  *
  * @section Mathematical_Foundation
  *
@@ -2780,7 +2789,7 @@ class Fp : public details::Field<Fp<p>> {
      *
      * Prime fields always provide a constexpr-compatible interface to extension fields,
      * regardless of internal implementation details. Whether Fp uses direct modular arithmetic
-     * (default) or actual lookup tables (USE_LUTS_FOR_FP), the interface functions like
+     * (default) or actual lookup tables (CECCO_USE_LUTS_FOR_FP), the interface functions like
      * lut_add(), lut_mul(), lut_neg() are always constexpr and can be used by CompileTime
      * extension fields during their LUT generation.
      *
@@ -2829,7 +2838,13 @@ class Fp : public details::Field<Fp<p>> {
      * @brief Checks whether this element is erased
      * @return true if this element is erased, false otherwise (meaning it actually is a field element)
      */
-    constexpr bool is_erased() const noexcept { return label == std::numeric_limits<label_t>::max(); }
+    constexpr bool is_erased() const noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
+        return label == std::numeric_limits<label_t>::max();
+#else
+        return false;
+#endif
+    }
 
     /**
      * @brief Compile-time synchronization point for staged template instantiation
@@ -2855,7 +2870,7 @@ class Fp : public details::Field<Fp<p>> {
      * @see Ext::ready()
      */
     static constexpr bool ready() {
-#ifdef USE_LUTS_FOR_FP
+#ifdef CECCO_USE_LUTS_FOR_FP
         return luts_ready;
 #else
         return true;  // Always ready when not using LUTs
@@ -2863,9 +2878,9 @@ class Fp : public details::Field<Fp<p>> {
     }
 
     // LUT-compatible interface for (default) non-LUT mode. This allows Fp to be used as base field B in Ext without
-    // enabling USE_LUTS_FOR_FP. These functions delegate to the optimized operator implementations to avoid
+    // enabling CECCO_USE_LUTS_FOR_FP. These functions delegate to the optimized operator implementations to avoid
     // duplication.
-#ifndef USE_LUTS_FOR_FP
+#ifndef CECCO_USE_LUTS_FOR_FP
     /// @brief Addition function with LUT-compatible interface: lut_add(a,b) = (a + b) mod p
     static constexpr label_t lut_add(label_t a, label_t b) noexcept {
         Fp temp_a(a), temp_b(b);
@@ -2891,7 +2906,7 @@ class Fp : public details::Field<Fp<p>> {
    private:
     label_t label;  ///< Element value in {0, 1, ..., p-1}
 
-#ifdef USE_LUTS_FOR_FP
+#ifdef CECCO_USE_LUTS_FOR_FP
     /// @brief Type alias for 1D lookup tables
     using Lut1D = details::Lut1D<label_t, p>;
     /// @brief Type alias for 2D lookup tables
@@ -3031,7 +3046,7 @@ constexpr Fp<p> Fp<p>::operator-() const& noexcept {
     if (this->is_erased()) return Fp().erase();
     Fp res(*this);
     if (res.label != 0) {
-#ifndef USE_LUTS_FOR_FP
+#ifndef CECCO_USE_LUTS_FOR_FP
         int temp = -(int)res.label + (int)p;
         res.label = temp;
 #else
@@ -3045,7 +3060,7 @@ template <uint16_t p>
 constexpr Fp<p>& Fp<p>::operator-() && noexcept {
     if (this->is_erased()) return this->erase();
     if (label != 0) {
-#ifndef USE_LUTS_FOR_FP
+#ifndef CECCO_USE_LUTS_FOR_FP
         label = -(int)label + (int)p;
 #else
         label = lut_neg(label);
@@ -3057,7 +3072,7 @@ constexpr Fp<p>& Fp<p>::operator-() && noexcept {
 template <uint16_t p>
 constexpr Fp<p>& Fp<p>::operator+=(const Fp& rhs) noexcept {
     if (this->is_erased() || rhs.is_erased()) return this->erase();
-#ifndef USE_LUTS_FOR_FP
+#ifndef CECCO_USE_LUTS_FOR_FP
     int temp = label + rhs.get_label();
     if (temp < p)
         label = temp;
@@ -3072,7 +3087,7 @@ constexpr Fp<p>& Fp<p>::operator+=(const Fp& rhs) noexcept {
 template <uint16_t p>
 constexpr Fp<p>& Fp<p>::operator-=(const Fp& rhs) noexcept {
     if (this->is_erased() || rhs.is_erased()) return this->erase();
-#ifndef USE_LUTS_FOR_FP
+#ifndef CECCO_USE_LUTS_FOR_FP
     int temp = (int)label - (int)rhs.get_label();
     if (temp >= 0)
         label = temp;
@@ -3087,7 +3102,7 @@ constexpr Fp<p>& Fp<p>::operator-=(const Fp& rhs) noexcept {
 template <uint16_t p>
 constexpr Fp<p>& Fp<p>::operator*=(const Fp& rhs) noexcept {
     if (this->is_erased() || rhs.is_erased()) return this->erase();
-#ifndef USE_LUTS_FOR_FP
+#ifndef CECCO_USE_LUTS_FOR_FP
     int temp = label * rhs.get_label();
     if (temp < p)
         label = temp;
@@ -3102,7 +3117,7 @@ constexpr Fp<p>& Fp<p>::operator*=(const Fp& rhs) noexcept {
 template <uint16_t p>
 constexpr Fp<p>& Fp<p>::operator*=(int s) noexcept {
     if (this->is_erased()) return *this;
-    if (get_characteristic() != 0) s %= static_cast<int>(get_characteristic());
+    s %= p;
     Fp res = daa<Fp>(*this, s);
     *this = std::move(res);
     return *this;
@@ -3112,7 +3127,7 @@ template <uint16_t p>
 Fp<p>& Fp<p>::operator/=(const Fp& rhs) {
     if (this->is_erased() || rhs.is_erased()) return this->erase();
     if (rhs.label == 0) throw std::invalid_argument("trying to divide by zero");
-#ifndef USE_LUTS_FOR_FP
+#ifndef CECCO_USE_LUTS_FOR_FP
     *this *= Fp(modinv<p, int>(rhs.get_label()));
 #else
     label = lut_mul(label, lut_inv(rhs.get_label()));
@@ -3124,7 +3139,7 @@ template <uint16_t p>
 Fp<p>& Fp<p>::randomize() noexcept {
     this->unerase();
     static std::uniform_int_distribution<int> dist(0, p - 1);
-#ifndef USE_LUTS_FOR_FP
+#ifndef CECCO_USE_LUTS_FOR_FP
     int temp = label + dist(gen());
     if (temp < p)
         label = temp;
@@ -3140,7 +3155,7 @@ template <uint16_t p>
 Fp<p>& Fp<p>::randomize_force_change() noexcept {
     this->unerase();
     static std::uniform_int_distribution<int> dist(1, p - 1);
-#ifndef USE_LUTS_FOR_FP
+#ifndef CECCO_USE_LUTS_FOR_FP
     int temp = label + dist(gen());
     if (temp < p)
         label = temp;
@@ -3156,7 +3171,7 @@ template <uint16_t p>
 size_t Fp<p>::get_multiplicative_order() const {
     if (is_erased()) throw std::invalid_argument("trying to calculate multiplicative order of erased element");
     if (label == 0) throw std::invalid_argument("trying to calculate multiplicative order of additive neutral element");
-#ifndef USE_LUTS_FOR_FP
+#ifndef CECCO_USE_LUTS_FOR_FP
     return details::calculate_multiplicative_order(*this);
 #else
     return lut_mul_ord(label);
@@ -3178,7 +3193,7 @@ void Fp<p>::show_tables() noexcept {
         std::cout << std::endl;
     }
 
-#ifdef USE_LUTS_FOR_FP
+#ifdef CECCO_USE_LUTS_FOR_FP
     std::cout << "additive inverse table (row and column headers omitted)" << std::endl;
     for (label_t i = 0; i < p; ++i) std::cout << (int)lut_neg(i) << std::endl;
 #endif
@@ -3189,7 +3204,7 @@ void Fp<p>::show_tables() noexcept {
         std::cout << std::endl;
     }
 
-#ifdef USE_LUTS_FOR_FP
+#ifdef CECCO_USE_LUTS_FOR_FP
     std::cout << "multiplicative inverse table (row and column headers "
                  "omitted)"
               << std::endl;
@@ -3286,8 +3301,8 @@ std::ostream& operator<<(std::ostream& os, const Fp<p>& e) noexcept {
  * **CompileTime Mode**: LUTs are computed during compilation and embedded in the executable.
  * No initialization required - field operations are immediately available.
  *
- * @warning Field constructions with CompileTime LUT calculation are only possible from base fields with CompileTime LUT
- * calculation.
+ * @warning Field constructions with CompileTime LUT calculation are only possible from base fields with CompileTime
+ * LUT calculation.
  *
  * @code{.cpp}
  * // Tower: F2 ⊂ F4 ⊂ F16 ⊂ F256 with mixed LUT modes
@@ -3800,7 +3815,13 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      * @brief Checks whether this element is erased
      * @return true if this element is erased, false otherwise (meaning it actually is a field element)
      */
-    constexpr bool is_erased() const noexcept { return label == std::numeric_limits<label_t>::max(); }
+    constexpr bool is_erased() const noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
+        return label == std::numeric_limits<label_t>::max();
+#else
+        return false;
+#endif
+    }
 
     /**
      * @brief Converts extension field element to vector representation over proper subfield
@@ -4189,7 +4210,8 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
  * **Branch 1 (Isomorphic)**: Direct isomorphism if Ext ≅ MAIN or Ext ≅ any OTHERS
  * **Branch 2 (Upcast)**: Cached embedding if Iso/MAIN/OTHERS ⊆ Ext
  * **Branch 3 (Downcast)**: Reverse embedding with validation if Ext ⊆ Iso/MAIN/OTHERS
- * **Branch 4 (Cross-cast)**: Bridge through @ref details::largest_common_subfield_t when no direct relationship exists
+ * **Branch 4 (Cross-cast)**: Bridge through @ref details::largest_common_subfield_t when no direct relationship
+ * exists
  *
  * @throws std::invalid_argument if downcast validation fails (element not in subfield)
  * @throws std::bad_alloc if memory allocation fails during conversion
@@ -4384,7 +4406,7 @@ constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator*=(const Ext& rh
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator*=(int s) noexcept {
     if (this->is_erased()) return *this;
-    // if (get_characteristic() != 0) s%= static_cast<int>(get_characteristic());
+    if constexpr (get_characteristic() != 0) s %= static_cast<int>(get_characteristic());
     Ext res = daa<Ext>(*this, s);
     *this = std::move(res);
     return *this;
