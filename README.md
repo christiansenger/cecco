@@ -1,5 +1,5 @@
 # C(++)ECCO
-C++ Error Control Coding Orrery: a header-only library for ECC simulations and experiments, modeling complete coding systems across arbitrary finite fields and complex inter-field relationships. CECCO provides an intuitive, object-oriented interface to finite fields, vectors, polynomials, matrices, and many linear error-correcting codes. Its low-level functionalities can be used to implement arbitrary linear codes and their decoders, its high-level functionalities are convenient for creating complete simulation chains.
+C++ Error Control Coding Orrery: a header-only library for ECC simulations and experiments, modeling complete coding systems across arbitrary finite fields and complex inter-field relationships. CECCO provides an intuitive, object-oriented interface for finite fields, vectors, polynomials, matrices, and many linear error-correcting codes. Its low-level functionalities can be used to implement arbitrary linear codes and their decoders, its high-level functionalities are convenient for creating complete simulation chains.
 
 Check the files in the demos folder to get started. Detailed Doxygen documentation is available <a href="https://christiansenger.github.io/cecco/">here</a>.
 
