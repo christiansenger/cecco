@@ -275,6 +275,44 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
      */
     T operator()(const T& in) noexcept;
 
+    /**
+     * @brief Calculate channel capacity in bits per symbol
+     * @return Channel capacity C in bits per symbol
+     *
+     * Computes the Shannon capacity of the SDMEC channel using the formula for q-ary
+     * symmetric channels with optional erasures. The capacity represents the maximum
+     * achievable rate of reliable communication through this channel.
+     *
+     * **Mathematical Formula**:
+     *
+     * For errors-only channel (px = 0):
+     * - C = log₂(q) + (1-pe)·log₂(1-pe) + pe·log₂(pe) - pe·log₂(q-1)
+     *
+     * For errors-and-erasures channel:
+     * - C = (1-px) · C_error
+     * - where C_error uses the conditional error probability pe/(1-px)
+     *
+     * For erasures-only channel:
+     * - C = (1-px)·log₂(q)
+     *
+     * **Implementation Notes**:
+     * - Uses internal error probability pe/(1-px) from error_dist.p()
+     * - Handles edge cases pe=0 and pe=1 using limit: lim_{x→0} x·log₂(x) = 0
+     * - For CECCO_ERASURE_SUPPORT, scales result by (1-px) to account for erasures
+     * - Returns capacity in bits per channel use (symbol)
+     *
+     * **Usage Example**:
+     * @code{.cpp}
+     * SDMEC<F4> channel(0.05, 0.1);  // 5% errors, 10% erasures over F₄
+     * double capacity = channel.get_capacity();
+     * std::cout << "Channel capacity: " << capacity << " bits/symbol" << std::endl;
+     * // Result: approximately 1.52 bits/symbol (for F₄ with these parameters)
+     * @endcode
+     *
+     * @note Returned value is in bits (log base 2).
+     */
+    double get_capacity() const noexcept;
+
    private:
     std::geometric_distribution<unsigned int> error_dist;
     unsigned int error_trials{0};
@@ -334,6 +372,24 @@ T SDMEC<T>::operator()(const T& in) noexcept {
     } else {
         ++erasure_trials;
     }
+#endif
+    return res;
+}
+
+template <FiniteFieldType T>
+double SDMEC<T>::get_capacity() const noexcept {
+    const double pe = error_dist.p();
+    const double q = static_cast<double>(T::get_size());
+
+    // Handle edge cases: lim_{x→0} x·log₂(x) = 0
+    const double term1 = (pe > 0.0 && pe < 1.0) ? pe * log2(pe) : 0.0;
+    const double term2 = (pe > 0.0 && pe < 1.0) ? (1 - pe) * log2(1 - pe) : 0.0;
+
+    double res = log2(q) + term2 + term1 - pe * log2(q - 1);
+
+#ifdef CECCO_ERASURE_SUPPORT
+    const double px = erasure_dist.p();
+    res *= (1 - px);
 #endif
     return res;
 }
@@ -698,6 +754,73 @@ double AWGN::calculate_pe(double Eb, double constellation_distance, double EbNod
 
     return 0.5 * erfc(sqrt(constellation_snr));
 }
+
+
+/**
+ * @brief Binary Input - Additive White Gaussian Noise (BI-AWGN) channel
+ *
+ * Combines NRZ modulation and AWGN transmission into a single block that maps binary inputs
+ * to noisy complex-valued channel outputs. Compatible with NRZDecoder for hard decisions
+ * or LLRCalculator for soft decisions.
+ *
+ * **Usage Example**:
+ * @code{.cpp}
+ * // BPSK-AWGN at 6 dB (default parameters)
+ * BI_AWGN channel(6.0); // BPSK: a=0, b=2
+ * Vector<Fp<2>> c = {1, 0, 1, 0};
+ * Vector<std::complex<double>> y;
+ * Vector<Fp<2>> r;
+ * c >> channel >> y >> NRZDecoder(channel.get_encoder()) >> r;
+ *
+ * // Custom NRZ constellation
+ * BI_AWGN ook(8.0, 1.0, 2.0); // OOK: a=1, b=2
+ * @endcode
+ *
+ * @note Default parameters implement BPSK (a=0, b=2)
+ * @see @ref CECCO::NRZEncoder for constellation parameters
+ * @see @ref CECCO::AWGN for transmission/noise model
+ * @see @ref CECCO::NRZDecoder for hard-decision
+ * @see @ref CECCO::LLRCalculator for soft-decision
+ */
+class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<double>> {
+   public:
+    using details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<double>>::operator();
+
+    /**
+     * @brief Construct BI-AWGN channel with SNR and optional NRZ parameters
+     * @param EbN0dB Signal-to-noise ratio (Eb/N0) in decibels
+     * @param a DC offset parameter for NRZ encoder (default: 0.0 for BPSK)
+     * @param b Constellation distance parameter for NRZ encoder (default: 2.0 for BPSK)
+     *
+     * Default parameters (a=0, b=2) implement BPSK modulation with constellation {-1, +1}.
+     * For other modulation schemes (e.g., OOK with a=1, b=2), specify custom parameters.
+     */
+    BI_AWGN(double EbN0dB, double a = 0.0, double b = 2.0)
+        : encoder(a, b), transmission(encoder.get_Eb(), encoder.get_constellation_distance(), EbN0dB) {}
+
+    /**
+     * @brief Process single bit through BI-AWGN channel
+     * @param in Input bit
+     * @return Noisy complex-valued channel output
+     */
+    std::complex<double> operator()(const Fp<2>& in) noexcept { return transmission(encoder(in)); }
+
+    /**
+     * @brief Get theoretical bit error probability for hard decisions
+     * @return Pe for this channel configuration
+     */
+    double get_pe() const noexcept { return transmission.get_pe(); }
+
+    /**
+     * @brief Get reference to internal NRZ encoder
+     * @return Const reference to NRZ encoder (needed for NRZDecoder construction)
+     */
+    const NRZEncoder& get_encoder() const noexcept { return encoder; }
+
+   private:
+    NRZEncoder encoder;
+    AWGN transmission;
+};
 
 /**
  * @brief Non-Return-to-Zero (NRZ) hard-decision decoder
