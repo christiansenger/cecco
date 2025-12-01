@@ -2,7 +2,7 @@
  * @file blocks.hpp
  * @brief Communication system blocks library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0
+ * @version 2.1
  * @date 2025
  *
  * @copyright
@@ -16,8 +16,9 @@
  *
  * This header file provides communication system blocks for error control coding experiments/simulations. It supports:
  *
- * - **Channel models**: Discrete Memoryless Channel (DMC), Binary Symmetric Channel (BSC), and
- *   Additive White Gaussian Noise (AWGN) channel with accurate error probability calculations
+ * - **Channel models**: Symmetric Discrete Memoryless Erasure Channel (SDMEC), Symmetric Discrete Memoryless Channel
+ * (SDMC), Binary Symmetric Channel (BSC), Binary Erasure Channel (BED), and Additive White Gaussian Noise (AWGN)
+ * channel with accurate error probability calculations
  * - **Modulation schemes**: Non-Return-to-Zero (NRZ) and Binary Phase Shift Keying (BPSK)
  *   with configurable constellation parameters
  * - **Demodulation**: Hard-decision and soft-decision demodulation with Log-Likelihood Ratio (LLR) computation
@@ -175,90 +176,249 @@ using LLRProcessor = BlockProcessor<T, std::complex<double>, double>;
 }  // namespace details
 
 /**
- * @brief Discrete Memoryless Channel (DMC)
+ * @brief Symmetric Discrete Memoryless Erasure Channel (SDMEC)
  * @tparam T Finite field type for channel input/output symbols
  *
- * Simulates a discrete memoryless channel that introduces random errors in finite field
- * symbols with a specified error probability. The channel uses a geometric distribution
- * to efficiently model the Bernoulli error process.
+ * Simulates a symmetric discrete memoryless channel that introduces random errors and erasures
+ * in finite field symbols with specified probabilities. The channel uses geometric distributions
+ * to efficiently model the Bernoulli error and erasure processes.
  *
- * **Usage Examples**:
+ * **Channel Model**:
+ *
+ * The SDMEC implements an errors-and-erasures channel where each transmitted symbol undergoes
+ * independent error and erasure checks. The error probability is adjusted (scaled by 1/(1-px))
+ * to achieve the desired overall error rate despite potential erasures.
+ *
+ * **Processing Steps**:
+ * 1. **Error check**: With probability pe/(1-px), the symbol is changed to a random incorrect value
+ * 2. **Erasure check**: With probability px, the symbol is marked as erased (overwrites any prior error)
+ * 3. **Result**: The final symbol state is returned to the receiver
+ *
+ * **Observed Outcomes** (from receiver's perspective):
+ * - **Overall error probability**: Pr(observe error) = pe/(1-px) × (1-px) = pe
+ * - **Overall erasure probability**: Pr(observe erasure) = px
+ * - **Success probability**: Pr(observe correct) = (1 - pe/(1-px)) × (1-px) = 1 - pe - px
+ * - **Memoryless property**: Each symbol is processed independently with i.i.d. error and erasure events
+ *
+ * **Implementation Details**:
+ *
+ * The channel uses two independent geometric distributions to model Bernoulli processes:
+ * - Error distribution with parameter pe/(1-px) (scaled to account for subsequent erasures)
+ * - Erasure distribution with parameter px
+ *
+ * **Usage Example**:
  * @code{.cpp}
- * // Binary symmetric channel over F₂ (special case)
- * using F2 = Fp<2>;
- * BSC bsc(0.1);                         // 10% bit error probability
- * auto c = Vector<F2>(20).randomize();  // random vector of length 20
- * Vector<F2> r;
- * c >> bsc >> r;
- *
- * // DMC over larger field
+ * #define CECCO_ERASURE_SUPPORT
  * using F4 = Ext<Fp<2>, {1, 1, 1}>;
- * DMC<F4> dmc(0.05);  // 5% symbol error probability
- * auto c = Vector<F4>(20).randomize();  // random vector of length 20
+ * SDMEC<F4> channel(0.05, 0.1);        // 5% errors, 10% erasures
+ * auto c = Vector<F4>(20).randomize();
  * Vector<F4> r;
- * c >> dmc >> r;
+ * c >> channel >> r;
  * @endcode
  *
- * @note For binary fields (F₂), this implements the Binary Symmetric Channel (BSC).
- *       For larger fields (F_q), this implements the q-ary Symmetric Channel.
+ * @note For binary fields (F₂), this implements the Binary Symmetric Channel (BSC) when px=0,
+ *       or the Binary Erasure Channel (BEC) when pe=0.
+ * @note Erasure functionality requires compilation with CECCO_ERASURE_SUPPORT defined.
+ *       Without this macro, px must be 0.0 (errors-only mode).
+ * @note For larger fields (F_q with q>2), this implements the q-ary Symmetric Channel when px=0.
+ * @note The error probability is internally scaled to pe/(1-px) to compensate for symbols that
+ *       are subsequently erased, ensuring the observed error rate matches the specified pe parameter.
  *
- * @see @ref CECCO::BSC for convenient BSC alias (equivalent to DMC<Fp<2>>)
+ * @see @ref CECCO::SDMC for errors-only convenience wrapper
+ * @see @ref CECCO::BSC for binary symmetric channel
+ * @see @ref CECCO::BEC for binary erasure channel
  */
 template <FiniteFieldType T>
-class DMC : public details::SameTypeProcessor<DMC<T>, T> {
+class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
    public:
     // Bring base class operator() overloads into scope
-    using details::SameTypeProcessor<DMC<T>, T>::operator();
+    using details::SameTypeProcessor<SDMEC<T>, T>::operator();
 
     /**
-     * @brief Construct DMC with specified error probability
-     * @param pe Symbol error probability (must be in [0, 1])
-     * @throws std::out_of_range if pe is outside valid range [0, 1] or too small for numerical precision
+     * @brief Construct SDMEC with specified error and erasure probabilities
+     * @param pe Symbol error probability - probability of observing an error at receiver (must be in [0, 1])
+     * @param px Symbol erasure probability - probability of observing an erasure at receiver (must be in [0, 1-pe],
+     * default: 0.0)
+     * @throws std::out_of_range if pe is outside [0, 1]
+     * @throws std::out_of_range if pe is too small for numerical precision (0 < pe < 1e-9)
+     * @throws std::out_of_range if px is outside [0, 1-pe] when CECCO_ERASURE_SUPPORT is defined
+     * @throws std::out_of_range if px is too small for numerical precision (0 < px < 1e-9)
+     * @throws std::invalid_argument if px != 0 when CECCO_ERASURE_SUPPORT is not defined
      *
-     * Creates a discrete memoryless channel that introduces errors with probability pe.
+     * Creates a symmetric discrete memoryless channel that produces errors with observed probability pe
+     * and erasures with observed probability px.
+     *
+     * **Constraint**: pe + px ≤ 1.0 (the remaining probability 1-pe-px represents correctly received symbols)
+     *
+     * **Special Cases**:
+     * - pe = 0, px = 0: Perfect channel (no errors or erasures)
+     * - pe > 0, px = 0: Error-only channel (standard SDMC/BSC)
+     * - pe = 0, px > 0: Erasure-only channel (requires CECCO_ERASURE_SUPPORT)
+     * - pe > 0, px > 0: Errors-and-erasures channel (requires CECCO_ERASURE_SUPPORT)
+     *
+     * @note Edge case probabilities pe=0.0 and px=0.0 are valid. The channel uses early
+     *       return optimization when both probabilities are zero.
+     * @note When CECCO_ERASURE_SUPPORT is not defined, px must be 0.0. Any non-zero px
+     *       will throw std::invalid_argument.
      */
-    DMC(double pe);
+    SDMEC(double pe, double px = 0.0);
 
     /**
-     * @brief Process single symbol through DMC
+     * @brief Process single symbol through SDMEC
      * @param in Input symbol
-     * @return Output symbol
+     * @return Output symbol (possibly erased when CECCO_ERASURE_SUPPORT is defined)
      *
-     * Applies the channel error model to a single symbol. When an error occurs,
-     * the output is randomly chosen from all symbols of T except the input symbol.
+     * Applies the channel error and erasure model to a single symbol through two independent checks:
+     *
+     * @note This method uses noexcept specification and relies on geometric distributions
+     *       for efficient Bernoulli process simulation via independent trial counting.
      */
     T operator()(const T& in) noexcept;
 
    private:
-    std::geometric_distribution<unsigned int> dist;
-    unsigned int trials{0};
-    unsigned int failures_before_hit;
+    std::geometric_distribution<unsigned int> error_dist;
+    unsigned int error_trials{0};
+    unsigned int error_failures_before_hit;
+#ifdef CECCO_ERASURE_SUPPORT
+    std::geometric_distribution<unsigned int> erasure_dist;
+    unsigned int erasure_trials{0};
+    unsigned int erasure_failures_before_hit;
+#endif
 };
 
 template <FiniteFieldType T>
-DMC<T>::DMC(double pe) : dist(pe) {
+SDMEC<T>::SDMEC(double pe, double px)
+    : error_dist(pe / (1 - px))
+#ifdef CECCO_ERASURE_SUPPORT
+      ,
+      erasure_dist(px)
+#endif
+{
     if (pe < 0.0 || pe > 1.0)
-        throw std::out_of_range("DMC error probability must be in [0,1], got: " + std::to_string(pe));
-    if (pe == 0.0) return;  // No need to initialize for zero error
-    if (pe < 0.000000001) throw std::out_of_range("pe too small");
-    failures_before_hit = dist(gen());
+        throw std::out_of_range("SDMEC error probability must be in [0,1], got: " + std::to_string(pe));
+    if (pe != 0.0 && pe < 0.000000001) throw std::out_of_range("pe too small");
+    error_failures_before_hit = error_dist(gen());
+#ifdef CECCO_ERASURE_SUPPORT
+    if (px < 0.0 || px > 1.0 - pe)
+        throw std::out_of_range("SDMEC erasure probability must be in [0," + std::to_string(1 - pe) +
+                                "], got: " + std::to_string(px));
+    if (px != 0.0 && px < 0.000000001) throw std::out_of_range("px too small");
+    erasure_failures_before_hit = erasure_dist(gen());
+#else
+    if (px != 0) throw std::invalid_argument("px!=0 requires CECCO_ERASURE_SUPPORT");
+#endif
 }
 
 template <FiniteFieldType T>
-T DMC<T>::operator()(const T& in) noexcept {
-    if (dist.p() == 0.0) return in;
+T SDMEC<T>::operator()(const T& in) noexcept {
+    if (error_dist.p() == 0.0
+#ifdef CECCO_ERASURE_SUPPORT
+        && erasure_dist.p() == 0.0
+#endif
+    )
+        return in;
     T res(in);
-    if (trials == failures_before_hit) {
+    if (error_trials == error_failures_before_hit) {
         res.randomize_force_change();
-        trials = 0;
-        failures_before_hit = dist(gen());
+        error_trials = 0;
+        error_failures_before_hit = error_dist(gen());
     } else {
-        ++trials;
+        ++error_trials;
     }
+#ifdef CECCO_ERASURE_SUPPORT
+    if (erasure_dist.p() == 0.0) return res;
+    if (erasure_trials == erasure_failures_before_hit) {
+        res.erase();
+        erasure_trials = 0;
+        erasure_failures_before_hit = erasure_dist(gen());
+    } else {
+        ++erasure_trials;
+    }
+#endif
     return res;
 }
 
-using BSC = DMC<Fp<2>>;
+/**
+ * @brief Symmetric Discrete Memoryless Channel (SDMC)
+ * @tparam T Finite field type for channel input/output symbols
+ *
+ * Specialized SDMEC for error-only channels (no erasures). Provides convenient
+ * single-parameter constructor for the traditional symmetric channel model.
+ *
+ * **Usage Example**:
+ * @code{.cpp}
+ * using F4 = Ext<Fp<2>, {1, 1, 1}>;
+ * SDMC<F4> sdmc(0.05);  // 5% symbol errors, 0% erasures
+ * auto c = Vector<F4>(20).randomize();
+ * Vector<F4> r;
+ * c >> sdmc >> r;
+ * @endcode
+ *
+ * @note Equivalent to SDMEC<T>(pe, 0.0)
+ * @see @ref CECCO::SDMEC for the full errors-and-erasures implementation
+ * @see @ref CECCO::BSC for binary symmetric channel
+ */
+template <FiniteFieldType T>
+class SDMC : public SDMEC<T> {
+   public:
+    /**
+     * @brief Construct SDMC with specified error probability
+     * @param pe Symbol error probability (must be in [0, 1])
+     */
+    SDMC(double pe) : SDMEC<T>(pe, 0.0) {}
+};
+
+/**
+ * @brief Binary Symmetric Channel (BSC)
+ *
+ * Binary SDMC with convenient single-parameter constructor. Implements the classical
+ * binary symmetric channel model where bits are flipped with probability pe.
+ *
+ * **Usage Example**:
+ * @code{.cpp}
+ * BSC bsc(0.1);                         // 10% bit error probability
+ * Vector<Fp<2>> c = {1, 0, 1, 0};
+ * Vector<Fp<2>> r;
+ * c >> bsc >> r;
+ * @endcode
+ *
+ * @note Equivalent to SDMC<Fp<2>>(pe) or SDMEC<Fp<2>>(pe, 0.0)
+ * @see @ref CECCO::SDMEC for the full errors-and-erasures implementation
+ * @see @ref CECCO::SDMC for the general errors-only channel
+ * @see @ref CECCO::BEC for binary erasure channel
+ */
+using BSC = SDMC<Fp<2>>;
+
+#ifdef CECCO_ERASURE_SUPPORT
+/**
+ * @brief Binary Erasure Channel (BEC)
+ *
+ * Specialized SDMEC for binary erasure channels where symbols are either received correctly
+ * or marked as erased (no errors). Provides convenient single-parameter constructor that
+ * takes only the erasure probability.
+ *
+ * **Usage Example**:
+ * @code{.cpp}
+ * BEC bec(0.1);                         // 10% erasure probability
+ * Vector<Fp<2>> c = {1, 0, 1, 1};
+ * Vector<Fp<2>> r;
+ * c >> bec >> r;
+ * @endcode
+ *
+ * @note Equivalent to SDMEC<Fp<2>>(0.0, px)
+ * @note Requires CECCO_ERASURE_SUPPORT to be defined at compile time
+ * @see @ref CECCO::SDMEC for the full errors-and-erasures implementation
+ * @see @ref CECCO::BSC for binary symmetric channel (errors only)
+ */
+class BEC : public SDMEC<Fp<2>> {
+   public:
+    /**
+     * @brief Construct BEC with specified erasure probability
+     * @param px Symbol erasure probability (must be in [0, 1])
+     */
+    BEC(double px) : SDMEC<Fp<2>>(0.0, px) {}
+};
+#endif
 
 /**
  * @brief Non-Return-to-Zero (NRZ) encoder for binary modulation
