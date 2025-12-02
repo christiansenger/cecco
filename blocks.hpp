@@ -168,9 +168,6 @@ template <typename T>
 using DecoderProcessor = BlockProcessor<T, std::complex<double>, Fp<2>>;
 
 template <typename T>
-using ChannelProcessor = BlockProcessor<T, std::complex<double>, std::complex<double>>;
-
-template <typename T>
 using LLRProcessor = BlockProcessor<T, std::complex<double>, double>;
 
 }  // namespace details
@@ -768,10 +765,10 @@ class BPSKEncoder : public NRZEncoder {
  * @see @ref CECCO::NRZEncoder, @ref CECCO::BPSKEncoder for compatible modulation schemes
  * @see @ref CECCO::LLRCalculator for soft-decision demodulation using this channel
  */
-class AWGN : public details::ChannelProcessor<AWGN> {
+class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
    public:
     // Bring base class operator() overloads into scope
-    using details::ChannelProcessor<AWGN>::operator();
+    using details::SameTypeProcessor<AWGN, std::complex<double>>::operator();
 
     /**
      * @brief Construct AWGN channel with specified parameters
