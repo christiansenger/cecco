@@ -835,11 +835,15 @@ class AWGN : public details::ChannelProcessor<AWGN> {
      * @brief Calculate channel capacity in bits per symbol
      * @return Channel capacity C in bits per symbol
      *
-     * Computes the Shannon capacity of the AWGN channel for binary signaling:
+     * Computes the Shannon capacity of the real-valued AWGN channel with binary input:
      * C = ½·log₂(1 + Eb/σ²)
      *
      * This represents the maximum achievable rate of reliable communication through
-     * this continuous-valued AWGN channel with binary input.
+     * this continuous-valued real AWGN channel with binary signaling (NRZ/BPSK).
+     *
+     * **Implementation Notes**:
+     * - Formula applies to real-valued signaling (one dimension)
+     * - For complex AWGN, capacity would be C = log₂(1 + Eb/(2σ²)) due to noise in both I and Q
      *
      * @note Returned value is in bits per channel use (symbol).
      */
@@ -930,13 +934,20 @@ class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<doub
      * @brief Calculate channel capacity in bits per symbol
      * @return Channel capacity C in bits per symbol
      *
-     * Computes the Shannon capacity of the BI-AWGN channel by numerical integration. Uses composite Simpson's rule.
+     * Computes the Shannon capacity of the binary-input, real-valued AWGN channel
+     * using numerical integration with composite Simpson's rule.
+     *
+     * **Mathematical Model**:
+     * - Binary input X ∈ {0, 1} mapped to real constellation points via NRZ
+     * - Real-valued output Y ∈ ℝ (one-dimensional continuous observation)
+     * - Capacity computed by numerical integration (no closed-form solution)
      *
      * **Edge Cases**:
      * - b = 0: C = 0 bits (no separation between symbols)
      * - σ = 0: C = 1 bit (noiseless channel)
      *
-     * @note Result is clamped to [0, 1] for numerical stability.
+     * @note Result is clamped to [0, 1] for numerical stability (binary input limits capacity to 1 bit).
+     * @note Integration performed over real line ℝ, reflecting real-valued signaling.
      */
     double get_capacity() const noexcept;
 
