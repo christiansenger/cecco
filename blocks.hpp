@@ -35,16 +35,16 @@
  *
  * // Create communication chain components
  * BPSKEncoder enc;                                                 // BPSK modulation (a=0, b=2)
- * AWGN chan(enc.get_Eb(), enc.get_constellation_distance(), 6.0);  // 6 dB SNR
+ * AWGN awgn(6.0, enc.get_Eb(), enc.get_b());  // 6 dB SNR
  * BPSKDecoder dec;                                                 // Hard-decision demodulation
  *
  * // Process through communication chain using operator>>
  * Vector<std::complex<double>> y;
  * Vector<F2> r;
- * message >> enc >> chan >> y >> dec >> r;
+ * message >> enc >> awgn >> y >> dec >> r;
  *
  * // Soft-decision processing with LLR
- * LLRCalculator calc(enc, chan);
+ * LLRCalculator calc(enc, awgn);
  * Vector<double> llrs;
  * y >> calc >> llrs;
  *
@@ -276,6 +276,20 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
     T operator()(const T& in) noexcept;
 
     /**
+     * @brief Get symbol error probability
+     * @return Error probability pe
+     */
+    double get_pe() const noexcept { return error_dist.p(); }
+
+#ifdef CECCO_ERASURE_SUPPORT
+    /**
+     * @brief Get symbol erasure probability
+     * @return Erasure probability px
+     */
+    double get_px() const noexcept { return erasure_dist.p(); }
+#endif
+
+    /**
      * @brief Calculate channel capacity in bits per symbol
      * @return Channel capacity C in bits per symbol
      *
@@ -303,10 +317,9 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
      *
      * **Usage Example**:
      * @code{.cpp}
-     * SDMEC<F4> channel(0.05, 0.1);  // 5% errors, 10% erasures over F₄
-     * double capacity = channel.get_capacity();
+     * SDMEC<F4> sdmec(0.05, 0.1);  // 5% errors, 10% erasures over F₄
+     * double capacity = sdmec.get_capacity();
      * std::cout << "Channel capacity: " << capacity << " bits/symbol" << std::endl;
-     * // Result: approximately 1.52 bits/symbol (for F₄ with these parameters)
      * @endcode
      *
      * @note Returned value is in bits (log base 2).
@@ -381,7 +394,6 @@ double SDMEC<T>::get_capacity() const noexcept {
     const double pe = error_dist.p();
     const double q = static_cast<double>(T::get_size());
 
-    // Handle edge cases: lim_{x→0} x·log₂(x) = 0
     const double term1 = (pe > 0.0 && pe < 1.0) ? pe * log2(pe) : 0.0;
     const double term2 = (pe > 0.0 && pe < 1.0) ? (1 - pe) * log2(1 - pe) : 0.0;
 
@@ -477,6 +489,104 @@ class BEC : public SDMEC<Fp<2>> {
 #endif
 
 /**
+ * @brief Binary Asymmetric Channel (BAC) - Z-Channel
+ *
+ * Implements the z-channel model where input bit 0 is never corrupted, but input bit 1
+ * can be flipped to 0 with probability p.
+ *
+ * **Usage Example**:
+ * @code{.cpp}
+ * BAC bac(0.1);                   // 10% probability that 1 flips to 0
+ * Vector<Fp<2>> c = {0, 1, 1, 0};
+ * Vector<Fp<2>> r;
+ * c >> bac >> r;
+ *
+ * // Check capacity
+ * double capacity = bac.get_capacity();
+ * std::cout << "Z-channel capacity: " << capacity << " bits/symbol\n";
+ * @endcode
+ *
+ * @see @ref CECCO::BSC for symmetric binary channel
+ * @see @ref CECCO::BEC for binary erasure channel
+ */
+class BAC : public details::SameTypeProcessor<BAC, Fp<2>> {
+   public:
+    using details::SameTypeProcessor<BAC, Fp<2>>::operator();
+
+    /**
+     * @brief Construct BAC with specified flip probability
+     * @param p Probability that 1 flips to 0 (must be in [0, 1])
+     * @throws std::out_of_range if p is outside [0, 1]
+     * @throws std::out_of_range if p is too small for numerical precision (0 < p < 1e-9)
+     *
+     * Creates a binary asymmetric channel where input 1 is flipped to 0 with probability p,
+     * while input 0 is always preserved.
+     *
+     * **Special Cases**:
+     * - p = 0: Perfect channel (no errors, capacity = 1 bit)
+     * - p = 1: All 1s become 0s (only 0 can be reliably transmitted, capacity = 0)
+     */
+    BAC(double p) : bsc(p) {}
+
+    /**
+     * @brief Process single bit through BAC
+     * @param in Input bit
+     * @return Output bit
+     *
+     * Applies the Z-channel model: input 0 is always preserved, input 1 is
+     * passed through internal BSC which flips to 0 with probability p.
+     */
+    Fp<2> operator()(const Fp<2>& in) noexcept {
+        if (in == Fp<2>(0)) return in;
+        return bsc(in);
+    }
+
+    /**
+     * @brief Get flip probability
+     * @return Flip probability p (probability that 1 → 0)
+     */
+    double get_pe() const noexcept { return bsc.get_pe(); }
+
+    /**
+     * @brief Calculate channel capacity in bits per symbol
+     * @return Channel capacity C in bits per symbol
+     *
+     * Computes the Shannon capacity of the z-channel (binary asymmetric channel).
+     * The capacity represents the maximum achievable rate of reliable communication
+     * through this asymmetric channel.
+     *
+     * **Mathematical Formula**:
+     * - C = log₂(1 + (1-p)·p^(p/(1-p)))
+     *
+     * **Implementation Notes**:
+     * - Handles edge cases p=0 and p=1 using explicit checks
+     * - Uses internal flip probability from bsc.get_pe()
+     * - Returns capacity in bits per channel use (symbol)
+     *
+     * **Usage Example**:
+     * @code{.cpp}
+     * BAC bac(0.1);  // 10% flip probability (1 → 0)
+     * double capacity = bac.get_capacity();
+     * std::cout << "Z-channel capacity: " << capacity << " bits/symbol" << std::endl;
+     * @endcode
+     *
+     * @note Returned value is in bits (log base 2).
+     */
+    double get_capacity() const noexcept {
+        const double p = bsc.get_pe();
+
+        if (p == 0.0) return 1.0;  // Perfect channel
+        if (p == 1.0) return 0.0;  // Useless channel
+
+        const double pe = bsc.get_pe();
+        return log2(1 + (1 - pe) * pow(pe, pe / (1 - pe)));
+    }
+
+   private:
+    BSC bsc;
+};
+
+/**
  * @brief Non-Return-to-Zero (NRZ) encoder for binary modulation
  *
  * Implements NRZ line coding that maps binary symbols to complex constellation points.
@@ -485,7 +595,7 @@ class BEC : public SDMEC<Fp<2>> {
  * **Mathematical Model**:
  * - **Constellation mapping**: 0 → (a - b/2, 0), 1 → (a + b/2, 0)
  * - **Energy per bit**: Eb = a² + b²/4 (assuming unit symbol duration)
- * - **Constellation distance**: d = b (minimum distance between symbols)
+ * - **Constellation distance**: b (minimum euclidean distance between symbols)
  * - **DC offset**: a (shifts entire constellation along real axis)
  *
  * **Common Configurations**:
@@ -539,14 +649,6 @@ class NRZEncoder : public details::EncoderProcessor<NRZEncoder> {
      * Calculates Eb = a² + b²/4 based on constellation geometry.
      */
     constexpr double get_Eb() const noexcept { return (a * a) + (b * b) / 4.0; }
-
-    /**
-     * @brief Get constellation distance
-     * @return Minimum distance between constellation points
-     *
-     * Returns the Euclidean distance between the two constellation symbols.
-     */
-    constexpr double get_constellation_distance() const noexcept { return b; }
 
     /**
      * @brief Get DC offset parameter
@@ -603,11 +705,11 @@ class NRZEncoder : public details::EncoderProcessor<NRZEncoder> {
  * message >> enc >> signal;              // Result: ( (-1, 0), (1, 0), (1, 0), (-1, 0) )
  *
  * double energy = enc.get_Eb();                        // Result: 1.0
- * double distance = enc.get_constellation_distance();  // Result: 2.0
+ * double distance = enc.get_b();  // Result: 2.0
  *
  * // Use with AWGN channel for theoretical Pe calculations
- * AWGN chan(enc.get_Eb(), enc.get_constellation_distance(), 6.0);  // 6 dB SNR
- * double theoretical_pe = chan.get_pe();
+ * AWGN awgn(6.0, enc.get_a(), enc.get_b());  // 6 dB SNR
+ * double theoretical_pe = awgn.get_pe();
  * @endcode
  *
  * @see @ref CECCO::NRZEncoder for general constellation configuration
@@ -646,14 +748,14 @@ class BPSKEncoder : public NRZEncoder {
  * @code{.cpp}
  * // BPSK over AWGN at 6 dB SNR
  * BPSKEncoder enc;  // Eb = 1, d = 2
- * AWGN chan(enc.get_Eb(), enc.get_constellation_distance(), 6.0);
+ * AWGN awgn(6.0, enc.get_a(), enc.get_b());
  * Vector<Fp<2>> message = {0, 1, 1, 0};
  * Vector<std::complex<double>> y;
- * mesage >> enc >> chan >> y;
+ * mesage >> enc >> awgn >> y;
  *
  * // Channel noise parameters
- * double sigma = chan.get_standard_deviation();  // Noise std deviation
- * double variance = chan.get_variance();         // Noise variance
+ * double sigma = awgn.get_standard_deviation();  // Noise std deviation
+ * double variance = awgn.get_variance();         // Noise variance
  * @endcode
  *
  * **Error Probability Calculation**:
@@ -673,15 +775,15 @@ class AWGN : public details::ChannelProcessor<AWGN> {
 
     /**
      * @brief Construct AWGN channel with specified parameters
-     * @param Eb Energy per bit from the modulation scheme
-     * @param constellation_distance Minimum Euclidean distance between constellation points
      * @param EbNodB Signal-to-noise ratio (Eb/N₀) in decibels
+     * @param a DC offset parameter (real part offset)
+     * @param b Constellation distance parameter (separation between symbols)
      *
      * Creates an AWGN channel that adds Gaussian noise with variance σ² = Eb/(2·10^(EbNodB/10)).
-     * The error probability is calculated based on the constellation distance and SNR.
+     * The error probability is calculated based on the DC offset and constellation distance.
      */
-    AWGN(double Eb, double constellation_distance, double EbNodB)
-        : dist(0, sqrt(0.5 * Eb / pow(10, EbNodB / 10))), pe(calculate_pe(Eb, constellation_distance, EbNodB)) {}
+    AWGN(double EbNodB, double a, double b)
+        : Eb(NRZEncoder(a, b).get_Eb()), dist(0, sqrt(0.5 * Eb / pow(10, EbNodB / 10))), pe(calculate_pe(EbNodB, b)) {}
 
     /** @name Noise Parameters
      * @{
@@ -728,33 +830,31 @@ class AWGN : public details::ChannelProcessor<AWGN> {
     }
 
    private:
+    const double Eb{};
     std::normal_distribution<double> dist;
     const double pe{};
 
     /**
      * @brief Calculate theoretical bit error probability
-     * @param Eb Energy per bit
-     * @param constellation_distance Minimum distance between constellation points
      * @param EbNodB Signal-to-noise ratio in dB
+     * @param b Constellation distance parameter (separation between symbols)
      * @return Theoretical Pe for NRZ/BPSK modulation
      */
-    static double calculate_pe(double Eb, double constellation_distance, double EbNodB) noexcept;
+    double calculate_pe(double EbNodB, double b) const noexcept;
 };
 
-double AWGN::calculate_pe(double Eb, double constellation_distance, double EbNodB) noexcept {
-    // For NRZ/BPSK: Pe = 0.5 * erfc(d/(2*sigma))
-    // where d is constellation distance and sigma is noise std dev
-    double EbN0_linear = pow(10, EbNodB / 10.0);
-    double d = constellation_distance;
+double AWGN::calculate_pe(double EbNodB, double b) const noexcept {
+    // For NRZ/BPSK: Pe = 0.5 * erfc(b/(2*sigma))
+    // where b is constellation distance and sigma is noise std dev
+    const double EbN0_linear = pow(10, EbNodB / 10.0);
 
     // Signal-to-noise ratio in terms of constellation distance
-    // SNR = (d/2)² / σ² = (d/2)² / (No/2) = (d/2)² * 2/No = (d²/2) / No
+    // SNR = (b/2)² / σ² = (b/2)² / (No/2) = (b/2)² * 2/No = (b²/2) / No
     // where No = Eb/EbN0_linear
-    double constellation_snr = (d * d * EbN0_linear) / (4.0 * Eb);
+    const double constellation_snr = (b * b * EbN0_linear) / (4.0 * Eb);
 
     return 0.5 * erfc(sqrt(constellation_snr));
 }
-
 
 /**
  * @brief Binary Input - Additive White Gaussian Noise (BI-AWGN) channel
@@ -795,8 +895,7 @@ class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<doub
      * Default parameters (a=0, b=2) implement BPSK modulation with constellation {-1, +1}.
      * For other modulation schemes (e.g., OOK with a=1, b=2), specify custom parameters.
      */
-    BI_AWGN(double EbN0dB, double a = 0.0, double b = 2.0)
-        : encoder(a, b), transmission(encoder.get_Eb(), encoder.get_constellation_distance(), EbN0dB) {}
+    BI_AWGN(double EbN0dB, double a = 0.0, double b = 2.0) : encoder(a, b), transmission(EbN0dB, a, b) {}
 
     /**
      * @brief Process single bit through BI-AWGN channel
@@ -804,12 +903,6 @@ class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<doub
      * @return Noisy complex-valued channel output
      */
     std::complex<double> operator()(const Fp<2>& in) noexcept { return transmission(encoder(in)); }
-
-    /**
-     * @brief Get theoretical bit error probability for hard decisions
-     * @return Pe for this channel configuration
-     */
-    double get_pe() const noexcept { return transmission.get_pe(); }
 
     /**
      * @brief Get reference to internal NRZ encoder
@@ -920,12 +1013,12 @@ class NRZDecoder : public details::DecoderProcessor<NRZDecoder> {
  *
  * // Complete BPSK communication chain
  * BPSKEncoder enc;
- * AWGN chan(enc.get_Eb(), enc.get_constellation_distance(), 6.0);
+ * AWGN awgn(6.0, enc.get_Eb(), enc.get_b());
  * BPSKDecoder dec;
  *
  * Vector<Fp<2>> c = {1, 0, 1, 1, 0};
  * Vector<Fp<2>> c_est;
- * c >> enc >> chan >> dec >> c_est;
+ * c >> enc >> awgn >> dec >> c_est;
  * @endcode
  *
  * @see @ref CECCO::BPSKEncoder for the corresponding BPSK modulator
@@ -964,8 +1057,8 @@ class BPSKDecoder : public NRZDecoder {
  * @code{.cpp}
  * // BPSK soft demodulation
  * BPSKEncoder enc;  // a = 0, b = 2
- * AWGN chan(enc.get_Eb(), enc.get_constellation_distance(), 4.0);
- * LLRCalculator llr_calc(enc, chan);
+ * AWGN awgn(4.0, enc.get_Eb(), enc.get_b());
+ * LLRCalculator llr_calc(enc, awgn);
  *
  * Vector<std::complex<double>> y = {(-0.8, 0.1), (1.2, -0.3), (-0.1, 0.2)};
  * Vector<double> llrs;
@@ -977,7 +1070,7 @@ class BPSKDecoder : public NRZDecoder {
  * Vector<std::complex<double>> x;
  * Vector<std::complex<double>> y;
  * Vector<double> llrs;
- * c >> enc >> x >> chan >> y >> llr_calc >> llrs;
+ * c >> enc >> x >> awgn >> y >> llr_calc >> llrs;
  * // Use soft_info with iterative decoder, LDPC, turbo codes, etc.
  * @endcode
  *
@@ -1250,15 +1343,15 @@ Vector<E> MUX<S, E>::operator()(const Matrix<S>& in) noexcept {
  * // Communication chain with processing blocks
  * Vector<Fp<2>> c = {1, 0, 1, 0};
  * BPSKEncoder enc;
- * AWGN chan(enc.get_Eb(), enc.get_constellation_distance(), 4.0);
+ * AWGN awgn(4.0, enc.get_Eb(), enc.get_b());
  * BPSKDecoder dec;
  *
  * // Chain operations using operator>>
  * Vector<Fp<2>> r;
- * c >> enc >> chan >> dec >> r;
+ * c >> enc >> awgn >> dec >> r;
  *
  * // Equivalent to nested function calls:
- * // r = deco(chan(enc(c)));
+ * // r = deco(awgn(enc(c)));
  * @endcode
  *
  * @note This operator is disabled for iostream types to avoid conflicts with
@@ -1292,15 +1385,15 @@ decltype(auto) operator>>(LHS&& lhs, RHS&& rhs) {
  * Vector<Fp<2>> r;
  *
  * BPSKEncoder enc;
- * AWGN chan(enc.get_Eb(), enc.get_constellation_distance(), 4.0);
+ * AWGN awgn(4.0, enc.get_Eb(), enc.get_b());
  * BPSKDecoder dec;
  *
  * // Chain with intermediate storage
- * c >> enc >> x >> chan >> y >> dec >> r;
+ * c >> enc >> x >> awgn >> y >> dec >> r;
  * // x and y variables now contain intermediate results
  *
  * // In case intermediate results are not needed:
- * c >> enc >> chan >> dec >> r;
+ * c >> enc >> awgn >> dec >> r;
  * @endcode
  *
  * @note This overload has lower priority than the callable overload, ensuring
