@@ -394,10 +394,10 @@ double SDMEC<T>::get_capacity() const noexcept {
     const double pe = error_dist.p();
     const double q = static_cast<double>(T::get_size());
 
-    const double term1 = (pe > 0.0 && pe < 1.0) ? pe * log2(pe) : 0.0;
-    const double term2 = (pe > 0.0 && pe < 1.0) ? (1 - pe) * log2(1 - pe) : 0.0;
+    const double term1 = (pe > 0.0 && pe < 1.0) ? pe * std::log2(pe) : 0.0;
+    const double term2 = (pe > 0.0 && pe < 1.0) ? (1 - pe) * std::log2(1 - pe) : 0.0;
 
-    double res = log2(q) + term2 + term1 - pe * log2(q - 1);
+    double res = std::log2(q) + term2 + term1 - pe * std::log2(q - 1);
 
 #ifdef CECCO_ERASURE_SUPPORT
     const double px = erasure_dist.p();
@@ -579,7 +579,7 @@ class BAC : public details::SameTypeProcessor<BAC, Fp<2>> {
         if (p == 1.0) return 0.0;  // Useless channel
 
         const double pe = bsc.get_pe();
-        return log2(1 + (1 - pe) * pow(pe, pe / (1 - pe)));
+        return std::log2(1 + (1 - pe) * pow(pe, pe / (1 - pe)));
     }
 
    private:
@@ -783,7 +783,9 @@ class AWGN : public details::ChannelProcessor<AWGN> {
      * The error probability is calculated based on the DC offset and constellation distance.
      */
     AWGN(double EbNodB, double a, double b)
-        : Eb(NRZEncoder(a, b).get_Eb()), dist(0, sqrt(0.5 * Eb / pow(10, EbNodB / 10))), pe(calculate_pe(EbNodB, b)) {}
+        : Eb(NRZEncoder(a, b).get_Eb()),
+          dist(0, std::sqrt(0.5 * Eb / pow(10, EbNodB / 10))),
+          pe(calculate_pe(EbNodB, b)) {}
 
     /** @name Noise Parameters
      * @{
@@ -829,6 +831,20 @@ class AWGN : public details::ChannelProcessor<AWGN> {
         return res;
     }
 
+    /**
+     * @brief Calculate channel capacity in bits per symbol
+     * @return Channel capacity C in bits per symbol
+     *
+     * Computes the Shannon capacity of the AWGN channel for binary signaling:
+     * C = ½·log₂(1 + Eb/σ²)
+     *
+     * This represents the maximum achievable rate of reliable communication through
+     * this continuous-valued AWGN channel with binary input.
+     *
+     * @note Returned value is in bits per channel use (symbol).
+     */
+    double get_capacity() const noexcept { return 1 / 2.0 * std::log2(1 + Eb / get_variance()); }
+
    private:
     const double Eb{};
     std::normal_distribution<double> dist;
@@ -853,7 +869,7 @@ double AWGN::calculate_pe(double EbNodB, double b) const noexcept {
     // where No = Eb/EbN0_linear
     const double constellation_snr = (b * b * EbN0_linear) / (4.0 * Eb);
 
-    return 0.5 * erfc(sqrt(constellation_snr));
+    return 0.5 * std::erfc(std::sqrt(constellation_snr));
 }
 
 /**
@@ -910,10 +926,66 @@ class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<doub
      */
     const NRZEncoder& get_encoder() const noexcept { return encoder; }
 
+    /**
+     * @brief Calculate channel capacity in bits per symbol
+     * @return Channel capacity C in bits per symbol
+     *
+     * Computes the Shannon capacity of the BI-AWGN channel by numerical integration. Uses composite Simpson's rule.
+     *
+     * **Edge Cases**:
+     * - b = 0: C = 0 bits (no separation between symbols)
+     * - σ = 0: C = 1 bit (noiseless channel)
+     *
+     * @note Result is clamped to [0, 1] for numerical stability.
+     */
+    double get_capacity() const noexcept;
+
    private:
     NRZEncoder encoder;
     AWGN transmission;
 };
+
+double BI_AWGN::get_capacity() const noexcept {
+    const double a = encoder.get_a();
+    const double b = encoder.get_b();
+    const double sigma = transmission.get_standard_deviation();
+
+    if (b == 0.0) return 0.0;      // no separation -> capacity zero
+    if (sigma == 0.0) return 1.0;  // noiseless -> capacity one
+
+    auto f_Y_star = [a, b, sigma](double x) -> double {
+        double m = 1.0 / (2.0 * sigma * std::sqrt(2.0 * M_PI));
+        double s0 = std::exp(-0.5 * std::pow((x - (a - b / 2.0)) / sigma, 2.0));
+        double s1 = std::exp(-0.5 * std::pow((x - (a + b / 2.0)) / sigma, 2.0));
+        return m * (s0 + s1);
+    };
+
+    auto g = [&f_Y_star](double x) -> double {
+        double fy = f_Y_star(x);
+        if (fy <= 0.0) return 0.0;  // avoid log2(0)
+        return fy * std::log2(fy);
+    };
+
+    const double K = 8.0;
+    const double mu0 = a - b / 2.0;
+    const double mu1 = a + b / 2.0;
+    const double lb = std::min(mu0, mu1) - K * sigma;
+    const double ub = std::max(mu0, mu1) + K * sigma;
+
+    // ---- composite Simpson's rule on [lb, ub] ----
+    const int N = 16000;  // must be even, tune for accuracy/speed
+    const double h = (ub - lb) / N;
+
+    double sum = g(lb) + g(ub);
+    for (int i = 1; i < N; ++i) {
+        double x = lb + i * h;
+        sum += (i % 2 == 0 ? 2.0 : 4.0) * g(x);
+    }
+
+    const double integral = h * sum / 3.0;  // ≈ ∫ g(x) dx
+
+    return std::clamp(-integral - std::log2(sigma * std::sqrt(2 * M_PI * M_E)), 0.0, 1.0);
+}
 
 /**
  * @brief Non-Return-to-Zero (NRZ) hard-decision decoder
