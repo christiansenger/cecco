@@ -76,7 +76,7 @@ int main(void) {
     using F64 = Iso<F64_c, F64_b, F64_a>;  // once we have F64: no reason to use F64_a,... any more
     std::cout << "Show textual info about F64:" << std::endl;
     std::cout << F64::get_info() << std::endl;
-    // F64 is now a superfield of F2, F4, F8, F64_a, F64_b, F64_c, and trivially by itself
+    // F64 is now a superfield of F2, F4, F8, F64_a, F64_b, F64_c, and trivially of itself
     static_assert(SubfieldOf<F64, F2>);
     static_assert(SubfieldOf<F64, F4>);
     static_assert(SubfieldOf<F64, F8>);

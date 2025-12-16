@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.0
+ * @version 2.1.1
  * @date 2025
  *
  * @copyright
@@ -1002,10 +1002,10 @@ std::pair<Polynomial<T>, Polynomial<T>> Polynomial<T>::poly_long_div(const Polyn
 {
     if (rhs.degree() == 0) {
         if (rhs[0] == T(0)) throw std::invalid_argument("polynomial long division by zero polynomial");
-        return std::make_pair(*this / rhs[0], Polynomial<T>());
+        return std::make_pair(*this / rhs[0], Polynomial<T>({0}));
     }
 
-    if (degree() == 0) return std::make_pair(Polynomial<T>(), Polynomial<T>());
+    if (degree() == 0) return std::make_pair(Polynomial<T>({0}), Polynomial<T>({0}));
 
     if (degree() < rhs.degree()) return std::make_pair(Polynomial<T>(), rhs);
 

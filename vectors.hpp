@@ -2,7 +2,7 @@
  * @file vectors.hpp
  * @brief Vector arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0
+ * @version 2.0.1
  * @date 2025
  *
  * @copyright
@@ -843,6 +843,25 @@ class Vector {
         requires FiniteFieldType<T>;
 
     /**
+     * @brief Construct vector from an integer (finite fields only)
+     *
+     * @param value Integer to convert
+     * @param n     Desired vector length
+     *
+     * @return Vector whose base-q positional encoding equals @p value
+     *
+     * Interprets @p value in base q = T::get_size() and constructs a vector of length @p n
+     * such that component data[n-1-i] is set to the i-th least significant base-q digit
+     * of @p value.
+     *
+     * @note This function is the left inverse of as_integer() for values in the valid range:
+     *       from_integer(v.as_integer(), v.size()) == v.
+     * @note Available only for finite field types.
+     */
+    Vector& from_integer(size_t value, size_t n)
+        requires FiniteFieldType<T>;
+
+    /**
      * @brief Convert to matrix over subfield (finite fields only)
      *
      * @tparam S Subfield type satisfying SubfieldOf<T, S>
@@ -1352,6 +1371,24 @@ size_t Vector<T>::as_integer() const noexcept
     return std::transform_reduce(indices.begin(), indices.end(), size_t{0}, std::plus<size_t>{}, [this](size_t i) {
         return data[data.size() - i - 1].get_label() * sqm<size_t>(T::get_size(), i);
     });
+}
+
+template <ComponentType T>
+Vector<T>& Vector<T>::from_integer(size_t value, size_t n)
+    requires FiniteFieldType<T>
+{
+    constexpr size_t q = T::get_size();
+
+    Vector<T> v(n, T(0));
+    for (size_t i = 0; i < n; ++i) {
+        const size_t digit = value % q;
+        value /= q;
+        v.set_component(n - 1 - i, T(digit));
+    }
+    if (value != 0)
+        throw std::out_of_range("Cannot convert integer value to base " + std::to_string(T::get_size()) + " vector of length " + std::to_string(n) + "!");
+    *this=v;
+    return *this;
 }
 
 template <ComponentType T>

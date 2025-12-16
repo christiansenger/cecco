@@ -2,7 +2,7 @@
  * @file matrices.hpp
  * @brief Matrix arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.0
+ * @version 2.1.2
  * @date 2025
  *
  * @copyright
@@ -613,6 +613,13 @@ class Matrix {
     constexpr bool is_empty() const noexcept { return m == 0 || n == 0; }
 
     /**
+     * @brief Check if matrix is zero
+     *
+     * @return true if matrix has only zero components, false otherwise
+     */
+    constexpr bool is_zero() const noexcept { return type == details::Zero; }
+
+    /**
      * @brief Compute Hamming weight (number of non-zero elements)
      *
      * @return Number of non-zero elements in the matrix
@@ -684,7 +691,7 @@ class Matrix {
      * @return Matrix whose rows form a basis for the nullspace
      *
      * Computes a basis for the nullspace using Gaussian elimination.
-     * The nullspace consists of all column vectors x such that Ax = 0.
+     * The nullspace consists of all row vectors x such that Ax^T = 0.
      *
      * @note Only available for field types
      */
@@ -2056,6 +2063,9 @@ Matrix<T> Matrix<T>::basis_of_nullspace() const
     Matrix<T> temp(*this);
     size_t r = 0;
     temp.rref(&r);
+
+    if (n - r == 0) return Matrix<T>(1, n, T(0));
+
     Matrix B(n - r, n);
 
     std::vector<size_t> mocols;  // "minus one columns"
@@ -2072,13 +2082,18 @@ Matrix<T> Matrix<T>::basis_of_nullspace() const
         }
     }
 
-    for (size_t k = 0; k < mocols.size(); ++k) {
-        size_t free_col = mocols[k];
-        B(k, free_col) = -T(1);
-        for (size_t i = 0; i < r; ++i) {
-            B(k, i) = temp(i, free_col);
+    size_t offset = 0;
+    for (size_t i = 0; i < m + offset + 1; ++i) {
+        for (size_t k = offset; k < n - r; ++k) {
+            if (i + offset == mocols[k]) {
+                B(k, i + offset) = -T(1);
+                ++offset;
+            } else {
+                B(k, i + offset) = temp(i, mocols[k]);
+            }
         }
     }
+
     return B;
 }
 
