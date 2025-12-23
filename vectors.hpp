@@ -2,7 +2,7 @@
  * @file vectors.hpp
  * @brief Vector arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.1
+ * @version 2.0.2
  * @date 2025
  *
  * @copyright
@@ -676,6 +676,8 @@ class Vector {
      */
     Vector& delete_component(size_t i) { return delete_components({i}); }
 
+#ifdef CECCO_ERASURE_SUPPORT
+
     /**
      * @brief Erases specified components from the vector (flags them as erasures)
      *
@@ -749,6 +751,8 @@ class Vector {
     {
         return unerase_components({i});
     }
+
+#endif
 
     /**
      * @brief Pad vector to specified length with zeros at front
@@ -1073,6 +1077,8 @@ Vector<T>& Vector<T>::delete_components(const std::vector<size_t>& v) {
     return *this;
 }
 
+#ifdef CECCO_ERASURE_SUPPORT
+
 template <ComponentType T>
 Vector<T>& Vector<T>::erase_components(const std::vector<size_t>& v)
     requires FieldType<T>
@@ -1109,6 +1115,8 @@ Vector<T>& Vector<T>::unerase_components(const std::vector<size_t>& v)
     cache.invalidate();
     return *this;
 }
+
+#endif
 
 /**
  * @brief Delete single component from vector
@@ -1386,8 +1394,9 @@ Vector<T>& Vector<T>::from_integer(size_t value, size_t n)
         v.set_component(n - 1 - i, T(digit));
     }
     if (value != 0)
-        throw std::out_of_range("Cannot convert integer value to base " + std::to_string(T::get_size()) + " vector of length " + std::to_string(n) + "!");
-    *this=v;
+        throw std::out_of_range("Cannot convert integer value to base " + std::to_string(T::get_size()) +
+                                " vector of length " + std::to_string(n) + "!");
+    *this = v;
     return *this;
 }
 
@@ -1405,6 +1414,7 @@ Matrix<S> Vector<T>::as_matrix() const noexcept
     res.set_submatrix(0, 0, temp);
 
     for (size_t i = 1; i < data.size(); ++i) {
+#ifdef CECCO_ERASURE_SUPPORT
         if (data[i].is_erased()) {
             for (size_t j = 0; j < m; ++j) {
                 res(j, i).erase();
@@ -1414,6 +1424,11 @@ Matrix<S> Vector<T>::as_matrix() const noexcept
             temp.transpose();
             res.set_submatrix(0, i, temp);
         }
+#else
+        Matrix<S> temp(data[i].template as_vector<S>());
+        temp.transpose();
+        res.set_submatrix(0, i, temp);
+#endif
     }
 
     return res;
@@ -1636,6 +1651,8 @@ Vector<T> delete_components(Vector<T>&& lhs, const std::vector<size_t>& v) {
     return res;
 }
 
+#ifdef CECCO_ERASURE_SUPPORT
+
 template <ComponentType T>
 Vector<T> erase_components(const Vector<T>& lhs, const std::vector<size_t>& v) {
     Vector res(lhs);
@@ -1691,6 +1708,8 @@ Vector<T> unerase_component(Vector<T>&& lhs, size_t i) {
     res.unerase_component(i);
     return res;
 }
+
+#endif
 
 template <ComponentType T>
 constexpr Vector<T> pad_front(const Vector<T>& v, size_t n) {

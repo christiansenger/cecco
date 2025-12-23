@@ -2,7 +2,7 @@
  * @file matrices.hpp
  * @brief Matrix arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.2
+ * @version 2.1.3
  * @date 2025
  *
  * @copyright
@@ -1103,6 +1103,8 @@ class Matrix {
      */
     Matrix<T>& delete_row(size_t i) { return delete_rows({i}); }
 
+    #ifdef CECCO_ERASURE_SUPPORT
+
     /**
      * @brief Erases specified component from the matrix (flags it as erasure)
      *
@@ -1286,6 +1288,8 @@ class Matrix {
     {
         return unerase_rows({i});
     }
+
+    #endif
 
     /** @} */
 
@@ -2484,6 +2488,8 @@ Matrix<T>& Matrix<T>::delete_rows(const std::vector<size_t>& v) {
     return *this;
 }
 
+#ifdef CECCO_ERASURE_SUPPORT
+
 template <ComponentType T>
 Matrix<T>& Matrix<T>::erase_component(size_t i, size_t j)
     requires FieldType<T>
@@ -2593,6 +2599,8 @@ Matrix<T>& Matrix<T>::unerase_rows(const std::vector<size_t>& v)
     cache.invalidate();
     return *this;
 }
+
+#endif
 
 template <ComponentType T>
 constexpr Matrix<T>& Matrix<T>::reverse_rows() {
@@ -3296,6 +3304,8 @@ constexpr Matrix<T> delete_row(Matrix<T>&& lhs, size_t i) {
     return res;
 }
 
+#ifdef CECCO_ERASURE_SUPPORT
+
 template <ComponentType T>
 constexpr Matrix<T> erase_component(const Matrix<T>& lhs, size_t i, size_t j) {
     Matrix<T> res(lhs);
@@ -3435,6 +3445,8 @@ constexpr Matrix<T> unerase_row(Matrix<T>&& lhs, size_t i) {
     res.unerase_colum(i);
     return res;
 }
+
+#endif
 
 template <ComponentType T>
 constexpr Matrix<T> reverse_rows(const Matrix<T>& M) {
