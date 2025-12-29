@@ -2,7 +2,7 @@
  * @file vectors.hpp
  * @brief Vector arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.2
+ * @version 2.0.3
  * @date 2025
  *
  * @copyright
@@ -152,9 +152,8 @@ double dE(const Vector<std::complex<double>>& lhs, const Vector<std::complex<dou
  */
 template <ComponentType T>
 class Vector {
-    template <ComponentType U>
-    friend constexpr bool operator==(const Vector<U>& lhs, const Vector<U>& rhs) noexcept
-        requires ReliablyComparableType<U>;
+    template <ReliablyComparableType U>
+    friend constexpr bool operator==(const Vector<U>& lhs, const Vector<U>& rhs) noexcept;
     friend constexpr T inner_product<>(const Vector<T>& lhs, const Vector<T>& rhs);
     friend Vector unit_vector<>(size_t length, size_t i);
     friend std::ostream& operator<< <>(std::ostream& os, const Vector& rhs) noexcept;
@@ -1547,10 +1546,8 @@ constexpr Vector<T> operator/(const Vector<T>& lhs, const T& rhs) {
     return res;
 }
 
-template <ComponentType T>
-constexpr Vector<T> operator/(Vector<T>&& lhs, const T& rhs)
-    requires FieldType<T>
-{
+template <FieldType T>
+constexpr Vector<T> operator/(Vector<T>&& lhs, const T& rhs) {
     Vector res(std::move(lhs));
     res /= rhs;
     return res;
@@ -1827,18 +1824,14 @@ T inner_product(const Vector<T>& lhs, const Vector<T>& rhs) {
     return std::inner_product(lhs.data.cbegin(), lhs.data.cend(), rhs.data.begin(), T(0));
 }
 
-template <ComponentType T>
-constexpr bool operator==(const Vector<T>& lhs, const Vector<T>& rhs) noexcept
-    requires ReliablyComparableType<T>
-{
+template <ReliablyComparableType T>
+constexpr bool operator==(const Vector<T>& lhs, const Vector<T>& rhs) noexcept {
     if (lhs.data.size() != rhs.data.size()) return false;
     return lhs.data == rhs.data;
 }
 
-template <ComponentType T>
-constexpr bool operator!=(const Vector<T>& lhs, const Vector<T>& rhs) noexcept
-    requires ReliablyComparableType<T>
-{
+template <ReliablyComparableType T>
+constexpr bool operator!=(const Vector<T>& lhs, const Vector<T>& rhs) noexcept {
     return !(lhs == rhs);
 }
 
@@ -1878,10 +1871,8 @@ std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) noexcept {
  * @note Not available for types T, where precise comparison for zero is not possible (all floating point types,
  * Rationals<T> with T != InfInt.
  */
-template <ComponentType T>
-constexpr size_t wH(const Vector<T>& v) noexcept
-    requires ReliablyComparableType<T>
-{
+template <ReliablyComparableType T>
+constexpr size_t wH(const Vector<T>& v) noexcept {
     return v.wH();
 }
 
@@ -1899,8 +1890,7 @@ constexpr size_t wH(const Vector<T>& v) noexcept
  *
  * @throws std::invalid_argument if vectors have different lengths
  */
-template <ComponentType T>
-    requires ReliablyComparableType<T>
+template <ReliablyComparableType T>
 size_t dH(const Vector<T>& lhs, const Vector<T>& rhs) {
     if (lhs.get_n() != rhs.get_n())
         throw std::invalid_argument(
@@ -1909,8 +1899,7 @@ size_t dH(const Vector<T>& lhs, const Vector<T>& rhs) {
     return (lhs - rhs).wH();
 }
 
-template <ComponentType T>
-    requires ReliablyComparableType<T>
+template <ReliablyComparableType T>
 size_t dH(Vector<T>&& lhs, const Vector<T>& rhs) {
     if (lhs.get_n() != rhs.get_n())
         throw std::invalid_argument(
@@ -1919,8 +1908,7 @@ size_t dH(Vector<T>&& lhs, const Vector<T>& rhs) {
     return (std::move(lhs) - rhs).wH();
 }
 
-template <ComponentType T>
-    requires ReliablyComparableType<T>
+template <ReliablyComparableType T>
 size_t dH(const Vector<T>& lhs, Vector<T>&& rhs) {
     if (lhs.get_n() != rhs.get_n())
         throw std::invalid_argument(
@@ -1928,8 +1916,7 @@ size_t dH(const Vector<T>& lhs, Vector<T>&& rhs) {
             "lengths");
     return (lhs - std::move(rhs)).wH();
 }
-template <ComponentType T>
-    requires ReliablyComparableType<T>
+template <ReliablyComparableType T>
 size_t dH(Vector<T>&& lhs, Vector<T>&& rhs) {
     if (lhs.get_n() != rhs.get_n())
         throw std::invalid_argument(
@@ -1941,7 +1928,7 @@ size_t dH(Vector<T>&& lhs, Vector<T>&& rhs) {
 /**
  * @brief Compute burst length of a vector
  *
- * @tparam T Vector component type (must satisfy @ref CECCO::FiniteFieldType or @ref CECCO::SignedIntType)
+ * @tparam T Vector component type (must satisfy @ref CECCO::ReliablyComparableType)
  * @param v Vector to analyze
  * @return Length of burst
  *
@@ -1950,17 +1937,15 @@ size_t dH(Vector<T>&& lhs, Vector<T>&& rhs) {
  *
  * @see Vector::burst_length() for detailed explanation
  */
-template <ComponentType T>
-constexpr size_t burst_length(const Vector<T>& v) noexcept
-    requires ReliablyComparableType<T>
-{
+template <ReliablyComparableType T>
+constexpr size_t burst_length(const Vector<T>& v) noexcept {
     return v.burst_length();
 }
 
 /**
  * @brief Compute cyclic burst length of a vector
  *
- * @tparam T Vector component type (must satisfy @ref CECCO::FiniteFieldType or @ref CECCO::SignedIntType)
+ * @tparam T Vector component type (must satisfy @ref CECCO::ReliablyComparableType)
  * @param v Vector to analyze
  * @return Length of cyclic burst
  *
@@ -1969,10 +1954,8 @@ constexpr size_t burst_length(const Vector<T>& v) noexcept
  *
  * @see Vector::cyclic_burst_length() for detailed explanation
  */
-template <ComponentType T>
-constexpr size_t cyclic_burst_length(const Vector<T>& v) noexcept
-    requires ReliablyComparableType<T>
-{
+template <ReliablyComparableType T>
+constexpr size_t cyclic_burst_length(const Vector<T>& v) noexcept {
     return v.cyclic_burst_length();
 }
 

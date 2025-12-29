@@ -2,7 +2,7 @@
  * @file matrices.hpp
  * @brief Matrix arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.3
+ * @version 2.1.4
  * @date 2025
  *
  * @copyright
@@ -14,7 +14,7 @@
  *
  * @section Description
  *
- * This header file provides a complete implementation of matrix arithmetic and mandy linear algebra
+ * This header file provides a complete implementation of matrix arithmetic and many linear algebra
  * operations. It supports:
  *
  * - **details::Generic matrix operations**: Over any @ref CECCO::ComponentType including finite fields,
@@ -272,9 +272,8 @@ class Matrix {
     friend constexpr Matrix<T> DiagonalMatrix<>(const Vector<T>& v);
     friend constexpr Matrix<T> ToeplitzMatrix<>(const Vector<T>& v, size_t m, size_t n);
     friend constexpr Matrix<T> VandermondeMatrix<>(const Vector<T>& v, size_t m);
-    template <ComponentType U>
-    friend constexpr bool operator==(const Matrix<U>& lhs, const Matrix<U>& rhs) noexcept
-        requires ReliablyComparableType<U>;
+    template <ReliablyComparableType U>
+    friend constexpr bool operator==(const Matrix<U>& lhs, const Matrix<U>& rhs) noexcept;
     friend std::ostream& operator<< <>(std::ostream& os, const Matrix& rhs) noexcept;
     template <ComponentType>
     friend class Matrix;
@@ -1103,7 +1102,7 @@ class Matrix {
      */
     Matrix<T>& delete_row(size_t i) { return delete_rows({i}); }
 
-    #ifdef CECCO_ERASURE_SUPPORT
+#ifdef CECCO_ERASURE_SUPPORT
 
     /**
      * @brief Erases specified component from the matrix (flags it as erasure)
@@ -1289,7 +1288,7 @@ class Matrix {
         return unerase_rows({i});
     }
 
-    #endif
+#endif
 
     /** @} */
 
@@ -3504,19 +3503,15 @@ constexpr Matrix<T> transpose(Matrix<T>&& M) noexcept {
     return res;
 }
 
-template <ComponentType T>
-Matrix<T> rref(const Matrix<T>& M)
-    requires FieldType<T>
-{
+template <FieldType T>
+Matrix<T> rref(const Matrix<T>& M) {
     Matrix<T> res(M);
     res.rref();
     return res;
 }
 
-template <ComponentType T>
-Matrix<T> rref(Matrix<T>&& M)
-    requires FieldType<T>
-{
+template <FieldType T>
+Matrix<T> rref(Matrix<T>&& M) {
     Matrix<T> res(std::move(M));
     res.rref();
     return res;
@@ -3555,10 +3550,8 @@ Vector<S> as_vector(const Matrix<T>& M) {
  * Two matrices are equal if they have the same dimensions and all corresponding
  * elements are equal. Uses optimized comparison algorithms for structured matrices.
  */
-template <ComponentType T>
-constexpr bool operator==(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept
-    requires ReliablyComparableType<T>
-{
+template <ReliablyComparableType T>
+constexpr bool operator==(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
     if (lhs.m != rhs.m || lhs.n != rhs.n) return false;
 
     if (lhs.m == 0) {
@@ -3619,10 +3612,8 @@ constexpr bool operator==(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept
  * Equivalent to !(lhs == rhs). Two matrices are not equal if they have different
  * dimensions or any corresponding elements differ.
  */
-template <ComponentType T>
-constexpr bool operator!=(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept
-    requires ReliablyComparableType<T>
-{
+template <ReliablyComparableType T>
+constexpr bool operator!=(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
     return !(lhs == rhs);
 }
 
