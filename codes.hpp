@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.4
+ * @version 2.0.6
  * @date 2025
  *
  * @copyright
@@ -43,10 +43,15 @@ namespace CECCO {
 template <FiniteFieldType T>
 long double HammingUpperBound(size_t n, size_t dmin) {
     constexpr size_t q = T::get_size();
-    const size_t tmax = std::floorl((long double)(dmin - 1.0) / 2.0);
-    InfInt h = 0;
-    for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-    return n - std::log2l(h.toUnsignedLongLong()) / std::log2l(q);
+    try {
+        const size_t tmax = std::floorl((long double)(dmin - 1.0) / 2.0);
+        InfInt h = 0;
+        for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
+        return n - std::log2l(h.toUnsignedLongLong()) / std::log2l(q);
+    } catch (const InfIntException& e) {
+        std::cout << " [Hamming bound overflow]";
+        return 0;
+    }
 }
 
 namespace details {
@@ -66,44 +71,59 @@ static size_t A(size_t n, size_t d, size_t w) {
 template <FiniteFieldType T>
 long double JohnsonUpperBound(size_t n, size_t dmin) {
     constexpr size_t q = T::get_size();
-    const size_t tmax = std::floorl((dmin - 1) / 2.0);
-    const size_t s = dmin % 2;
-    InfInt h = 0;
-    for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-    return n - std::log2l(h.toUnsignedLongLong() + (bin<InfInt>(n, tmax + 1) * sqm<InfInt>(q - 1, tmax + 1) -
-                                                    InfInt(s) * bin<InfInt>(dmin, tmax) * A<T>(n, dmin, dmin))
-                                                           .toUnsignedLongLong() /
-                                                       (long double)A<T>(n, dmin, tmax + 1)) /
-                   std::log2l(q);
+    try {
+        const size_t tmax = std::floorl((dmin - 1) / 2.0);
+        const size_t s = dmin % 2;
+        InfInt h = 0;
+        for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
+        return n - std::log2l(h.toUnsignedLongLong() + (bin<InfInt>(n, tmax + 1) * sqm<InfInt>(q - 1, tmax + 1) -
+                                                        InfInt(s) * bin<InfInt>(dmin, tmax) * A<T>(n, dmin, dmin))
+                                                               .toUnsignedLongLong() /
+                                                           (long double)A<T>(n, dmin, tmax + 1)) /
+                       std::log2l(q);
+    } catch (const InfIntException& e) {
+        std::cout << " [Johnson bound overflow]";
+        return 0;
+    }
 }
 
 template <FiniteFieldType T>
 long double PlotkinUpperBound(size_t n, size_t dmin) {
     constexpr size_t q = T::get_size();
-    if ((long double)dmin / n > (long double)(q - 1) / q) {  // conventional
-        return 1 - std::log2l(q - (long double)n * (q - 1) / dmin) / std::log2l(q);
-    } else {  // improved
-        const size_t Delta = n - std::floorl((long double)dmin * q / (q - 1)) + 1;
-        const size_t M = sqm(q, Delta + 1) * (long double)dmin / ((q * dmin - (n - Delta) * (q - 1)));
-        return std::log2l(M) / std::log2l(q);
+    try {
+        if ((long double)dmin / n > (long double)(q - 1) / q) {  // conventional
+            return 1 - std::log2l(q - (long double)n * (q - 1) / dmin) / std::log2l(q);
+        } else {  // improved
+            const size_t Delta = n - std::floorl((long double)dmin * q / (q - 1)) + 1;
+            const size_t M = sqm(q, Delta + 1) * (long double)dmin / ((q * dmin - (n - Delta) * (q - 1)));
+            return std::log2l(M) / std::log2l(q);
+        }
+    } catch (const InfIntException& e) {
+        std::cout << " [Plotkin bound overflow]";
+        return 0;
     }
 }
 
 template <FiniteFieldType T>
 long double EliasUpperBound(size_t n, size_t dmin) {
     constexpr size_t q = T::get_size();
-    const long double r = 1 - (long double)1 / q;
-    long double min = std::numeric_limits<long double>::max();
-    for (size_t w = 0; w <= r * n; ++w) {
-        if (w * w - 2 * r * n * w + r * n * dmin > 0) {
-            InfInt h = 0;
-            for (size_t i = 0; i <= w; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-            long double temp = (long double)(r * n * dmin) / (w * w - 2 * r * n * w + r * n * dmin);
-            temp /= h.toUnsignedLongLong();
-            min = std::min<long double>(temp, min);
+    try {
+        const long double r = 1 - (long double)1 / q;
+        long double min = std::numeric_limits<long double>::max();
+        for (size_t w = 0; w <= r * n; ++w) {
+            if (w * w - 2 * r * n * w + r * n * dmin > 0) {
+                InfInt h = 0;
+                for (size_t i = 0; i <= w; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
+                long double temp = (long double)(r * n * dmin) / (w * w - 2 * r * n * w + r * n * dmin);
+                temp /= h.toUnsignedLongLong();
+                min = std::min<long double>(temp, min);
+            }
         }
+        return n + std::log2l(min) / std::log2l(q);
+    } catch (const InfIntException& e) {
+        std::cout << " [Elias bound overflow]";
+        return 0;
     }
-    return n + std::log2l(min) / std::log2l(q);
 }
 
 size_t SingletonUpperBound(size_t n, size_t dmin) { return n - dmin + 1; }
@@ -143,9 +163,14 @@ size_t GilbertVarshamovLowerBound(size_t n, size_t dmin) {
     if (dmin == 1) return n;
     if (dmin == n) return 1;
     constexpr size_t q = T::get_size();
-    InfInt sum = 0;
-    for (size_t i = 0; i < dmin; ++i) sum += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-    return std::ceill(n - std::log2l(sum.toUnsignedLongLong()) / std::log2l(q));
+    try {
+        InfInt sum = 0;
+        for (size_t i = 0; i < dmin; ++i) sum += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
+        return std::ceill(n - std::log2l(sum.toUnsignedLongLong()) / std::log2l(q));
+    } catch (const InfIntException& e) {
+        std::cout << " [Gilbert-Varshamov bound overflow]";
+        return 0;
+    }
 }
 
 template <FiniteFieldType T>
@@ -555,7 +580,7 @@ class LinearCode : public Code<T> {
                     do {
                         size_t i = 0;
                         for (size_t j = 0; j < this->n; ++j) {
-                            if (selection[j] == true) {
+                            if (selection[j]) {
                                 M.set_submatrix(i, 0, HT.get_submatrix(j, 0, 1, this->n - k));
                                 ++i;
                             }
@@ -623,7 +648,7 @@ class LinearCode : public Code<T> {
         gamma.emplace(g);
     }
 
-     void set_gamma(Polynomial<T>&& g) const noexcept {
+    void set_gamma(Polynomial<T>&& g) const noexcept {
         polynomial.emplace(true);
         gamma.emplace(std::move(g));
     }
@@ -642,9 +667,14 @@ class LinearCode : public Code<T> {
             size_t count = 0;
             bool done = false;
 
-            standard_array.emplace(std::vector<Vector<T>>(sqm<size_t>(q, this->n - k)));
-            tainted.emplace(std::vector<bool>(standard_array.value().size(), false));
-            tainted_burst.emplace(std::vector<bool>(standard_array.value().size(), false));
+            try {
+                standard_array.emplace(std::vector<Vector<T>>(sqm<size_t>(q, this->n - k)));
+                tainted.emplace(std::vector<bool>(standard_array.value().size(), false));
+                tainted_burst.emplace(std::vector<bool>(standard_array.value().size(), false));
+            } catch (const std::bad_alloc& e) {
+                std::cout << "Memory allocation failed, standard array would be too large!" << std::endl;
+                throw e;
+            }
 
             std::vector<size_t> leader_wH(standard_array.value().size(), std::numeric_limits<size_t>::max());
             std::vector<size_t> leader_cyclic_burst_length(standard_array.value().size(),
@@ -1206,7 +1236,12 @@ class HammingCode : public LinearCode<T> {
         return c_hat;
     }
 
-    Vector<T> dec_ML(const Vector<T>& r) const override { return dec_BD(r); }
+    Vector<T> dec_ML(const Vector<T>& r) const override {
+        if (!LinearCode<T>::erasures_present(r))
+            return dec_BD(r);
+        else
+            return LinearCode<T>::dec_ML_EE(r);
+    }
 
 #ifdef CECCO_ERASURE_SUPPORT
     virtual Vector<T> dec_BD_EE(const Vector<T>& r) const override {
@@ -1216,9 +1251,7 @@ class HammingCode : public LinearCode<T> {
         }
         const size_t tau = X.size();
 
-        if (tau == 0) {
-            return dec_BD(r);
-        }
+        if (tau == 0) return dec_BD(r);
         if (tau > 2) throw decoding_failure("Hamming code BD error/erasure decoder failed!");
 
         auto s = Vector<T>(this->n - this->k);
@@ -1233,7 +1266,7 @@ class HammingCode : public LinearCode<T> {
                 c_est.set_component(X[0], 0);
             } else {
                 for (size_t i = 0; i < this->n - this->k; ++i) {
-                    if (!s[i].is_zero()) {
+                    if (!this->HT(X[0], i).is_zero()) {
                         c_est.set_component(X[0], -s[i] / this->HT(X[0], i));
                         break;
                     }
@@ -1249,10 +1282,10 @@ class HammingCode : public LinearCode<T> {
             c_est.set_component(X[1], B(0, 1));
         }
 
+        if (!(c_est * this->HT).is_zero()) throw decoding_failure("Hamming code BD error/erasure decoder failed!");
+
         return c_est;
     }
-
-    virtual Vector<T> dec_ML_EE(const Vector<T>& r) const override { return dec_BD_EE(r); }
 #endif
 
    private:
@@ -1344,7 +1377,7 @@ class SimplexCode : public LinearCode<T> {
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
-        if (LinearCode<T>::erasures_present(r)) return LinearCode<T>::dec_ML_EE(r);
+        if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
 
         if constexpr (T::get_size() != 2) return LinearCode<T>::dec_ML(r);
 
@@ -1369,8 +1402,45 @@ class SimplexCode : public LinearCode<T> {
         Vector<T> u_hat;
         u_hat.from_integer(hit, this->k);
 
-        return u_hat*this->G;
+        return u_hat * this->G;
     }
+
+#ifdef CECCO_ERASURE_SUPPORT
+    Vector<T> dec_ML_EE(const Vector<T>& r) const override {
+        if (!LinearCode<T>::erasures_present(r)) return dec_ML(r);
+
+        if constexpr (T::get_size() != 2) return LinearCode<T>::dec_ML_EE(r);
+
+        size_t tau = 0;
+        for (size_t i = 0; i < this->n; ++i) {
+            if (r[i].is_erased()) ++tau;
+        }
+        if (tau == this->n) throw decoding_failure("Simplex code ML error/erasure decoder failed!");
+
+        Vector<double> y(this->n + 1, 0.0);
+        y.set_component(0, 0.0);
+        for (size_t i = 0; i < this->n; ++i) {
+            const size_t j = cols_as_integers[i];
+            if (!r[i].is_erased()) y.set_component(j, r[i].is_zero() ? 1.0 : -1.0);
+        }
+
+        FWHT(y);
+
+        size_t hit = 0;
+        double best = -std::numeric_limits<double>::infinity();
+        for (size_t u = 0; u < y.get_n(); ++u) {
+            if (y[u] > best) {
+                best = y[u];
+                hit = u;
+            }
+        }
+
+        Vector<T> u_hat;
+        u_hat.from_integer(hit, this->k);
+
+        return u_hat * this->G;
+    }
+#endif
 
    private:
     static void FWHT(Vector<double>& a) {
@@ -1464,33 +1534,6 @@ class RepetitionCode : public LinearCode<T> {
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
-    virtual Vector<T> dec_BD_EE(const Vector<T>& r) const override {
-        std::vector<size_t> X;
-        for (size_t i = 0; i < this->n; ++i) {
-            if (r[i].is_erased()) X.push_back(i);
-        }
-        const size_t tau = X.size();
-
-        if (tau == 0) return dec_ML(r);
-        if (tau == this->n) throw decoding_failure("Repetition code BD error/erasure decoder failed!");
-
-        constexpr size_t q = T::get_size();
-        std::array<size_t, q> counters{};
-        for (size_t i = 0; i < r.get_n(); ++i) {
-            if (!r[i].is_erased()) ++counters[r[i].get_label()];
-        }
-        auto it = std::max_element(counters.cbegin(), counters.cend());
-        std::size_t label = static_cast<std::size_t>(std::distance(counters.cbegin(), it));
-
-        auto c_est = Vector<T>(this->n, T(label));
-        if (q != 2 || this->n % 2 == 0) {
-            if (2 * dH(r, c_est) + tau > this->get_dmin() - 1)
-                throw decoding_failure("Repetition code BD error/erasure decoder failed!");
-        }
-
-        return c_est;
-    }
-
     virtual Vector<T> dec_ML_EE(const Vector<T>& r) const override {
         std::vector<size_t> X;
         for (size_t i = 0; i < this->n; ++i) {
@@ -1573,6 +1616,7 @@ class SingleParityCheckCode : public LinearCode<T> {
         return c_est;
     }
 
+#ifdef CECCO_ERASURE_SUPPORT
     Vector<T> dec_BD_EE(const Vector<T>& r) const override {
         std::vector<size_t> X;
         for (size_t i = 0; i < this->n; ++i) {
@@ -1613,6 +1657,7 @@ class SingleParityCheckCode : public LinearCode<T> {
         for (size_t i = 1; i < tau; ++i) c_est.set_component(X[i], T(0));
         return c_est;
     }
+#endif
 };
 
 template <FiniteFieldType T>
@@ -1821,60 +1866,19 @@ class ExtendedCode : public LinearCode<T> {
     }
 
     virtual Vector<T> dec_BD(const Vector<T>& r) const override {
-        if (parity) {
-            if (LinearCode<T>::erasures_present(r)) return LinearCode<T>::dec_BD_EE(r);
-
-            auto r_base = concatenate(r.get_subvector(0, i), r.get_subvector(i + 1, r.get_n() - i - 1));
-
-            auto c_hat_base = BaseCode.dec_BD(r_base);  // may throw
-            const size_t d_base = dH(r_base, c_hat_base);
-
-            T p(0);
-            for (size_t j = 0; j < c_hat_base.get_n(); ++j) p += c_hat_base[j];
-
-            const size_t d = d_base + ((p != r[i]) ? 1u : 0u);
-            if (d > this->get_tmax()) throw decoding_failure("Extended BD failed!");
-
-            Vector<T> c_hat(this->n);
-            c_hat.set_subvector(c_hat_base.get_subvector(0, i), 0);
-            c_hat.set_component(i, -p);
-            c_hat.set_subvector(c_hat_base.get_subvector(i, c_hat_base.get_n() - i), i + 1);
-            return c_hat;
-        }
-        return LinearCode<T>::dec_BD(r);
-    }
-
-    Vector<T> dec_BD_EE(const Vector<T>& r) const override {
-        if (!parity) return LinearCode<T>::dec_BD_EE(r);
-
-        std::vector<size_t> X;
-        for (size_t j = 0; j < this->n; ++j) {
-            if (r[j].is_erased()) X.push_back(j);
-        }
-        const size_t tau = X.size();
-
-        if (tau == 0) return dec_BD(r);
-        if (tau > this->get_dmin() - 1) throw decoding_failure("Extended BD error/erasure decoder failed!");
-
-        auto c_hat = dec_ML_EE(r);
-        size_t t = 0;
-        for (size_t j = 0; j < this->n; ++j)
-            if (!r[j].is_erased() && r[j] != c_hat[j]) ++t;
-
-        if (2 * t + tau > this->get_dmin() - 1) throw decoding_failure("Extended BD error/erasure decoder failed!");
-
-        return c_hat;
-    }
-
-    Vector<T> dec_ML_EE(const Vector<T>& r) const override {
-        if (!parity) return LinearCode<T>::dec_ML_EE(r);
+        if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+        if (!parity) return LinearCode<T>::dec_BD(r);
 
         auto r_base = concatenate(r.get_subvector(0, i), r.get_subvector(i + 1, r.get_n() - i - 1));
 
-        auto c_hat_base = BaseCode.dec_ML_EE(r_base);  // may throw
+        auto c_hat_base = BaseCode.dec_BD(r_base);  // may throw
+        const size_t d_base = dH(r_base, c_hat_base);
 
         T p(0);
         for (size_t j = 0; j < c_hat_base.get_n(); ++j) p += c_hat_base[j];
+
+        const size_t d = d_base + ((-p != r[i]) ? 1u : 0u);
+        if (d > this->get_tmax()) throw decoding_failure("Extended code BD failed!");
 
         Vector<T> c_hat(this->n);
         c_hat.set_subvector(c_hat_base.get_subvector(0, i), 0);
@@ -1882,6 +1886,56 @@ class ExtendedCode : public LinearCode<T> {
         c_hat.set_subvector(c_hat_base.get_subvector(i, c_hat_base.get_n() - i), i + 1);
         return c_hat;
     }
+
+#ifdef CECCO_ERASURE_SUPPORT
+    Vector<T> dec_BD_EE(const Vector<T>& r) const override {
+        if (!parity) return LinearCode<T>::dec_BD_EE(r);
+        if (!r[i].is_erased()) return LinearCode<T>::dec_BD_EE(r);
+
+        auto r_base = concatenate(r.get_subvector(0, i), r.get_subvector(i + 1, r.get_n() - i - 1));
+
+        auto c_base = BaseCode.dec_BD_EE(r_base);
+
+        T p(0);
+        for (size_t j = 0; j < c_base.get_n(); ++j) p += c_base[j];
+
+        Vector<T> c_hat(this->n);
+        c_hat.set_subvector(c_base.get_subvector(0, i), 0);
+        c_hat.set_component(i, -p);
+        c_hat.set_subvector(c_base.get_subvector(i, c_base.get_n() - i), i + 1);
+
+        size_t tau = 0;
+        size_t t = 0;
+        for (size_t j = 0; j < this->n; ++j) {
+            if (r[j].is_erased())
+                ++tau;
+            else if (r[j] != c_hat[j])
+                ++t;
+        }
+
+        if (2 * t + tau > this->get_dmin() - 1) throw decoding_failure("Extended code BD error/erasure failed!");
+
+        return c_hat;
+    }
+
+    Vector<T> dec_ML_EE(const Vector<T>& r) const override {
+        if (!parity) return LinearCode<T>::dec_ML_EE(r);
+        if (!r[i].is_erased()) return LinearCode<T>::dec_ML_EE(r);
+
+        auto r_base = concatenate(r.get_subvector(0, i), r.get_subvector(i + 1, r.get_n() - i - 1));
+
+        auto c_base = BaseCode.dec_ML_EE(r_base);
+
+        T p(0);
+        for (size_t j = 0; j < c_base.get_n(); ++j) p += c_base[j];
+
+        Vector<T> c_hat(this->n);
+        c_hat.set_subvector(c_base.get_subvector(0, i), 0);
+        c_hat.set_component(i, -p);
+        c_hat.set_subvector(c_base.get_subvector(i, c_base.get_n() - i), i + 1);
+        return c_hat;
+    }
+#endif
 
    private:
     static Matrix<T> Extended_G(const Matrix<T>& Gp, size_t i, const Vector<T>& v) {
