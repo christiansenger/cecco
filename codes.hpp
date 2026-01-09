@@ -2506,6 +2506,50 @@ std::ostream& operator<<(std::ostream& os, const Code<T>& rhs) {
     return os;
 }
 
+    template <FieldType T>
+    class Enc {
+       public:
+        Enc(const Code<T>& C) : C(C) {}
+
+        Vector<T> operator()(const Vector<T>& in) noexcept { return C.enc(in); }
+
+       private:
+        const Code<T>& C;
+    };
+
+    template <FieldType T>
+    class Dec_BD {
+       public:
+        Dec_BD(const Code<T>& C) : C(C) {}
+
+        Vector<T> operator()(const Vector<T>& in) { return C.dec_BD(in); }
+
+       private:
+        const Code<T>& C;
+    };
+
+    template <FieldType T>
+    class Dec_ML {
+       public:
+        Dec_ML(const Code<T>& C) : C(C) {}
+
+        Vector<T> operator()(const Vector<T>& in) noexcept { return C.dec_ML(in); }
+
+       private:
+        const Code<T>& C;
+    };
+
+    template <FiniteFieldType T>
+    class Encinv {
+       public:
+        Encinv(const Code<T>& C) : C(C) {}
+
+        Vector<T> operator()(const Vector<T>& in) noexcept { return C.encinv(in); }
+
+       private:
+        const Code<T>& C;
+    };
+
 }  // namespace CECCO
 
 #endif

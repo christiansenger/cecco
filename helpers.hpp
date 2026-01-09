@@ -2,11 +2,11 @@
  * @file helpers.hpp
  * @brief Utility functions and mathematical helpers
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0
- * @date 2025
+ * @version 2.0.1
+ * @date 2026
  *
  * @copyright
- * Copyright (c) 2025, Christian Senger <senger@inue.uni-stuttgart.de>
+ * Copyright (c) 2026, Christian Senger <senger@inue.uni-stuttgart.de>
  *
  * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
  * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
@@ -218,7 +218,8 @@ constexpr bool is_prime(T a) noexcept {
  */
 template <class T>
 constexpr T GCD(T a, T b, T* s = nullptr, T* t = nullptr) noexcept {
-    static_assert((std::is_integral<T>::value && std::is_signed<T>::value) || std::is_same_v<T, InfInt>, "GCD requires signed integral type or InfInt");
+    static_assert((std::is_integral<T>::value && std::is_signed<T>::value) || std::is_same_v<T, InfInt>,
+                  "GCD requires signed integral type or InfInt");
     if (s != nullptr && t != nullptr) {  // extended EA
         *s = T(1);
         *t = T(0);
@@ -596,6 +597,18 @@ class Cache {
         return operator()<ID>(std::forward<decltype(calculate_func)>(calculate_func));
     }
 };
+
+std::string basename(const char* path) {
+    std::string s(path);
+
+    const auto pos = s.find_last_of("/\\");
+    if (pos != std::string::npos) s.erase(0, pos + 1);
+
+    const auto dot = s.find_last_of('.');
+    if (dot != std::string::npos && dot != 0) s.erase(dot);
+
+    return s;
+}
 
 }  // namespace details
 
