@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.7
+ * @version 2.0.8
  * @date 2026
  *
  * @copyright
@@ -1184,14 +1184,14 @@ class ZeroCode : public LinearCode<T> {
     Vector<T> encinv(const Vector<T>& c) const override { throw std::logic_error("Zero code has no encoder inverse!"); }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+        this->validate_length(r);
         return Vector<T>(this->n);
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+        this->validate_length(r);
         return Vector<T>(this->n);
     }
 
@@ -1251,8 +1251,8 @@ class HammingCode : public LinearCode<T> {
     SimplexCode<T> get_dual() const noexcept { return SimplexCode<T>(s); }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+        this->validate_length(r);
 
         constexpr size_t q = T::get_size();
         const auto s = r * this->HT;
@@ -1272,7 +1272,6 @@ class HammingCode : public LinearCode<T> {
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (!LinearCode<T>::erasures_present(r))
             return dec_BD(r);
         else
@@ -1403,10 +1402,9 @@ class SimplexCode : public LinearCode<T> {
     HammingCode<T> get_dual() const noexcept { return HammingCode<T>(s); }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
-
         if constexpr (T::get_size() != 2) return LinearCode<T>::dec_BD(r);
+        this->validate_length(r);
 
         const auto c_est = dec_ML(r);
         if (dH(r, c_est) > this->get_tmax())
@@ -1416,10 +1414,9 @@ class SimplexCode : public LinearCode<T> {
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
-
         if constexpr (T::get_size() != 2) return LinearCode<T>::dec_ML(r);
+        this->validate_length(r);
 
         Vector<double> y(this->n + 1, 0.0);
         y.set_component(0, 0.0);
@@ -1447,8 +1444,8 @@ class SimplexCode : public LinearCode<T> {
 
 #ifdef CECCO_ERASURE_SUPPORT
     Vector<T> dec_BD_EE(const Vector<T>& r) const override {
-        this->validate_length(r);
         if constexpr (T::get_size() != 2) return LinearCode<T>::dec_BD_EE(r);
+        this->validate_length(r);
 
         size_t tau = 0;
         for (size_t i = 0; i < this->n; ++i) {
@@ -1470,8 +1467,8 @@ class SimplexCode : public LinearCode<T> {
     }
 
     Vector<T> dec_ML_EE(const Vector<T>& r) const override {
-        this->validate_length(r);
         if constexpr (T::get_size() != 2) return LinearCode<T>::dec_ML_EE(r);
+        this->validate_length(r);
 
         size_t tau = 0;
         for (size_t i = 0; i < this->n; ++i) {
@@ -1566,7 +1563,6 @@ class RepetitionCode : public LinearCode<T> {
     Vector<T> encinv(const Vector<T>& c) const override { return Vector<T>(1, c[0]); }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (LinearCode<T>::erasures_present(r)) return LinearCode<T>::dec_BD_EE(r);
 
         const auto c_est = dec_ML(r);
@@ -1579,8 +1575,8 @@ class RepetitionCode : public LinearCode<T> {
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+        this->validate_length(r);
 
         constexpr size_t q = T::get_size();
         std::array<size_t, q> counters{};
@@ -1686,8 +1682,8 @@ class SingleParityCheckCode : public LinearCode<T> {
     RepetitionCode<T> get_dual() const noexcept { return RepetitionCode<T>(this->n); }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+        this->validate_length(r);
 
         T s = T(0);
         for (size_t i = 0; i < this->n; ++i) s += r[i];
@@ -1698,8 +1694,8 @@ class SingleParityCheckCode : public LinearCode<T> {
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+        this->validate_length(r);
 
         T s = T(0);
         for (size_t i = 0; i < this->n; ++i) s += r[i];
@@ -1874,8 +1870,8 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
     }
 
     Vector<Fp<2>> dec_BD(const Vector<Fp<2>>& r) const override {
-        this->validate_length(r);
         if (LinearCode<Fp<2>>::erasures_present(r)) return dec_BD_EE(r);
+        this->validate_length(r);
 
         const size_t t = this->get_tmax();
         for (auto it = this->cbegin(); it != this->cend(); ++it) {
@@ -1885,8 +1881,8 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
     }
 
     Vector<Fp<2>> dec_ML(const Vector<Fp<2>>& r) const override {
-        this->validate_length(r);
         if (LinearCode<Fp<2>>::erasures_present(r)) return dec_ML_EE(r);
+        this->validate_length(r);
 
         Vector<Fp<2>> best;
         size_t best_t = std::numeric_limits<size_t>::max();
@@ -2050,37 +2046,23 @@ class ExtendedCode : public LinearCode<T> {
     }
 
     virtual Vector<T> dec_BD(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
-        if (!parity) return LinearCode<T>::dec_BD(r);
+        return LinearCode<T>::dec_BD(r);
+    }
 
-        const auto r_base = concatenate(r.get_subvector(0, i), r.get_subvector(i + 1, this->n - i - 1));
-
-        const auto cp_est = BaseCode.dec_BD(r_base);  // may throw
-        const size_t d_base = dH(r_base, cp_est);
-
-        T p(0);
-        for (size_t j = 0; j < cp_est.get_n(); ++j) p += cp_est[j];
-
-        const size_t d = d_base + ((-p != r[i]) ? 1 : 0);
-        if (d > this->get_tmax()) throw decoding_failure("Extended code BD failed!");
-
-        Vector<T> c_est(this->n);
-        c_est.set_subvector(cp_est.get_subvector(0, i), 0);
-        c_est.set_component(i, -p);
-        c_est.set_subvector(cp_est.get_subvector(i, cp_est.get_n() - i), i + 1);
-        return c_est;
+    virtual Vector<T> dec_ML(const Vector<T>& r) const override {
+        if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+        return LinearCode<T>::dec_ML(r);
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
     Vector<T> dec_BD_EE(const Vector<T>& r) const override {
+        if (!parity || !r[i].is_erased()) return LinearCode<T>::dec_BD_EE(r);
         this->validate_length(r);
-        if (!parity) return LinearCode<T>::dec_BD_EE(r);
-        if (!r[i].is_erased()) return LinearCode<T>::dec_BD_EE(r);
 
         const auto r_base = concatenate(r.get_subvector(0, i), r.get_subvector(i + 1, this->n - i - 1));
 
-        const auto cp_est = BaseCode.dec_BD_EE(r_base);
+        const auto cp_est = BaseCode.dec_ML_EE(r_base);  // sic!
 
         T p(0);
         for (size_t j = 0; j < cp_est.get_n(); ++j) p += cp_est[j];
@@ -2099,17 +2081,17 @@ class ExtendedCode : public LinearCode<T> {
                 ++t;
         }
 
-        if (2 * t + tau > this->get_dmin() - 1) throw decoding_failure("Extended code BD error/erasure failed!");
+        if (2 * t + tau > this->get_dmin() - 1)
+            throw decoding_failure("Extended code BD error/erasure decoding failed!");
 
         return c_est;
     }
 
     Vector<T> dec_ML_EE(const Vector<T>& r) const override {
+        if (!parity || !r[i].is_erased()) return LinearCode<T>::dec_ML_EE(r);
         this->validate_length(r);
-        if (!parity) return LinearCode<T>::dec_ML_EE(r);
-        if (!r[i].is_erased()) return LinearCode<T>::dec_ML_EE(r);
 
-        const auto r_base = concatenate(r.get_subvector(0, i), r.get_subvector(i + 1, r.get_n() - i - 1));
+        const auto r_base = concatenate(r.get_subvector(0, i), r.get_subvector(i + 1, this->n - i - 1));
 
         const auto cp_est = BaseCode.dec_ML_EE(r_base);
 
@@ -2199,8 +2181,8 @@ class AugmentedCode : public LinearCode<T> {
     }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+        this->validate_length(r);
 
         const size_t t = this->get_tmax();
 
@@ -2220,8 +2202,8 @@ class AugmentedCode : public LinearCode<T> {
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
-        this->validate_length(r);
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+        this->validate_length(r);
 
         const size_t tmax = this->get_tmax();
 
