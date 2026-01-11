@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.8
+ * @version 2.0.9
  * @date 2026
  *
  * @copyright
@@ -276,8 +276,10 @@ class Code {
     virtual Vector<T> dec_BD(const Vector<T>& r) const = 0;
     virtual Vector<T> dec_ML(const Vector<T>& r) const = 0;
     virtual Vector<T> dec_burst(const Vector<T>& r) const = 0;
+#ifdef CECCO_ERASURE_SUPPORT
     virtual Vector<T> dec_BD_EE(const Vector<T>& r) const = 0;
     virtual Vector<T> dec_ML_EE(const Vector<T>& r) const = 0;
+#endif
 
    protected:
     size_t n;
@@ -316,6 +318,7 @@ class EmptyCode : public Code<T> {
         throw std::invalid_argument("Cannot ML decode an empty code!");
     }
 
+#ifdef CECCO_ERASURE_SUPPORT
     Vector<T> dec_BD_EE(const Vector<T>& r) const override {
         throw std::invalid_argument("Cannot BD error/erasure decode an empty code!");
     }
@@ -323,6 +326,7 @@ class EmptyCode : public Code<T> {
     Vector<T> dec_ML_EE(const Vector<T>& r) const override {
         throw std::invalid_argument("Cannot ML error/erasure decode an empty code!");
     }
+#endif
 
     Vector<T> dec_burst(const Vector<T>& r) const override {
         throw std::invalid_argument("Cannot burst decode an empty code!");
@@ -474,12 +478,15 @@ class LinearCode : public Code<T> {
           tainted_flag(),
           tainted_burst(other.tainted_burst),
           tainted_burst_flag(),
+#ifdef CECCO_ERASURE_SUPPORT
           punctured_codes(other.punctured_codes),
           punctured_codes_flag(),
+#endif
           polynomial(other.polynomial),
           polynomial_flag(),
           gamma(other.gamma),
-          gamma_flag() {}
+          gamma_flag() {
+    }
 
     LinearCode(LinearCode&& other)
         : Code<T>(std::move(other)),
@@ -498,12 +505,15 @@ class LinearCode : public Code<T> {
           tainted_flag(),
           tainted_burst(std::move(other.tainted_burst)),
           tainted_burst_flag(),
+#ifdef CECCO_ERASURE_SUPPORT
           punctured_codes(std::move(other.punctured_codes)),
           punctured_codes_flag(),
+#endif
           polynomial(std::move(other.polynomial)),
           polynomial_flag(),
           gamma(std::move(other.gamma)),
-          gamma_flag() {}
+          gamma_flag() {
+    }
 
     LinearCode& operator=(const LinearCode& other) {
         if (this != &other) {
@@ -517,7 +527,9 @@ class LinearCode : public Code<T> {
             standard_array = other.standard_array;
             tainted = other.tainted;
             tainted_burst = other.tainted_burst;
+#ifdef CECCO_ERASURE_SUPPORT
             punctured_codes = other.punctured_codes;
+#endif
             polynomial = other.polynomial;
             gamma = other.gamma;
         }
@@ -536,7 +548,9 @@ class LinearCode : public Code<T> {
             standard_array = std::move(other.standard_array);
             tainted = std::move(other.tainted);
             tainted_burst = std::move(other.tainted_burst);
+#ifdef CECCO_ERASURE_SUPPORT
             punctured_codes = std::move(other.punctured_codes);
+#endif
             polynomial = std::move(other.polynomial);
             gamma = std::move(other.gamma);
         }
@@ -557,7 +571,7 @@ class LinearCode : public Code<T> {
     const Matrix<T>& get_HT() const noexcept { return HT; }
     Matrix<T> get_H() const { return transpose(HT); }
 
-    size_t get_dmin() const {
+    virtual size_t get_dmin() const {
         std::call_once(dmin_flag, [this] {
             if (dmin.has_value()) return;
             // if weight enumerator is calculated, use it...
@@ -885,8 +899,10 @@ class LinearCode : public Code<T> {
     virtual Vector<T> dec_BD(const Vector<T>& r) const override {
         static_assert(FiniteFieldType<T>, "Bounded distance decoding only available for finite fields");
         validate_length(r);
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
-        const auto c_est = dec_ML(r);
+#endif
+        const auto c_est = LinearCode<T>::dec_ML(r);
         if (dH(r, c_est) > this->get_tmax()) throw decoding_failure("Linear code BD decoder failed!");
         return c_est;
     }
@@ -894,7 +910,9 @@ class LinearCode : public Code<T> {
     virtual Vector<T> dec_ML(const Vector<T>& r) const override {
         static_assert(FiniteFieldType<T>, "Maximum likelihood decoding only available for finite fields");
         validate_length(r);
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+#endif
         get_standard_array();
         const auto s = r * HT;  // calculate syndrome...
         if (s.is_zero()) return r;
@@ -905,8 +923,10 @@ class LinearCode : public Code<T> {
     virtual Vector<T> dec_burst(const Vector<T>& r) const override {
         static_assert(FiniteFieldType<T>, "Burst decoding only available for finite fields");
         validate_length(r);
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r))
             throw std::invalid_argument("Trying to correct erasures with a burst decoder!");
+#endif
         get_standard_array();
         const auto s = r * HT;  // calculate syndrome...
         if (s.is_zero()) return r;
@@ -1021,16 +1041,14 @@ class LinearCode : public Code<T> {
 #endif
 
    protected:
-    static bool erasures_present(const Vector<T>& r) {
 #ifdef CECCO_ERASURE_SUPPORT
+    static bool erasures_present(const Vector<T>& r) {
         for (size_t i = 0; i < r.get_n(); ++i) {
             if (r[i].is_erased()) return true;
         }
         return false;
-#else
-        return false;
-#endif
     }
+#endif
 
     void validate_length(const Vector<T>& r) const {
         if (r.get_n() != this->n)
@@ -1115,30 +1133,37 @@ class UniverseCode : public LinearCode<T> {
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
         this->validate_length(r);
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r))
             throw decoding_failure("Universe code BD decoder failed, received vector contains erasures!");
+#endif
         return r;
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
         this->validate_length(r);
-        if (LinearCode<T>::erasures_present(r))
-            throw decoding_failure("Universe code ML decoder failed, received vector contains erasures!");
+#ifdef CECCO_ERASURE_SUPPORT
+        if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+#endif
         return r;
     }
 
     Vector<T> dec_burst(const Vector<T>& r) const override {
         this->validate_length(r);
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r))
             throw decoding_failure("Universe code burst decoder failed, received vector contains erasures!");
+#endif
         return r;
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
     Vector<T> dec_BD_EE(const Vector<T>& r) const override {
         this->validate_length(r);
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r))
             throw decoding_failure("Universe code BD error/erasure decoder failed, contains erasures!");
+#endif
         return r;
     }
     Vector<T> dec_ML_EE(const Vector<T>& r) const override {
@@ -1184,13 +1209,17 @@ class ZeroCode : public LinearCode<T> {
     Vector<T> encinv(const Vector<T>& c) const override { throw std::logic_error("Zero code has no encoder inverse!"); }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+#endif
         this->validate_length(r);
         return Vector<T>(this->n);
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+#endif
         this->validate_length(r);
         return Vector<T>(this->n);
     }
@@ -1251,7 +1280,9 @@ class HammingCode : public LinearCode<T> {
     SimplexCode<T> get_dual() const noexcept { return SimplexCode<T>(s); }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+#endif
         this->validate_length(r);
 
         constexpr size_t q = T::get_size();
@@ -1272,10 +1303,11 @@ class HammingCode : public LinearCode<T> {
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
-        if (!LinearCode<T>::erasures_present(r))
-            return dec_BD(r);
-        else
-            return LinearCode<T>::dec_ML_EE(r);
+#ifdef CECCO_ERASURE_SUPPORT
+        if (LinearCode<T>::erasures_present(r)) return LinearCode<T>::dec_ML_EE(r);
+#endif
+
+        return LinearCode<T>::dec_BD(r);
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
@@ -1402,7 +1434,9 @@ class SimplexCode : public LinearCode<T> {
     HammingCode<T> get_dual() const noexcept { return HammingCode<T>(s); }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+#endif
         if constexpr (T::get_size() != 2) return LinearCode<T>::dec_BD(r);
         this->validate_length(r);
 
@@ -1414,7 +1448,9 @@ class SimplexCode : public LinearCode<T> {
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+#endif
         if constexpr (T::get_size() != 2) return LinearCode<T>::dec_ML(r);
         this->validate_length(r);
 
@@ -1563,7 +1599,9 @@ class RepetitionCode : public LinearCode<T> {
     Vector<T> encinv(const Vector<T>& c) const override { return Vector<T>(1, c[0]); }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return LinearCode<T>::dec_BD_EE(r);
+#endif
 
         const auto c_est = dec_ML(r);
         constexpr size_t q = T::get_size();
@@ -1575,7 +1613,9 @@ class RepetitionCode : public LinearCode<T> {
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+#endif
         this->validate_length(r);
 
         constexpr size_t q = T::get_size();
@@ -1682,7 +1722,9 @@ class SingleParityCheckCode : public LinearCode<T> {
     RepetitionCode<T> get_dual() const noexcept { return RepetitionCode<T>(this->n); }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+#endif
         this->validate_length(r);
 
         T s = T(0);
@@ -1694,7 +1736,9 @@ class SingleParityCheckCode : public LinearCode<T> {
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+#endif
         this->validate_length(r);
 
         T s = T(0);
@@ -1870,7 +1914,9 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
     }
 
     Vector<Fp<2>> dec_BD(const Vector<Fp<2>>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<Fp<2>>::erasures_present(r)) return dec_BD_EE(r);
+#endif
         this->validate_length(r);
 
         const size_t t = this->get_tmax();
@@ -1881,7 +1927,9 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
     }
 
     Vector<Fp<2>> dec_ML(const Vector<Fp<2>>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<Fp<2>>::erasures_present(r)) return dec_ML_EE(r);
+#endif
         this->validate_length(r);
 
         Vector<Fp<2>> best;
@@ -1973,6 +2021,276 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
     int8_t m;
 };
 
+namespace details {
+
+template <FieldType T>
+Matrix<T> LDC_G(const Matrix<T>& G_U, const Matrix<T>& G_V) {
+    const size_t n = G_U.get_n();
+    if (G_V.get_n() != n) throw std::invalid_argument("Codes must have same length for LDC construction!");
+
+    const size_t kU = G_U.get_m();
+    const size_t kV = G_V.get_m();
+
+    Matrix<T> G(kU + kV, 2 * n);
+    G.set_submatrix(0, 0, G_U);
+    G.set_submatrix(0, n, G_U);
+    G.set_submatrix(kU, n, G_V);
+    return G;
+}
+
+}  // namespace details
+
+template <class BU, class BV>
+    requires(std::derived_from<BU, LinearCode<typename BU::field>> &&
+             std::derived_from<BV, LinearCode<typename BV::field>> &&
+             std::same_as<typename BU::field, typename BV::field>)
+class LDCCode : public LinearCode<typename BU::field> {
+   public:
+    using T = typename BU::field;
+
+    LDCCode(const BU& U, const BV& V) try : LinearCode
+        <T>(2 * U.get_n(), U.get_k() + V.get_k(), details::LDC_G(U.get_G(), V.get_G())), U(U), V(V) {}
+    catch (const std::invalid_argument& e) {
+        throw std::invalid_argument(std::string("Trying to perform an invalid length-doubling construction: ") +
+                                    e.what());
+    }
+
+    LDCCode(const LDCCode&) = default;
+    LDCCode(LDCCode&&) = default;
+    LDCCode& operator=(const LDCCode&) = default;
+    LDCCode& operator=(LDCCode&&) = default;
+
+    const BU& get_U() const noexcept { return U; }
+    const BV& get_V() const noexcept { return V; }
+
+    virtual size_t get_dmin() const override {
+        if constexpr (T::get_size() == 2) this->set_dmin(std::min({2 * U.get_dmin(), V.get_dmin()}));
+        return this->LinearCode<T>::get_dmin();
+    }
+
+    virtual void get_info(std::ostream& os) const override {
+        if (os.iword(details::index) < 3) {
+            LinearCode<T>::get_info(os);
+            os << std::endl;
+        }
+        if (os.iword(details::index) > 0) {
+            const auto old = os.iword(details::index);
+            os << "LDC code with properties: { ";
+            os << "U = " << showbasic;
+            U.LinearCode<T>::get_info(os);
+            os << ", V = ";
+            V.LinearCode<T>::get_info(os);
+            os << " }";
+            os.iword(details::index) = old;
+        }
+    }
+
+    Vector<T> dec_recursive(const Vector<T>& r) const {
+#ifdef CECCO_ERASURE_SUPPORT
+        if (LinearCode<T>::erasures_present(r)) return dec_recursive_EE(r);
+#endif
+        this->validate_length(r);
+
+        auto rl = r.get_subvector(0, U.get_n());
+        auto rr = r.get_subvector(U.get_n(), U.get_n());
+
+        const Vector<T> cr_hat = dec_wrapper(V, rl + rr);
+        const Vector<T> cl_hat_1 = dec_wrapper(U, rl);
+        const Vector<T> cl_hat_2 = dec_wrapper(U, rr - cr_hat);
+
+        const auto c_hat_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
+        const auto c_hat_2 = concatenate(cl_hat_2, cl_hat_2 + cr_hat);
+        if (dH(r, c_hat_1) < dH(r, c_hat_2))
+            return c_hat_1;
+        else
+            return c_hat_2;
+    }
+
+#ifdef CECCO_ERASURE_SUPPORT
+    Vector<T> dec_recursive_EE(const Vector<T>& r) const {
+        this->validate_length(r);
+
+        size_t tau = 0;
+        for (size_t i = 0; i < this->n; ++i) {
+            if (r[i].is_erased()) ++tau;
+        }
+
+        if (tau == 0) return dec_recursive(r);
+        if (tau == this->n) return Vector<T>(this->n, T(0));
+
+        auto rl = r.get_subvector(0, U.get_n());
+        auto rr = r.get_subvector(U.get_n(), U.get_n());
+
+        const Vector<T> cr_hat = dec_wrapper_EE(V, rl + rr);
+        const Vector<T> cl_hat_1 = dec_wrapper_EE(U, rl);
+        const Vector<T> cl_hat_2 = dec_wrapper_EE(U, rr - cr_hat);
+
+        const auto c_hat_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
+        const auto c_hat_2 = concatenate(cl_hat_2, cl_hat_2 + cr_hat);
+
+        size_t t_1 = 0;
+        size_t t_2 = 0;
+        for (size_t i = 0; i < this->n; ++i) {
+            if (!r[i].is_erased()) {
+                if (r[i] != c_hat_1[i]) ++t_1;
+                if (r[i] != c_hat_2[i]) ++t_2;
+            }
+        }
+
+        if (t_1 < t_2)
+            return c_hat_1;
+        else
+            return c_hat_2;
+    }
+#endif
+
+   private:
+    BU U;
+    BV V;
+
+    Vector<T> dec_wrapper(const LinearCode<T>& C, const Vector<T>& r) const { return C.dec_ML(r); }
+
+    Vector<T> dec_wrapper(const LDCCode& C, const Vector<T>& r) const { return C.dec_recursive(r); }
+
+#ifdef CECCO_ERASURE_SUPPORT
+    Vector<T> dec_wrapper_EE(const LinearCode<T>& C, const Vector<T>& r) const { return C.dec_ML_EE(r); }
+
+    Vector<T> dec_wrapper_EE(const LDCCode& C, const Vector<T>& r) const { return C.dec_recursive_EE(r); }
+#endif
+};
+
+class RMCode : public LinearCode<Fp<2>> {
+   public:
+    using T = Fp<2>;
+
+    RMCode(size_t r, size_t m) try : LinearCode
+        <T>(sqm(2, m), RM_k(r, m), RM_G(r, m)), r(r), m(m) { this->set_dmin(sqm(2, m - r)); }
+    catch (const std::invalid_argument& e) {
+        throw std::invalid_argument(std::string("Trying to construct invalid RM code: ") + e.what());
+    }
+
+    RMCode(const RMCode&) = default;
+    RMCode(RMCode&&) = default;
+    RMCode& operator=(const RMCode&) = default;
+    RMCode& operator=(RMCode&&) = default;
+
+    size_t get_r() const noexcept { return r; }
+    size_t get_m() const noexcept { return m; }
+
+    void get_info(std::ostream& os) const override {
+        if (os.iword(details::index) < 3) {
+            LinearCode<T>::get_info(os);
+            os << std::endl;
+        }
+        if (os.iword(details::index) > 0) {
+            os << "RM code with properties: { r = " << r << ", m = " << m << " }";
+        }
+    }
+
+    // Documentation note: there is no dec_ML, falls back to LinearCode since dec_recursive is only approximative
+    // ML!
+
+    Vector<T> dec_recursive(const Vector<T>& r) const {
+        this->validate_length(r);
+        return dec_wrapper(this->r, m, r);
+    }
+
+#ifdef CECCO_ERASURE_SUPPORT
+    Vector<T> dec_recursive_EE(const Vector<T>& r) const {
+        this->validate_length(r);
+
+        size_t tau = 0;
+        for (size_t i = 0; i < this->n; ++i) {
+            if (r[i].is_erased()) ++tau;
+        }
+
+        if (tau == 0) return dec_recursive(r);
+        if (tau == this->n) return Vector<T>(this->n, T(0));
+
+        return dec_wrapper_EE(this->r, m, r);
+    }
+#endif
+
+   private:
+    size_t r;
+    size_t m;
+
+    static size_t RM_k(size_t r, size_t m) {
+        size_t k = 0;
+        for (size_t i = 0; i <= r; ++i) k += bin<size_t>(m, i);
+        return k;
+    }
+
+    static Matrix<T> RM_G(size_t r, size_t m) {
+        if (r > m) throw std::invalid_argument("RM codes require 0 <= r <= m");
+        const size_t n = sqm(2, m);
+
+        if (r == 0) return Matrix<T>(1, n, T(1));
+        if (r == m) return IdentityMatrix<T>(n);
+
+        const auto GU = RM_G(r, m - 1);
+        const auto GV = RM_G(r - 1, m - 1);
+        return details::LDC_G(GU, GV);
+    }
+
+    static Vector<T> dec_wrapper(size_t r, size_t m, const Vector<T>& v) {
+        const size_t n = sqm(2, m);
+
+        if (r == m) return UniverseCode<T>(n).dec_ML(v);
+        if (r == 0) return RepetitionCode<T>(n).dec_ML(v);
+
+        const size_t np = sqm(2, m - 1);
+        auto vl = v.get_subvector(0, np);
+        auto vr = v.get_subvector(np, np);
+
+        const Vector<T> cr_hat = dec_wrapper(r - 1, m - 1, vl + vr);
+        const Vector<T> cl_hat_1 = dec_wrapper(r, m - 1, vl);
+        const Vector<T> cl_hat_2 = dec_wrapper(r, m - 1, vr - cr_hat);
+
+        const auto c_hat_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
+        const auto c_hat_2 = concatenate(cl_hat_2, cl_hat_2 + cr_hat);
+
+        if (dH(v, c_hat_1) < dH(v, c_hat_2))
+            return c_hat_1;
+        else
+            return c_hat_2;
+    }
+
+#ifdef CECCO_ERASURE_SUPPORT
+    static Vector<T> dec_wrapper_EE(size_t r, size_t m, const Vector<T>& v) {
+        const size_t n = sqm(2, m);
+
+        if (r == m) return UniverseCode<T>(n).dec_ML_EE(v);
+        if (r == 0) return RepetitionCode<T>(n).dec_ML_EE(v);
+
+        const size_t np = sqm(2, m - 1);
+        auto vl = v.get_subvector(0, np);
+        auto vr = v.get_subvector(np, np);
+
+        const Vector<T> cr_hat = dec_wrapper_EE(r - 1, m - 1, vl + vr);
+        const Vector<T> cl_hat_1 = dec_wrapper_EE(r, m - 1, vl);
+        const Vector<T> cl_hat_2 = dec_wrapper_EE(r, m - 1, vr - cr_hat);
+
+        const auto c_hat_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
+        const auto c_hat_2 = concatenate(cl_hat_2, cl_hat_2 + cr_hat);
+
+        size_t t_1 = 0;
+        size_t t_2 = 0;
+        for (size_t i = 0; i < n; ++i) {
+            if (!v[i].is_erased()) {
+                if (v[i] != c_hat_1[i]) ++t_1;
+                if (v[i] != c_hat_2[i]) ++t_2;
+            }
+        }
+
+        if (t_1 < t_2)
+            return c_hat_1;
+        else
+            return c_hat_2;
+    }
+#endif
+};
+
 template <FieldType T, class B>
     requires std::derived_from<B, LinearCode<T>>
 class ExtendedCode : public LinearCode<T> {
@@ -2046,12 +2364,16 @@ class ExtendedCode : public LinearCode<T> {
     }
 
     virtual Vector<T> dec_BD(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+#endif
         return LinearCode<T>::dec_BD(r);
     }
 
     virtual Vector<T> dec_ML(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+#endif
         return LinearCode<T>::dec_ML(r);
     }
 
@@ -2181,7 +2503,9 @@ class AugmentedCode : public LinearCode<T> {
     }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+#endif
         this->validate_length(r);
 
         const size_t t = this->get_tmax();
@@ -2202,7 +2526,9 @@ class AugmentedCode : public LinearCode<T> {
     }
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
+#endif
         this->validate_length(r);
 
         const size_t tmax = this->get_tmax();
@@ -2506,49 +2832,110 @@ std::ostream& operator<<(std::ostream& os, const Code<T>& rhs) {
     return os;
 }
 
-    template <FieldType T>
-    class Enc {
-       public:
-        Enc(const Code<T>& C) : C(C) {}
+template <FieldType T>
+class Enc {
+   public:
+    Enc(const Code<T>& C) : C(C) {}
 
-        Vector<T> operator()(const Vector<T>& in) noexcept { return C.enc(in); }
+    Vector<T> operator()(const Vector<T>& in) const { return C.enc(in); }
 
-       private:
-        const Code<T>& C;
-    };
+   private:
+    const Code<T>& C;
+};
 
-    template <FieldType T>
-    class Dec_BD {
-       public:
-        Dec_BD(const Code<T>& C) : C(C) {}
+template <FieldType T>
+class Dec_BD {
+   public:
+    Dec_BD(const Code<T>& C) : C(C) {}
 
-        Vector<T> operator()(const Vector<T>& in) { return C.dec_BD(in); }
+    Vector<T> operator()(const Vector<T>& in) const { return C.dec_BD(in); }
 
-       private:
-        const Code<T>& C;
-    };
+   private:
+    const Code<T>& C;
+};
 
-    template <FieldType T>
-    class Dec_ML {
-       public:
-        Dec_ML(const Code<T>& C) : C(C) {}
+template <FieldType T>
+class Dec_ML {
+   public:
+    Dec_ML(const Code<T>& C) : C(C) {}
 
-        Vector<T> operator()(const Vector<T>& in) noexcept { return C.dec_ML(in); }
+    Vector<T> operator()(const Vector<T>& in) const { return C.dec_ML(in); }
 
-       private:
-        const Code<T>& C;
-    };
+   private:
+    const Code<T>& C;
+};
 
-    template <FiniteFieldType T>
-    class Encinv {
-       public:
-        Encinv(const Code<T>& C) : C(C) {}
+#ifdef CECCO_ERASURE_SUPPORT
+template <FieldType T>
+class Dec_BD_EE {
+   public:
+    explicit Dec_BD_EE(const Code<T>& code) : C(code) {}
 
-        Vector<T> operator()(const Vector<T>& in) noexcept { return C.encinv(in); }
+    Vector<T> operator()(const Vector<T>& in) const { return C.dec_BD_EE(in); }
 
-       private:
-        const Code<T>& C;
-    };
+   private:
+    const Code<T>& C;
+};
+
+template <FieldType T>
+class Dec_ML_EE {
+   public:
+    explicit Dec_ML_EE(const Code<T>& code) : C(code) {}
+
+    Vector<T> operator()(const Vector<T>& in) const { return C.dec_ML_EE(in); }
+
+   private:
+    const Code<T>& C;
+};
+#endif
+
+namespace details {
+
+template <class C>
+concept HasRecursive = requires(const C& c, const Vector<typename std::remove_cvref_t<C>::field>& v) {
+    { c.dec_recursive(v) } -> std::same_as<Vector<typename std::remove_cvref_t<C>::field>>;
+};
+
+}  // namespace details
+
+template <details::HasRecursive C>
+class Dec_recursive {
+   public:
+    using T = typename std::remove_cvref_t<C>::field;
+
+    explicit Dec_recursive(const C& code) : C_(code) {}
+
+    Vector<T> operator()(const Vector<T>& in) const { return C_.dec_recursive(in); }
+
+   private:
+    const C& C_;
+};
+
+#ifdef CECCO_ERASURE_SUPPORT
+template <details::HasRecursive C>
+class Dec_recursive_EE {
+   public:
+    using T = typename std::remove_cvref_t<C>::field;
+
+    explicit Dec_recursive_EE(const C& code) : C_(code) {}
+
+    Vector<T> operator()(const Vector<T>& in) const { return C_.dec_recursive_EE(in); }
+
+   private:
+    const C& C_;
+};
+#endif
+
+template <FiniteFieldType T>
+class Encinv {
+   public:
+    Encinv(const Code<T>& C) : C(C) {}
+
+    Vector<T> operator()(const Vector<T>& in) const { return C.encinv(in); }
+
+   private:
+    const Code<T>& C;
+};
 
 }  // namespace CECCO
 
