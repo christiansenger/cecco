@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.9
+ * @version 2.0.10
  * @date 2026
  *
  * @copyright
@@ -44,7 +44,7 @@ template <FiniteFieldType T>
 long double HammingUpperBound(size_t n, size_t dmin) {
     constexpr size_t q = T::get_size();
     try {
-        const size_t tmax = (dmin - 1.0) / 2;
+        const size_t tmax = (dmin - 1) / 2;
         InfInt h = 0;
         for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
         return n - std::log2l(h.toUnsignedLongLong()) / std::log2l(q);
@@ -57,7 +57,7 @@ long double HammingUpperBound(size_t n, size_t dmin) {
 namespace details {
 
 template <FiniteFieldType T>
-static size_t A(size_t n, size_t d, size_t w) {
+size_t A(size_t n, size_t d, size_t w) {
     if (2 * w < d) return 1;
     constexpr size_t q = T::get_size();
     const size_t e = std::ceill(d / 2.0);
@@ -216,7 +216,7 @@ Polynomial<InfInt> MacWilliamsIdentity(const Polynomial<InfInt>& A, size_t n, si
                     }
                 }
             }
-            K(i, j) = sum;
+            K.set_component(i, j, sum);
         }
     }
     return Polynomial<InfInt>(Vector<InfInt>(a) * Matrix<InfInt>(K) / sqm<InfInt>(q, k));
@@ -275,6 +275,7 @@ class Code {
     virtual Vector<T> encinv(const Vector<T>& c) const = 0;
     virtual Vector<T> dec_BD(const Vector<T>& r) const = 0;
     virtual Vector<T> dec_ML(const Vector<T>& r) const = 0;
+    virtual Vector<T> dec_ML_soft(const Vector<double>& llrs) const = 0;
     virtual Vector<T> dec_burst(const Vector<T>& r) const = 0;
 #ifdef CECCO_ERASURE_SUPPORT
     virtual Vector<T> dec_BD_EE(const Vector<T>& r) const = 0;
@@ -302,34 +303,28 @@ class EmptyCode : public Code<T> {
         }
     }
 
-    Vector<T> enc(const Vector<T>& u) const override {
-        throw std::invalid_argument("Cannot encode wrt. an empty code!");
-    }
+    Vector<T> enc(const Vector<T>& u) const override { throw std::logic_error("Cannot encode wrt. an empty code!"); }
 
     Vector<T> encinv(const Vector<T>& c) const override {
-        throw std::invalid_argument("Cannot invert encoding wrt. an empty code!");
+        throw std::logic_error("Cannot invert encoding wrt. an empty code!");
     }
 
-    Vector<T> dec_BD(const Vector<T>& r) const override {
-        throw std::invalid_argument("Cannot BD decode an empty code!");
-    }
+    Vector<T> dec_BD(const Vector<T>& r) const override { throw std::logic_error("Cannot BD decode an empty code!"); }
 
-    Vector<T> dec_ML(const Vector<T>& r) const override {
-        throw std::invalid_argument("Cannot ML decode an empty code!");
-    }
+    Vector<T> dec_ML(const Vector<T>& r) const override { throw std::logic_error("Cannot ML decode an empty code!"); }
 
 #ifdef CECCO_ERASURE_SUPPORT
     Vector<T> dec_BD_EE(const Vector<T>& r) const override {
-        throw std::invalid_argument("Cannot BD error/erasure decode an empty code!");
+        throw std::logic_error("Cannot BD error/erasure decode an empty code!");
     }
 
     Vector<T> dec_ML_EE(const Vector<T>& r) const override {
-        throw std::invalid_argument("Cannot ML error/erasure decode an empty code!");
+        throw std::logic_error("Cannot ML error/erasure decode an empty code!");
     }
 #endif
 
     Vector<T> dec_burst(const Vector<T>& r) const override {
-        throw std::invalid_argument("Cannot burst decode an empty code!");
+        throw std::logic_error("Cannot burst decode an empty code!");
     }
 };
 
@@ -421,7 +416,7 @@ class LinearCode : public Code<T> {
     LinearCode(size_t n, size_t k, const Matrix<T>& X) : Code<T>(n), k(k), MI(k, k) {
         if (X.get_n() != this->n) throw std::invalid_argument("G must have " + std::to_string(this->n) + " columns");
         if (k == 0) {
-            if (!X.is_zero()) throw std::invalid_argument("G must be a zero matrix");
+            if (!X.is_zero() && !X.is_invertible()) throw std::invalid_argument("G must be a zero matrix");
             G = ZeroMatrix<T>(1, n);
             HT = IdentityMatrix<T>(n);
             return;
@@ -517,42 +512,76 @@ class LinearCode : public Code<T> {
 
     LinearCode& operator=(const LinearCode& other) {
         if (this != &other) {
+            Code<T>::operator=(other);
             k = other.k;
             G = other.G;
             HT = other.HT;
             MI = other.MI;
             infoset = other.infoset;
             dmin = other.dmin;
+            dmin_flag.~once_flag();
+            new (&dmin_flag) std::once_flag();
             weight_enumerator = other.weight_enumerator;
+            weight_enumerator_flag.~once_flag();
+            new (&weight_enumerator_flag) std::once_flag();
             standard_array = other.standard_array;
+            standard_array_flag.~once_flag();
+            new (&standard_array_flag) std::once_flag();
             tainted = other.tainted;
+            tainted_flag.~once_flag();
+            new (&tainted_flag) std::once_flag();
             tainted_burst = other.tainted_burst;
+            tainted_burst_flag.~once_flag();
+            new (&tainted_burst_flag) std::once_flag();
 #ifdef CECCO_ERASURE_SUPPORT
             punctured_codes = other.punctured_codes;
+            punctured_codes_flag.~once_flag();
+            new (&punctured_codes_flag) std::once_flag();
 #endif
             polynomial = other.polynomial;
+            polynomial_flag.~once_flag();
+            new (&polynomial_flag) std::once_flag();
             gamma = other.gamma;
+            gamma_flag.~once_flag();
+            new (&gamma_flag) std::once_flag();
         }
         return *this;
     }
 
     LinearCode& operator=(LinearCode&& other) {
         if (this != &other) {
+            Code<T>::operator=(std::move(other));
             k = other.k;
             G = std::move(other.G);
             HT = std::move(other.HT);
             MI = std::move(other.MI);
             infoset = std::move(other.infoset);
             dmin = std::move(other.dmin);
+            dmin_flag.~once_flag();
+            new (&dmin_flag) std::once_flag();
             weight_enumerator = std::move(other.weight_enumerator);
+            weight_enumerator_flag.~once_flag();
+            new (&weight_enumerator_flag) std::once_flag();
             standard_array = std::move(other.standard_array);
+            standard_array_flag.~once_flag();
+            new (&standard_array_flag) std::once_flag();
             tainted = std::move(other.tainted);
+            tainted_flag.~once_flag();
+            new (&tainted_flag) std::once_flag();
             tainted_burst = std::move(other.tainted_burst);
+            tainted_burst_flag.~once_flag();
+            new (&tainted_burst_flag) std::once_flag();
 #ifdef CECCO_ERASURE_SUPPORT
             punctured_codes = std::move(other.punctured_codes);
+            punctured_codes_flag.~once_flag();
+            new (&punctured_codes_flag) std::once_flag();
 #endif
             polynomial = std::move(other.polynomial);
+            polynomial_flag.~once_flag();
+            new (&polynomial_flag) std::once_flag();
             gamma = std::move(other.gamma);
+            gamma_flag.~once_flag();
+            new (&gamma_flag) std::once_flag();
         }
         return *this;
     }
@@ -564,7 +593,7 @@ class LinearCode : public Code<T> {
         if constexpr (FiniteFieldType<T>) {
             return sqm<InfInt>(T::get_size(), k);
         } else {
-            throw std::logic_error("get_size() only available for finite fields");
+            throw std::logic_error("Cannot get size of code over infinite field!");
         }
     }
     const Matrix<T>& get_G() const noexcept { return G; }
@@ -574,6 +603,8 @@ class LinearCode : public Code<T> {
     virtual size_t get_dmin() const {
         std::call_once(dmin_flag, [this] {
             if (dmin.has_value()) return;
+            if (k == 0) throw std::logic_error("Cannot calculate dmin of a dimension zero code!");
+
             // if weight enumerator is calculated, use it...
             if (weight_enumerator.has_value()) {
                 for (size_t i = 1; i <= weight_enumerator.value().degree(); ++i) {
@@ -618,16 +649,21 @@ class LinearCode : public Code<T> {
         return dmin.value();
     }
 
-    size_t get_tmax() const { return (get_dmin() - 1) / 2; }
+    size_t get_tmax() const {
+        if (k == 0) return this->n;
+        return (get_dmin() - 1) / 2;
+    }
 
     virtual const Polynomial<InfInt>& get_weight_enumerator() const {
         if constexpr (!FiniteFieldType<T>)
-            throw std::logic_error("Weight enumerators make only sense for codes over finite fields!");
+            throw std::logic_error("Cannot calculate weight enumerator of code over infinte field!");
 
         std::call_once(weight_enumerator_flag, [this] {
             constexpr size_t q = T::get_size();
             if (weight_enumerator.has_value()) return;
-            if (k <= this->n - k) {  // calculate directly
+            if (k == 0) {
+                weight_enumerator.emplace(Polynomial<InfInt>(1));
+            } else if (k <= this->n - k) {  // calculate directly
                 std::clog << "--> Calculating weight enumerator, this requires iterating through " << sqm<InfInt>(q, k)
                           << " codewords" << std::endl;
                 weight_enumerator.emplace(ZeroPolynomial<InfInt>());
@@ -646,7 +682,8 @@ class LinearCode : public Code<T> {
     }
 
     const Polynomial<T>& get_gamma() const {
-        if (!is_polynomial()) throw std::logic_error("Trying to get gamma of a code that is not polynomial!");
+        if (!is_polynomial())
+            throw std::logic_error("Cannot calculate generator polynomial of a code that is not polynomial!");
         return gamma.value();
     }
 
@@ -764,7 +801,10 @@ class LinearCode : public Code<T> {
     CodewordIterator<T> cbegin() const noexcept
         requires FiniteFieldType<T>
     {
-        return CodewordIterator<T>(*this, 0);
+        if (k == 0)
+            return CodewordIterator<T>(*this, get_size());
+        else
+            return CodewordIterator<T>(*this, 0);
     }
 
     CodewordIterator<T> cend() const noexcept
@@ -774,14 +814,18 @@ class LinearCode : public Code<T> {
     }
 
     bool is_perfect() const {
-        if (k == 0) return true;
+        if (k == 0) return false;
         return std::fabsl(HammingUpperBound<T>(this->n, get_dmin()) - k) <
                10 * std::numeric_limits<long double>::epsilon();
     }
 
-    bool is_MDS() const { return SingletonUpperBound(this->n, get_dmin()) == k; }
+    bool is_MDS() const {
+        if (k == 0) return false;
+        return SingletonUpperBound(this->n, get_dmin()) == k;
+    }
 
     bool is_equidistant() const {
+        if (k == 0) return true;
         return std::fabsl(PlotkinUpperBound<T>(this->n, get_dmin()) - k) <
                10 * std::numeric_limits<long double>::epsilon();
     }
@@ -791,9 +835,17 @@ class LinearCode : public Code<T> {
     bool is_self_dual() const { return 2 * k == this->n && is_weakly_self_dual() && is_dual_containing(); }
 
     bool is_polynomial() const {
-        if (k == 0) return true;
         std::call_once(polynomial_flag, [this] {
             if (polynomial.has_value()) return;
+
+            if (k == 0) {
+                polynomial.emplace(true);
+                auto g = ZeroPolynomial<T>();
+                g.set_coefficient(0, -T(1));
+                g.set_coefficient(this->n, T(1));
+                gamma.emplace(g);
+                return;
+            }
 
             auto g = ZeroPolynomial<T>();
             for (size_t i = 0; i < k; ++i) {
@@ -829,29 +881,32 @@ class LinearCode : public Code<T> {
     }
 
     virtual void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) > 0) Code<T>::get_info(os);
-        if constexpr (FiniteFieldType<T>) {
-            constexpr size_t q = T::get_size();
-            os << "[F_" << q << "; " << this->n << ", " << k << "]";
-        } else {
-            os << "[Q; " << this->n << ", " << k << "]";
-        }
-        if (os.iword(details::index) > 0) {
-            os << std::endl;
-            os << "G = " << std::endl;
-            os << G << std::endl;
-            os << "H = " << std::endl;
-            os << get_H();
-        }
-        if (os.iword(details::index) > 1) {
-            os << std::endl;
-            const auto A = get_weight_enumerator();
-            os << "A(x) = " << A << std::setfill(' ') << std::endl;
-            size_t dmin = get_dmin();
-            if (dmin == std::numeric_limits<size_t>::max())
-                os << "dmin = undefined";
-            else
-                os << "dmin = " << dmin;
+        if (os.iword(details::index) != 3) {
+            if (os.iword(details::index) > 0) Code<T>::get_info(os);
+            if constexpr (FiniteFieldType<T>) {
+                constexpr size_t q = T::get_size();
+                os << "[F_" << q << "; " << this->n << ", " << k << "]";
+            } else {
+                os << "[Q; " << this->n << ", " << k << "]";
+            }
+            if (os.iword(details::index) > 0) {
+                os << std::endl;
+                os << "G = " << std::endl;
+                os << G << std::endl;
+                os << "H = " << std::endl;
+                os << get_H();
+            }
+            if (os.iword(details::index) > 1) {
+                os << std::endl;
+                const auto A = get_weight_enumerator();
+                os << "A(x) = " << A << std::setfill(' ') << std::endl;
+                try {
+                    size_t dmin = get_dmin();
+                    os << "dmin = " << dmin;
+                } catch (const std::logic_error& e) {
+                    os << "dmin = undefined";
+                }
+            }
         }
         if (os.iword(details::index) > 0) {
             os << std::endl;
@@ -887,6 +942,8 @@ class LinearCode : public Code<T> {
     Vector<T> enc(const Vector<T>& u) const override { return u * G; }
 
     Vector<T> encinv(const Vector<T>& c) const override {
+        if (k == 0) throw std::logic_error("Cannot invert encoding wrt. a dimension zero code!");
+
         Vector<T> c_sub(k);
         size_t i = 0;
         for (auto it = infoset.cbegin(); it != infoset.cend(); ++it) {
@@ -897,22 +954,28 @@ class LinearCode : public Code<T> {
     }
 
     virtual Vector<T> dec_BD(const Vector<T>& r) const override {
-        static_assert(FiniteFieldType<T>, "Bounded distance decoding only available for finite fields");
+        static_assert(FiniteFieldType<T>, "BD decoding only available for codes over finite fields!");
         validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
 #endif
+
+        if (k == 0) return Vector<T>(this->n);
+
         const auto c_est = LinearCode<T>::dec_ML(r);
         if (dH(r, c_est) > this->get_tmax()) throw decoding_failure("Linear code BD decoder failed!");
         return c_est;
     }
 
     virtual Vector<T> dec_ML(const Vector<T>& r) const override {
-        static_assert(FiniteFieldType<T>, "Maximum likelihood decoding only available for finite fields");
+        static_assert(FiniteFieldType<T>, "ML decoding only available for codes over finite fields!");
         validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
 #endif
+
+        if (k == 0) return Vector<T>(this->n);
+
         get_standard_array();
         const auto s = r * HT;  // calculate syndrome...
         if (s.is_zero()) return r;
@@ -921,7 +984,7 @@ class LinearCode : public Code<T> {
     }
 
     virtual Vector<T> dec_burst(const Vector<T>& r) const override {
-        static_assert(FiniteFieldType<T>, "Burst decoding only available for finite fields");
+        static_assert(FiniteFieldType<T>, "Burst decoding only available for codes over finite fields!");
         validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r))
@@ -939,10 +1002,32 @@ class LinearCode : public Code<T> {
         }
     }
 
+    virtual Vector<T> dec_ML_soft(const Vector<double>& llrs) const override {
+        validate_length(llrs);
+
+        if (k == 0) return Vector<T>(this->n);
+
+        Vector<T> c_est(this->n);
+        double best;
+        for (auto it = cbegin(); it != cend(); ++it) {
+            double val = 0;
+            for (size_t i = 0; i < this->n; ++i) {
+                if ((*it)[i] != T(0)) val += llrs[i];
+            }
+            if (val < best) {
+                c_est = *it;
+                best = val;
+            }
+        }
+        return c_est;
+    }
+
 #ifdef CECCO_ERASURE_SUPPORT
     virtual Vector<T> dec_BD_EE(const Vector<T>& r) const override {
-        static_assert(FiniteFieldType<T>, "Bounded distance error/erasure decoding only available for finite fields");
+        static_assert(FiniteFieldType<T>, "BD error/erasure decoding only available for codes over finite fields!");
         validate_length(r);
+
+        if (k == 0) return Vector<T>(this->n);
 
         size_t tau = 0;
         for (size_t i = 0; i < this->n; ++i) {
@@ -966,9 +1051,10 @@ class LinearCode : public Code<T> {
     }
 
     virtual Vector<T> dec_ML_EE(const Vector<T>& r) const override {
-        static_assert(FiniteFieldType<T>,
-                      "Maximum likelihood error/erasure decoding only available for finite fields!");
+        static_assert(FiniteFieldType<T>, "ML error/erasure decoding only available for codes over finite fields!");
         validate_length(r);
+
+        if (k == 0) return Vector<T>(this->n);
 
         std::call_once(punctured_codes_flag, [this] {
             if (punctured_codes.has_value()) return;
@@ -1050,7 +1136,8 @@ class LinearCode : public Code<T> {
     }
 #endif
 
-    void validate_length(const Vector<T>& r) const {
+    template <typename S>
+    void validate_length(const Vector<S>& r) const {
         if (r.get_n() != this->n)
             throw std::invalid_argument(std::string("Received vector length must be ") + std::to_string(this->n));
     }
@@ -1111,7 +1198,7 @@ class UniverseCode : public LinearCode<T> {
     }
 
     UniverseCode(const LinearCode<T>& C) : LinearCode<T>(C) {
-        if (this->n != this->k) throw std::invalid_argument("Linear code cannot be converted into a universe code!");
+        if (this->n != this->k) throw std::invalid_argument("Linear code cannot be converted into universe code!");
     }
 
     UniverseCode(const UniverseCode&) = default;
@@ -1122,7 +1209,7 @@ class UniverseCode : public LinearCode<T> {
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
-            os << std::endl;
+            if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0) os << "Universe code";
     }
@@ -1162,7 +1249,7 @@ class UniverseCode : public LinearCode<T> {
         this->validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r))
-            throw decoding_failure("Universe code BD error/erasure decoder failed, contains erasures!");
+            throw decoding_failure("Universe code BD error/erasure decoder failed, received vector contains erasures!");
 #endif
         return r;
     }
@@ -1180,15 +1267,10 @@ class UniverseCode : public LinearCode<T> {
 template <FiniteFieldType T>
 class ZeroCode : public LinearCode<T> {
    public:
-    ZeroCode(size_t n) : LinearCode<T>(n, 0, ZeroMatrix<T>(1, n)) {
-        this->set_dmin(std::numeric_limits<size_t>::max());
-        const auto weight_enumerator = Polynomial<InfInt>(1);
-        this->set_weight_enumerator(std::move(weight_enumerator));
-        this->set_gamma(ZeroPolynomial<T>());
-    }
+    ZeroCode(size_t n) : LinearCode<T>(n, 0, ZeroMatrix<T>(1, n)) {}
 
     ZeroCode(const LinearCode<T>& C) : LinearCode<T>(C) {
-        if (this->k != 0) throw std::invalid_argument("Linear code cannot be converted into a zero code!");
+        if (this->k != 0) throw std::invalid_argument("Linear code cannot be converted into zero code!");
     }
 
     ZeroCode(const ZeroCode&) = default;
@@ -1199,39 +1281,9 @@ class ZeroCode : public LinearCode<T> {
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
-            os << std::endl;
+            if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0) os << "Zero code";
-    }
-
-    UniverseCode<T> get_dual() const noexcept { return UniverseCode<T>(this->n); }
-    Vector<T> enc(const Vector<T>& u) const override { return Vector<T>(this->n, T(0)); }
-    Vector<T> encinv(const Vector<T>& c) const override { throw std::logic_error("Zero code has no encoder inverse!"); }
-
-    Vector<T> dec_BD(const Vector<T>& r) const override {
-#ifdef CECCO_ERASURE_SUPPORT
-        if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
-#endif
-        this->validate_length(r);
-        return Vector<T>(this->n);
-    }
-
-    Vector<T> dec_ML(const Vector<T>& r) const override {
-#ifdef CECCO_ERASURE_SUPPORT
-        if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
-#endif
-        this->validate_length(r);
-        return Vector<T>(this->n);
-    }
-
-    Vector<T> dec_BD_EE(const Vector<T>& r) const override {
-        this->validate_length(r);
-        return Vector<T>(this->n);
-    }
-
-    Vector<T> dec_ML_EE(const Vector<T>& r) const override {
-        this->validate_length(r);
-        return Vector<T>(this->n);
     }
 };
 
@@ -1259,7 +1311,7 @@ class HammingCode : public LinearCode<T> {
                 }
             }
         }
-        throw std::invalid_argument("Linear code cannot be converted into a Hamming code!");
+        throw std::invalid_argument("Linear code cannot be converted into Hamming code!");
     }
 
     HammingCode(const HammingCode&) = default;
@@ -1272,7 +1324,7 @@ class HammingCode : public LinearCode<T> {
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
-            os << std::endl;
+            if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0) os << "Hamming code with properties: { s = " << s << " }";
     }
@@ -1375,7 +1427,7 @@ class HammingCode : public LinearCode<T> {
         for (size_t top = 0; top < s; ++top) {
             const auto v = IdentityMatrix<T>(s - top - 1).rowspace();
             for (size_t j = 0; j < v.size(); ++j) {
-                H(n - i - 1, top) = T(1);
+                H.set_component(n - i - 1, top, T(1));
                 H.set_submatrix(n - i - 1, top + 1, Matrix(v[v.size() - j - 1]));
                 ++i;
             }
@@ -1413,7 +1465,7 @@ class SimplexCode : public LinearCode<T> {
                 }
             }
         }
-        throw std::invalid_argument("Linear code cannot be converted into a Simplex code!");
+        throw std::invalid_argument("Linear code cannot be converted into Simplex code!");
     }
 
     SimplexCode(const SimplexCode&) = default;
@@ -1426,7 +1478,7 @@ class SimplexCode : public LinearCode<T> {
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
-            os << std::endl;
+            if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0) os << "Simplex code with properties: { s = " << s << " }";
     }
@@ -1578,7 +1630,7 @@ class RepetitionCode : public LinearCode<T> {
 
     RepetitionCode(const LinearCode<T>& C) : LinearCode<T>(C) {
         if (this->k != 1 || this->get_dmin() != this->n)
-            throw std::invalid_argument("Linear code cannot be converted into a repetition code!");
+            throw std::invalid_argument("Linear code cannot be converted into repetition code!");
     }
 
     RepetitionCode(const RepetitionCode&) = default;
@@ -1589,7 +1641,7 @@ class RepetitionCode : public LinearCode<T> {
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
-            os << std::endl;
+            if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0) os << "Repetition code";
     }
@@ -1653,7 +1705,7 @@ class RepetitionCode : public LinearCode<T> {
             if (!r[i].is_erased() && r[i] != c_est[i]) ++t;
         }
 
-        if (q > 2 || q % 2 == 0) {
+        if (q != 2 || this->n % 2 == 0) {
             if (2 * t + tau > this->get_dmin() - 1)
                 throw decoding_failure("Repetition code BD error/erasure decoder failed!");
         }
@@ -1703,7 +1755,7 @@ class SingleParityCheckCode : public LinearCode<T> {
 
     SingleParityCheckCode(const LinearCode<T>& C) : LinearCode<T>(C) {
         if (this->k != this->n - 1 || this->get_dmin() != 2)
-            throw std::invalid_argument("Linear code cannot be converted into a single parity check code!");
+            throw std::invalid_argument("Linear code cannot be converted into single parity check code!");
     }
 
     SingleParityCheckCode(const SingleParityCheckCode&) = default;
@@ -1714,7 +1766,7 @@ class SingleParityCheckCode : public LinearCode<T> {
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
-            os << std::endl;
+            if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0) os << "Single parity check code";
     }
@@ -1821,7 +1873,7 @@ class GolayCode : public LinearCode<T> {
             else if (T::get_size() == 3 && this->get_dmin() == 5)
                 return;
         }
-        throw std::invalid_argument("Linear code cannot be converted into a Golay code!");
+        throw std::invalid_argument("Linear code cannot be converted into Golay code!");
     }
 
     GolayCode(const GolayCode&) = default;
@@ -1832,7 +1884,7 @@ class GolayCode : public LinearCode<T> {
     virtual void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
-            os << std::endl;
+            if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0) {
             if constexpr (T::get_size() == 2) {
@@ -1887,13 +1939,13 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
     }
 
     CordaroWagnerCode(const LinearCode<Fp<2>>& C) : LinearCode<Fp<2>>(C), r(0), m(0) {
-        if (this->k != 2) throw std::invalid_argument("Linear code cannot be converted into a Cordaro-Wagner code!");
+        if (this->k != 2) throw std::invalid_argument("Linear code cannot be converted into Cordaro-Wagner code!");
 
-        r = std::floor(n / 3.0 + 1.0 / 2.0);
+        r = std::floor(this->n / 3.0 + 1.0 / 2.0);
         m = this->n - 3 * r;
 
         if (this->get_dmin() != std::min(2 * r, 2 * r + m))
-            throw std::invalid_argument("Linear code cannot be converted into a Cordaro-Wagner code!");
+            throw std::invalid_argument("Linear code cannot be converted into Cordaro-Wagner code!");
     }
 
     CordaroWagnerCode(const CordaroWagnerCode&) = default;
@@ -1907,7 +1959,7 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
     virtual void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<Fp<2>>::get_info(os);
-            os << std::endl;
+            if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0)
             os << "Cordaro-Wagner code with properties: { r = " << r << ", m = " << (int)m << " }";
@@ -1923,7 +1975,7 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
         for (auto it = this->cbegin(); it != this->cend(); ++it) {
             if (dH(*it, r) <= t) return *it;
         }
-        throw decoding_failure("Cordaro-Wagner code BD failed!");
+        throw decoding_failure("Cordaro-Wagner code BD decoder failed!");
     }
 
     Vector<Fp<2>> dec_ML(const Vector<Fp<2>>& r) const override {
@@ -2051,8 +2103,7 @@ class LDCCode : public LinearCode<typename BU::field> {
     LDCCode(const BU& U, const BV& V) try : LinearCode
         <T>(2 * U.get_n(), U.get_k() + V.get_k(), details::LDC_G(U.get_G(), V.get_G())), U(U), V(V) {}
     catch (const std::invalid_argument& e) {
-        throw std::invalid_argument(std::string("Trying to perform an invalid length-doubling construction: ") +
-                                    e.what());
+        throw std::invalid_argument(std::string("Trying to perform invalid length-doubling construction: ") + e.what());
     }
 
     LDCCode(const LDCCode&) = default;
@@ -2071,7 +2122,7 @@ class LDCCode : public LinearCode<typename BU::field> {
     virtual void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
-            os << std::endl;
+            if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0) {
             const auto old = os.iword(details::index);
@@ -2180,7 +2231,7 @@ class RMCode : public LinearCode<Fp<2>> {
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
-            os << std::endl;
+            if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0) {
             os << "RM code with properties: { r = " << r << ", m = " << m << " }";
@@ -2296,8 +2347,9 @@ template <FieldType T, class B>
 class ExtendedCode : public LinearCode<T> {
    public:
     ExtendedCode(const B& BaseCode, size_t i, const Vector<T>& v) try : LinearCode
-        <T>(BaseCode.get_n() + 1, BaseCode.get_k(), Extended_G(BaseCode.get_G(), i, v)), BaseCode(BaseCode), i(i), v(v),
-            parity(false) {
+        <T>(BaseCode.get_n() + 1, BaseCode.get_k() == 0 ? v.wH() : BaseCode.get_k(),
+            Extended_G(BaseCode.get_G(), i, v)),
+            BaseCode(BaseCode), i(i), v(v), parity(false) {
             if (v == Extended_v(this->BaseCode.get_G())) parity = true;
         }
     catch (const std::invalid_argument& e) {
@@ -2306,8 +2358,9 @@ class ExtendedCode : public LinearCode<T> {
     }
 
     ExtendedCode(B&& BaseCode, size_t i, const Vector<T>& v) try : LinearCode
-        <T>(BaseCode.get_n() + 1, BaseCode.get_k(), Extended_G(BaseCode.get_G(), i, v)), BaseCode(std::move(BaseCode)),
-            i(i), v(v), parity(v == Extended_v(this->BaseCode.get_G())) {}
+        <T>(BaseCode.get_n() + 1, BaseCode.get_k() == 0 ? v.wH() : BaseCode.get_k(),
+            Extended_G(BaseCode.get_G(), i, v)),
+            BaseCode(std::move(BaseCode)), i(i), v(v), parity(v == Extended_v(this->BaseCode.get_G())) {}
     catch (const std::invalid_argument& e) {
         throw std::invalid_argument(std::string("Trying to extend a code with invalid extension parameters: ") +
                                     e.what());
@@ -2348,7 +2401,7 @@ class ExtendedCode : public LinearCode<T> {
     virtual void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
-            os << std::endl;
+            if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0) {
             const auto old = os.iword(details::index);
@@ -2404,7 +2457,7 @@ class ExtendedCode : public LinearCode<T> {
         }
 
         if (2 * t + tau > this->get_dmin() - 1)
-            throw decoding_failure("Extended code BD error/erasure decoding failed!");
+            throw decoding_failure("Extended code BD error/erasure decoder failed!");
 
         return c_est;
     }
@@ -2440,6 +2493,7 @@ class ExtendedCode : public LinearCode<T> {
         for (size_t j = 0; j < i; ++j) G.set_submatrix(0, j, Gp.get_submatrix(0, j, k, 1));
         G.set_submatrix(0, i, transpose(Matrix<T>(v)));
         for (size_t j = i; j < n; ++j) G.set_submatrix(0, j + 1, Gp.get_submatrix(0, j, k, 1));
+        std::cout << G << std::endl;
         return G;
     }
 
@@ -2489,7 +2543,7 @@ class AugmentedCode : public LinearCode<T> {
     virtual void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
-            os << std::endl;
+            if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0) {
             const auto old = os.iword(details::index);
@@ -2631,6 +2685,8 @@ class AugmentedCode : public LinearCode<T> {
 
         if (w.get_n() != n) throw std::invalid_argument(std::string("Length of w must be ") + std::to_string(n));
 
+        if (Gp.get_m() == 1 && Gp.rank() == 0) return Matrix<T>(w);
+
         if (j == 0) {
             const auto G = vertical_join(Matrix(w), Gp);
             return G;
@@ -2770,6 +2826,7 @@ auto puncture(C&& code, size_t i) {
 template <FieldType T>
 LinearCode<T> expurgate(const LinearCode<T>& C, const std::vector<size_t>& v) {
     if (!details::validate(v, C.get_k())) throw std::invalid_argument("Invalid pattern for expurgating linear code!");
+    if (C.get_k() == 0) EmptyCode<T>(C.get_n());
 
     auto G = C.get_G();
     G.delete_rows(v);
@@ -2860,6 +2917,17 @@ class Dec_ML {
     Dec_ML(const Code<T>& C) : C(C) {}
 
     Vector<T> operator()(const Vector<T>& in) const { return C.dec_ML(in); }
+
+   private:
+    const Code<T>& C;
+};
+
+template <FieldType T>
+class Dec_ML_soft {
+   public:
+    Dec_ML_soft(const Code<T>& C) : C(C) {}
+
+    Vector<T> operator()(const Vector<double>& in) const { return C.dec_ML_soft(in); }
 
    private:
     const Code<T>& C;

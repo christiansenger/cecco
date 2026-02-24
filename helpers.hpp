@@ -2,7 +2,7 @@
  * @file helpers.hpp
  * @brief Utility functions and mathematical helpers
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.1
+ * @version 2.1
  * @date 2026
  *
  * @copyright
@@ -370,13 +370,14 @@ InfInt bin(const InfInt& n, InfInt k) noexcept {
  * @endcode
  */
 template <class T>
-constexpr T sqm(T b, int e) noexcept {
+constexpr T sqm(T b, int e) {
     static_assert(std::is_integral<decltype(e)>::value, "exponent must be integral type");
-    if (e == 0) {
-        return T(1);
-    }
+    if (e == 0) return T(1);
     if (e < 0) {
         b = T(1) / b;
+        if (e == std::numeric_limits<int>::min())
+            throw std::invalid_argument(
+                "Exponent e too large!");  // INT_MIN might be INT_MAX+1, potential problem in next line
         e = -e;
     }
     // square and multiply
@@ -411,11 +412,12 @@ constexpr T sqm(T b, int e) noexcept {
 template <class T>
 constexpr T daa(T b, int m) noexcept {
     static_assert(std::is_integral<decltype(m)>::value, "multiplicand must be integral type");
-    if (m == 0) {
-        return T(0);
-    }
+    if (m == 0) return T(0);
     if (m < 0) {
         b = -b;
+        if (m == std::numeric_limits<int>::min())
+            throw std::invalid_argument(
+                "Multiplier m too large!");  // INT_MIN might be INT_MAX+1, potential problem in next line
         m = -m;
     }
     // double and add
@@ -589,6 +591,14 @@ class Cache {
             cached = calculate_func();
         }
         return std::get<ReturnType>(cached);
+    }
+
+    // Get cached value (if present)
+    template <auto ID>
+    std::optional<type_for_id_t<ID>> get() const {
+        static_assert(ID <= max_id, "Cache ID out of bounds");
+        if (std::holds_alternative<std::monostate>(cache_data[ID])) return std::nullopt;
+        return std::get<type_for_id_t<ID>>(cache_data[ID]);
     }
 
     // Alternative syntax for cleaner usage

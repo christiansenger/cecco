@@ -2,11 +2,11 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.1
- * @date 2025
+ * @version 2.2.3
+ * @date 2026
  *
  * @copyright
- * Copyright (c) 2025, Christian Senger <senger@inue.uni-stuttgart.de>V
+ * Copyright (c) 2026, Christian Senger <senger@inue.uni-stuttgart.de>
  *
  * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
  * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
@@ -97,7 +97,7 @@ Polynomial<T> ZeroPolynomial();
 
 /**
  * @class Polynomial
- * @brief Generic univariate polynmial class for error control coding (CECCO) and finite field applications
+ * @brief Generic univariate polynomial class for error control coding (CECCO) and finite field applications
  *
  * @tparam T Coefficient type satisfying @ref CECCO::ComponentType concept. Supported types include:
  *   - **Finite field types**: @ref CECCO::Fp, @ref CECCO::Ext, also satisfying concept @ref CECCO::FiniteFieldType
@@ -251,7 +251,7 @@ class Polynomial {
      * Creates a polynomial where v[i] is the coefficient of x^i.
      * The polynomial degree equals v.get_n() - 1.
      *
-     * @note If you need cross-field polynomial <-> vector conversion then first convert v into the the other field.
+     * @note If you need cross-field polynomial <-> vector conversion then first convert v into the other field.
      *
      * @throws std::bad_alloc if memory allocation fails
      */
@@ -334,7 +334,7 @@ class Polynomial {
      * Creates a new polynomial -p(x) where each coefficient is negated.
      * Uses copy constructor for lvalue references.
      */
-    constexpr Polynomial operator-() const& noexcept;
+    constexpr Polynomial operator-() & noexcept;
 
     /**
      * @brief Unary minus operator for rvalue references (move optimization)
@@ -452,7 +452,7 @@ class Polynomial {
      *
      * @throws std::invalid_argument if attempting to divide by zero scalar
      *
-     * @warning Reliable results ( (p / s) *  s == p for a polynomial p and nonzero scalar s are only guaranteed in case
+     * @warning Reliable results ((p / s) *  s == p) for a polynomial p and nonzero scalar s are only guaranteed in case
      * T fulfills concept FieldType<T>
      */
     Polynomial& operator/=(const T& s);
@@ -677,6 +677,19 @@ class Polynomial {
         return leading_coefficient() == T(1);
     }
 
+    /**
+     * @brief Check whether the polynomial is irreducible over its coefficient field
+     *
+     * @return True if the polynomial is irreducible, false otherwise
+     *
+     * Tests irreducibility by trial division: checks all monic polynomials of degree
+     * up to deg(p)/2 for divisibility. A constant polynomial (degree 0) is not
+     * considered irreducible; a linear polynomial (degree 1) is always irreducible.
+     *
+     * @throws std::invalid_argument if called on empty polynomial (via degree())
+     *
+     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
+     */
     constexpr bool is_irreducible() const
         requires FieldType<T>
     {
@@ -725,16 +738,6 @@ class Polynomial {
      * @{
      */
 
-    /**
-     * @brief Add value to coefficient at specified position
-     *
-     * @param i Index of coefficient to modify (power of x)
-     * @param c Value to add to the coefficient
-     * @return Reference to this polynomial after modification
-     *
-     * Adds c to the coefficient of x^i. Automatically grows polynomial
-     * if i exceeds current degree. Maintains canonical form through pruning.
-     */
     /**
      * @brief Add value to coefficient at specified position using perfect forwarding
      *
@@ -870,16 +873,15 @@ Polynomial<T>& Polynomial<T>::operator=(const Polynomial<S>& rhs) {
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> Polynomial<T>::operator-() const& noexcept {
+constexpr Polynomial<T> Polynomial<T>::operator-() & noexcept {
     Polynomial res(*this);
-    std::for_each(res.data.begin(), res.data.end(), [](T& c) { c = -c; });
-    cache.invalidate();
+    std::ranges::for_each(res.data, [](T& c) { c = -c; });
     return res;
 }
 
 template <ComponentType T>
 constexpr Polynomial<T> Polynomial<T>::operator-() && noexcept {
-    std::for_each(data.begin(), data.end(), [](T& c) { c = -c; });
+    std::ranges::for_each(data, [](T& c) { c = -c; });
     cache.invalidate();
     return std::move(*this);
 }
@@ -964,7 +966,7 @@ constexpr Polynomial<T>& Polynomial<T>::operator*=(const T& s) noexcept {
         data.resize(1);
         data.back() = T(0);
     } else {
-        std::for_each(data.begin(), data.end(), [&s](T& c) { c *= s; });
+        std::ranges::for_each(data, [&s](T& c) { c *= s; });
         cache.invalidate();
     }
     return *this;
@@ -982,7 +984,7 @@ constexpr Polynomial<T>& Polynomial<T>::operator*=(size_t n) noexcept
         data.resize(1);
         data.back() = T(0);
     } else {
-        std::for_each(data.begin(), data.end(), [&n](T& c) { c *= n; });
+        std::ranges::for_each(data, [&n](T& c) { c *= n; });
         cache.invalidate();
     }
     return *this;
@@ -991,7 +993,7 @@ constexpr Polynomial<T>& Polynomial<T>::operator*=(size_t n) noexcept
 template <ComponentType T>
 Polynomial<T>& Polynomial<T>::operator/=(const T& s) {
     if (s == T(0)) throw std::invalid_argument("division by zero (polynomial)");
-    std::for_each(data.begin(), data.end(), [&s](T& c) { c /= s; });
+    std::ranges::for_each(data, [&s](T& c) { c /= s; });
     cache.invalidate();
     return *this;
 }
@@ -1000,26 +1002,23 @@ template <ComponentType T>
 std::pair<Polynomial<T>, Polynomial<T>> Polynomial<T>::poly_long_div(const Polynomial<T>& rhs) const
     requires FieldType<T>
 {
-    if (rhs.degree() == 0) {
-        if (rhs[0] == T(0)) throw std::invalid_argument("polynomial long division by zero polynomial");
-        return std::make_pair(*this / rhs[0], Polynomial<T>({0}));
-    }
+    if (rhs.is_zero()) throw std::invalid_argument("polynomial long division by zero polynomial");
 
-    if (degree() == 0) return std::make_pair(Polynomial<T>({0}), Polynomial<T>({0}));
+    const auto rhs_degree = rhs.degree();
+    const auto rhs_lc = rhs.leading_coefficient();
 
-    if (degree() < rhs.degree()) return std::make_pair(Polynomial<T>(), rhs);
+    if (rhs_degree == 0) return std::make_pair(*this / rhs[0], Polynomial<T>({0}));
+
+    if (degree() < rhs_degree) return std::make_pair(Polynomial<T>({0}), *this);
 
     Polynomial<T> q;
     Polynomial<T> r = *this;
 
-    while (r.degree() >= rhs.degree()) {
-        const T t = r.leading_coefficient() / rhs.leading_coefficient();
-        // std::cout << (*this)[d] << ", " << rhs[rhs.degree()] << ": " << t << std::endl;
-        const size_t i = r.degree() - rhs.degree();
+    while (r.degree() >= rhs_degree) {
+        const T t = r.leading_coefficient() / rhs_lc;
+        const size_t i = r.degree() - rhs_degree;
         q.add_to_coefficient(i, t);
-        for (size_t j = 0; j <= rhs.degree(); ++j) {
-            r.add_to_coefficient(i + j, -(t * rhs)[j]);
-        }
+        for (size_t j = 0; j <= rhs_degree; ++j) r.add_to_coefficient(i + j, -(t * rhs[j]));
     }
 
     return std::make_pair(std::move(q), std::move(r));
@@ -1029,26 +1028,26 @@ template <ComponentType T>
 Polynomial<T>& Polynomial<T>::randomize(size_t d) noexcept {
     data.resize(d + 1);
     if constexpr (FieldType<T>) {
-        std::for_each(data.begin(), data.end(), std::mem_fn(&T::randomize));
+        std::ranges::for_each(data, std::mem_fn(&T::randomize));
         do {
             data.back().randomize();
         } while (data.back() == T(0));
     } else if constexpr (std::same_as<T, double>) {
         std::uniform_real_distribution<double> dist(-1.0, 1.0);
-        std::for_each(data.begin(), data.end(), [&](double& val) { val = dist(gen()); });
+        std::ranges::for_each(data, [&](double& val) { val = dist(gen()); });
         do {
             data.back() = dist(gen());
         } while (data.back() == T(0));
     } else if constexpr (std::same_as<T, std::complex<double>>) {
         std::uniform_real_distribution<double> dist(-1.0, 1.0);
-        std::for_each(data.begin(), data.end(),
-                      [&](std::complex<double>& val) { val = std::complex<double>(dist(gen()), dist(gen())); });
+        std::ranges::for_each(data,
+                              [&](std::complex<double>& val) { val = std::complex<double>(dist(gen()), dist(gen())); });
         do {
             data.back() = std::complex<double>(dist(gen()), dist(gen()));
         } while (data.back() == T(0));
     } else if constexpr (SignedIntType<T>) {
         std::uniform_int_distribution<long long> dist(-100, 100);
-        std::for_each(data.begin(), data.end(), [&](T& val) { val = T(dist(gen())); });
+        std::ranges::for_each(data, [&](T& val) { val = T(dist(gen())); });
         do {
             data.back() = dist(gen());
         } while (data.back() == T(0));
@@ -1168,11 +1167,18 @@ template <typename U>
 constexpr Polynomial<T>& Polynomial<T>::set_coefficient(size_t i, U&& c)
     requires std::convertible_to<std::decay_t<U>, T>
 {
-    T c_converted = std::forward<U>(c);
-    if (data.size() == 0 || i >= data.size())
-        add_to_coefficient(i, std::move(c_converted));
-    else
-        add_to_coefficient(i, c_converted - data[i]);
+    T new_value = std::forward<U>(c);
+    if (data.size() == 0 || i >= data.size()) {
+        if (new_value == T(0)) return *this;
+        cache.invalidate();
+        data.resize(i + 1);
+        data[i] = std::move(new_value);
+    } else {
+        if (data[i] == new_value) return *this;
+        cache.invalidate();
+        data[i] = std::move(new_value);
+        if (i == data.size() - 1 && data.back() == T(0)) prune();
+    }
     return *this;
 }
 
@@ -1208,9 +1214,9 @@ template <ComponentType T>
 constexpr Polynomial<T>& Polynomial<T>::prune() noexcept {
     if (data.size() == 0) return *this;
 
-    const auto leading_coefficient = std::find_if(data.crbegin(), data.crend(), [](const T& e) { return e != T(0); });
-    if (leading_coefficient != data.crend()) {
-        data.resize(data.size() - std::distance(data.crbegin(), leading_coefficient));
+    const auto lc = std::find_if(data.crbegin(), data.crend(), [](const T& e) { return e != T(0); });
+    if (lc != data.crend()) {
+        data.resize(data.size() - std::distance(data.crbegin(), lc));
     } else {
         data.resize(1);
         data.back() = T(0);
@@ -1414,7 +1420,6 @@ template <ComponentType T>
 std::pair<Polynomial<T>, Polynomial<T>> poly_long_div(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> temp(std::move(lhs));
     return temp.poly_long_div(rhs);
-    ;
 }
 template <ComponentType T>
 constexpr Polynomial<T> derivative(const Polynomial<T>& poly, size_t s)
@@ -1612,7 +1617,7 @@ Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, 
         Polynomial<T> u = Polynomial<T>({0});
         Polynomial<T> v = Polynomial<T>({1});
         // while (b.degree() > 0) {
-        while (b != Polynomial<T>(0)) {  // changed 25.07.2023, verify!
+        while (!b.is_zero()) {
             const Polynomial<T> q = a / b;
             Polynomial<T> b1 = std::move(b);
             b = a - q * b1;
@@ -1624,9 +1629,9 @@ Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, 
             v = *t - q * v1;
             *t = std::move(v1);
         }
-    } else {                             // "normal" EA
-                                         // while (b.degree() > 0) {
-        while (b != Polynomial<T>(0)) {  // changed 25.07.2023, verify!
+    } else {  // "normal" EA
+              // while (b.degree() > 0) {
+        while (!b.is_zero()) {
             const Polynomial<T> q = a / b;
             Polynomial<T> b1 = std::move(b);
             b = a - q * b1;
@@ -1737,6 +1742,19 @@ constexpr Polynomial<T> operator^(const Polynomial<T>& base, int exponent) noexc
     return sqm<Polynomial<T>>(base, exponent);
 }
 
+/**
+ * @brief Find a random irreducible polynomial of given degree
+ *
+ * @tparam T Field type for coefficients (must satisfy @ref CECCO::FieldType)
+ * @param degree Degree of the irreducible polynomial to find
+ * @return A monic irreducible polynomial of the specified degree
+ *
+ * Generates random monic polynomials of the given degree and tests them for
+ * irreducibility until one is found.
+ *
+ * @note Relies on randomization; runtime depends on the density of irreducible
+ *       polynomials at the given degree
+ */
 template <FieldType T>
 Polynomial<T> find_irreducible(size_t degree) {
     Polynomial<T> res;
@@ -1748,6 +1766,18 @@ Polynomial<T> find_irreducible(size_t degree) {
     return res;
 }
 
+/**
+ * @brief Get the coefficient vector of the Conway polynomial for 𝔽_{p^m}
+ *
+ * @tparam p Prime characteristic
+ * @tparam m Extension degree
+ * @return Coefficient vector [a₀, a₁, ..., aₘ] of the Conway polynomial
+ *
+ * Returns the standardized Conway polynomial coefficients for the finite field
+ * with p^m elements.
+ *
+ * @note Returns an empty vector if the requested (p, m) pair is not in the table
+ */
 template <uint16_t p, size_t m>
 constexpr Vector<Fp<p>> ConwayCoefficients() {
     if constexpr (p == 2) {
@@ -1929,6 +1959,18 @@ constexpr Vector<Fp<p>> ConwayCoefficients() {
     return Vector<Fp<p>>();
 }
 
+/**
+ * @brief Get the Conway polynomial for 𝔽_{p^m}
+ *
+ * @tparam p Prime characteristic
+ * @tparam m Extension degree
+ * @return The Conway polynomial for 𝔽_{p^m} as a Polynomial<Fp<p>>
+ *
+ * Convenience wrapper that constructs a polynomial from @ref ConwayCoefficients.
+ *
+ * @note Returns an empty polynomial if the requested (p, m) pair is not in the table
+ * @see ConwayCoefficients
+ */
 template <uint16_t p, size_t m>
 constexpr Polynomial<Fp<p>> ConwayPolynomial() {
     return Polynomial<Fp<p>>(ConwayCoefficients<p, m>());

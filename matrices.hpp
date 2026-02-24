@@ -2,11 +2,11 @@
  * @file matrices.hpp
  * @brief Matrix arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.4
- * @date 2025
+ * @version 2.2.3
+ * @date 2026
  *
  * @copyright
- * Copyright (c) 2025, Christian Senger <senger@inue.uni-stuttgart.de>
+ * Copyright (c) 2026, Christian Senger <senger@inue.uni-stuttgart.de>
  *
  * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
  * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
@@ -96,11 +96,13 @@
 
 #include <algorithm>
 #include <cassert>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <ranges>
 #include <set>
 #include <sstream>
+#include <unordered_map>
 // #include <string> // transitive through field_concepts_traits.hpp
 // #include <vector> // transitive through helpers.hpp
 
@@ -312,7 +314,7 @@ class Matrix {
      *
      * @throws std::bad_alloc if memory allocation fails
      */
-    constexpr Matrix(size_t m, size_t n, const T& l);
+    Matrix(size_t m, size_t n, const T& l);
 
     /**
      * @brief Constructs a matrix from a flat initializer list
@@ -348,7 +350,7 @@ class Matrix {
      *
      * @note Rows with different lengths are zero-padded to match the longest row
      */
-    constexpr Matrix(std::initializer_list<std::initializer_list<T>> l);
+    Matrix(std::initializer_list<std::initializer_list<T>> l);
 
     /**
      * @brief Constructs a single-row matrix from a vector
@@ -365,7 +367,7 @@ class Matrix {
      * Matrix<int> M(v);  // 1 × 4 matrix
      * @endcode
      */
-    constexpr Matrix(const Vector<T>& v);
+    Matrix(const Vector<T>& v);
 
     /**
      * @brief Copy constructor
@@ -412,8 +414,34 @@ class Matrix {
      * @note Available for any finite field types with matching characteristics
      */
     template <FiniteFieldType S>
-        requires FiniteFieldType<T> && (T::get_characteristic() == S::get_characteristic())
-    constexpr Matrix(const Matrix<S>& other) noexcept;
+    constexpr Matrix(const Matrix<S>& other)
+        requires FiniteFieldType<T> && (T::get_characteristic() == S::get_characteristic());
+
+    /**
+     * @brief Construct matrix from a PPM (P3) image file
+     *
+     * @param filename Path to the input PPM file (ASCII P3 format)
+     *
+     * Reads a PPM image and constructs an m × n matrix (m = height, n = width)
+     * by mapping each pixel's RGB triplet back to a field element label using the
+     * same 64-entry colormap as @ref export_as_ppm. Pixels whose RGB values do not
+     * match any colormap entry are treated as erased (when @c CECCO_ERASURE_SUPPORT
+     * is defined) or set to a random field element.
+     *
+     * @note Only available for finite field types with field size at most 64
+     * @note The input file must use the colormap palette. To convert any image
+     *       (PNG, JPG, etc.) into the appropriate PPM format, use ImageMagick:
+     * @code{.sh}
+     * magick input.png -alpha remove -background black +dither -remap palette.ppm -compress none output.ppm
+     * @endcode
+     *
+     * @code{.cpp}
+     * using F4 = Ext<Fp<2>, MOD{1, 1, 1}>;
+     * Matrix<F4> M("matrix.ppm");
+     * @endcode
+     */
+    Matrix(const std::string& filename)
+        requires FiniteFieldType<T> && (T::get_size() <= 64);
 
     /** @name Assignment Operators
      * @{
@@ -614,9 +642,28 @@ class Matrix {
     /**
      * @brief Check if matrix is zero
      *
+     * Sets type to details::Zero in case the matrix is zero.
+     *
+     * @return true if matrix has only zero components, false otherwise
+     *
+     * @see @ref CECCO::details::matrix_type_t for matrix type optimizations
+     */
+    constexpr bool is_zero() noexcept {
+        if (type == details::Zero) return true;
+        const bool b = std::ranges::all_of(data, [](const T& v) { return v == T(0); });
+        if (b) type = details::Zero;
+        return b;
+    }
+
+    /**
+     * @brief Check if matrix is zero
+     *
      * @return true if matrix has only zero components, false otherwise
      */
-    constexpr bool is_zero() const noexcept { return type == details::Zero; }
+    constexpr bool is_zero() const noexcept {
+        if (type == details::Zero) return true;
+        return std::ranges::all_of(data, [](const T& v) { return v == T(0); });
+    }
 
     /**
      * @brief Compute Hamming weight (number of non-zero elements)
@@ -739,10 +786,10 @@ class Matrix {
      *
      * @throws std::invalid_argument if matrix is not square
      *
-     * @note Only available for field types
+     * @note Only available for finite field types
      */
     std::vector<T> eigenvalues() const
-        requires FieldType<T>;
+        requires FiniteFieldType<T>;
 
     /**
      * @brief Computes all vectors of the row space
@@ -778,58 +825,24 @@ class Matrix {
      */
 
     /**
-     * @brief Set matrix element by copy
-     *
-     * @param i Row index (0-based)
-     * @param j Column index (0-based)
-     * @param c Value to assign to the element
-     * @return Reference to this matrix after setting component
-     *
-     * Sets the element at position (i, j) to the specified value.
-     *
-     * @throws std::invalid_argument if indices are out of bounds
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
-     */
-    /**
-     * @brief Set matrix element using perfect forwarding
+     * @brief Set component value using perfect forwarding
      *
      * @tparam U Type that can be converted to T
      * @param i Row index (0-based)
      * @param j Column index (0-based)
-     * @param c Value to forward to the element
-     * @return Reference to this matrix after setting component
+     * @param c Value to forward into the component
+     * @return Reference to this matrix after modification
      *
-     * Sets the element at position (i, j) using perfect forwarding.
+     * Efficiently forwards the value into the specified component position.
      * Handles both lvalue and rvalue references optimally.
      *
-     * @throws std::invalid_argument if indices are out of bounds
+     * @throws std::invalid_argument if either index is out of bounds
      *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @note Matrix type may change decay after this operation
      */
     template <typename U>
-    constexpr Matrix& set_component(size_t i, size_t j, U&& c)
-        requires std::convertible_to<std::decay_t<U>, T>
-    {
-        (*this)(i, j) = std::forward<U>(c);
-        cache.invalidate();
-        return *this;
-    }
-
-    /**
-     * @brief Access matrix element (mutable)
-     *
-     * @param i Row index (0-based)
-     * @param j Column index (0-based)
-     * @return Mutable reference to element at position (i, j)
-     *
-     * Provides mutable access to matrix elements with bounds checking.
-     *
-     * @throws std::invalid_argument if indices are out of bounds
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
-     */
-    T& operator()(size_t i, size_t j);
+    Matrix& set_component(size_t i, size_t j, U&& c)
+        requires std::convertible_to<std::decay_t<U>, T>;
 
     /**
      * @brief Access matrix element (const)
@@ -961,7 +974,7 @@ class Matrix {
      * A.diagonal_join(B);                // A becomes 4 × 4 block diagonal matrix
      * @endcode
      */
-    constexpr Matrix<T>& diagonal_join(const Matrix& other) noexcept;
+    Matrix<T>& diagonal_join(const Matrix& other) noexcept;
 
     /**
      * @brief Compute Kronecker product with another matrix
@@ -974,7 +987,7 @@ class Matrix {
      *
      * @throws std::bad_alloc if memory allocation fails
      */
-    constexpr Matrix<T>& Kronecker_product(const Matrix& other);
+    Matrix<T>& Kronecker_product(const Matrix& other);
 
     /**
      * @brief Swap two rows of the matrix
@@ -990,6 +1003,21 @@ class Matrix {
      * @note Matrix type may change to @ref details::Generic after this operation
      */
     Matrix<T>& swap_rows(size_t i, size_t j);
+
+    /**
+     * @brief Swap two columns of the matrix
+     *
+     * @param i Index of first column to swap
+     * @param j Index of second column to swap
+     * @return Reference to this matrix after column swap
+     *
+     * Exchanges the contents of columns i and j.
+     *
+     * @throws std::invalid_argument if column indices are out of bounds
+     *
+     * @note Matrix type may change to @ref details::Generic after this operation
+     */
+    Matrix<T>& swap_columns(size_t i, size_t j);
 
     /**
      * @brief Scale a row by a scalar value
@@ -1008,6 +1036,22 @@ class Matrix {
     Matrix<T>& scale_row(const T& s, size_t i);
 
     /**
+     * @brief Scale a column by a scalar value
+     *
+     * @param s Scalar value to multiply the column by
+     * @param i Index of column to scale
+     * @return Reference to this matrix after column scaling
+     *
+     * Multiplies all elements in column i by the scalar s. This is a fundamental
+     * column operation.
+     *
+     * @throws std::invalid_argument if column index is out of bounds
+     *
+     * @note Matrix type may change to @ref details::Generic after this operation
+     */
+    Matrix<T>& scale_column(const T& s, size_t i);
+
+    /**
      * @brief Add a scaled row to another row
      *
      * @param s Scalar value to multiply row i by before adding
@@ -1022,6 +1066,22 @@ class Matrix {
      * @note Matrix type may change to @ref details::Generic after this operation
      */
     Matrix<T>& add_scaled_row(const T& s, size_t i, size_t j);
+
+    /**
+     * @brief Add a scaled column to another column
+     *
+     * @param s Scalar value to multiply column i by before adding
+     * @param i Index of source column to scale and add
+     * @param j Index of destination column to add to
+     * @return Reference to this matrix after column operation
+     *
+     * Performs the operation: column[j] += s * column[i].
+     *
+     * @throws std::invalid_argument if column indices are out of bounds
+     *
+     * @note Matrix type may change to @ref details::Generic after this operation
+     */
+    Matrix<T>& add_scaled_column(const T& s, size_t i, size_t j);
 
     /**
      * @brief Add one row to another row
@@ -1040,6 +1100,28 @@ class Matrix {
         if (i >= m || j >= m)
             throw std::invalid_argument("trying to add row to other row, at least one of them is non-existent");
         return add_scaled_row(T(1), i, j);
+    }
+
+    /**
+     * @brief Add one column to another column
+     *
+     * @param i Index of source column to add
+     * @param j Index of destination column to add to
+     * @return Reference to this matrix after column operation
+     *
+     * Performs the operation: column[j] += column[i].
+     *
+     * @throws std::invalid_argument if column indices are out of bounds
+     *
+     * @note Matrix type may change to @ref details::Generic after this operation
+     */
+    Matrix<T>& add_column(size_t i, size_t j) {
+        if (i >= n || j >= n)
+            throw std::invalid_argument("trying to add column to other column, at least one of them is non-existent");
+        transpose();
+        add_scaled_row(T(1), i, j);
+        transpose();
+        return *this;
     }
 
     /**
@@ -1304,7 +1386,7 @@ class Matrix {
      * Reverses the order of rows: first row becomes last, second becomes
      * second-to-last, etc.
      */
-    constexpr Matrix<T>& reverse_rows();
+    Matrix<T>& reverse_rows();
 
     /**
      * @brief Reverse the order of matrix columns
@@ -1314,7 +1396,7 @@ class Matrix {
      * Reverses the order of columns: first column becomes last, second becomes
      * second-to-last, etc.
      */
-    constexpr Matrix<T>& reverse_columns();
+    Matrix<T>& reverse_columns();
 
     /**
      * @brief Fill all matrix elements with specified value
@@ -1437,6 +1519,42 @@ class Matrix {
     constexpr Vector<S> as_vector() const
         requires FiniteFieldType<T> && ExtensionOf<T, S> && (!std::is_same_v<T, S>);
 
+    /**
+     * @brief Flatten matrix into a vector by row-major concatenation
+     *
+     * @return Vector of length m × n containing all matrix elements
+     *
+     * Concatenates all rows of the matrix into a single vector. For an m × n matrix,
+     * element (i, j) maps to vector index i · n + j.
+     *
+     * @code{.cpp}
+     * Matrix<double> M = {{1, 2, 3}, {4, 5, 6}};
+     * auto v = M.to_vector();  // v = (1, 2, 3, 4, 5, 6)
+     * @endcode
+     */
+    Vector<T> to_vector() const;
+
+    /**
+     * @brief Export matrix as a PPM image file
+     *
+     * @param filename Path to the output PPM file
+     *
+     * Writes the matrix to a PPM (P3) image file where each field element is mapped
+     * to an RGB color using a built-in 64-entry colormap (black → blue → green → yellow → white).
+     * The image has width n and height m.
+     *
+     * @note Only available for finite field types with field size at most 64
+     * @note When @c CECCO_ERASURE_SUPPORT is defined, erased elements are rendered in red
+     *
+     * @code{.cpp}
+     * using F4 = Ext<Fp<2>, MOD{1, 1, 1}>;
+     * Matrix<F4> M(8, 8);
+     * M.export_as_ppm("matrix.ppm");
+     * @endcode
+     */
+    void export_as_ppm(const std::string& filename) const
+        requires FiniteFieldType<T> && (T::get_size() <= 64);
+
     /** @} */
 
    private:
@@ -1472,6 +1590,19 @@ class Matrix {
      * optimizations and algorithms.
      */
     details::matrix_type_t type = details::Zero;
+
+    static inline const uint8_t colormap[64][3] = {
+        {0, 0, 0},       {0, 0, 24},      {0, 0, 40},      {0, 0, 56},      {0, 0, 72},      {0, 0, 88},
+        {0, 0, 104},     {0, 0, 120},     {0, 0, 136},     {0, 0, 152},     {0, 0, 167},     {0, 0, 183},
+        {0, 0, 199},     {0, 0, 215},     {0, 0, 231},     {0, 0, 252},     {0, 6, 253},     {0, 24, 232},
+        {0, 40, 216},    {0, 56, 200},    {0, 72, 184},    {0, 88, 168},    {0, 104, 152},   {0, 120, 136},
+        {0, 136, 120},   {0, 152, 104},   {0, 167, 88},    {0, 183, 72},    {0, 199, 56},    {0, 215, 41},
+        {0, 231, 25},    {0, 249, 6},     {6, 255, 0},     {24, 255, 0},    {40, 255, 0},    {56, 255, 0},
+        {72, 255, 0},    {88, 255, 0},    {104, 255, 0},   {120, 255, 0},   {136, 255, 0},   {152, 255, 0},
+        {167, 255, 0},   {183, 255, 0},   {199, 255, 0},   {215, 255, 0},   {231, 255, 0},   {249, 255, 0},
+        {255, 255, 6},   {255, 255, 24},  {255, 255, 40},  {255, 255, 56},  {255, 255, 72},  {255, 255, 88},
+        {255, 255, 104}, {255, 255, 120}, {255, 255, 136}, {255, 255, 152}, {255, 255, 167}, {255, 255, 183},
+        {255, 255, 199}, {255, 255, 215}, {255, 255, 231}, {255, 255, 255}};
 
     /**
      * @brief Cache system for expensive computations
@@ -1558,7 +1689,7 @@ class Matrix {
      * @return Number of rows processed (new h value)
      */
     template <bool transposed>
-    size_t ref_elimination_kernel(T* __restrict__ data, size_t m, size_t n, size_t h, size_t k) {
+    static size_t ref_elimination_kernel(T* __restrict__ data, size_t m, size_t n, size_t h, size_t k) {
         while (h < m && k < n) {
             // find pivot
             size_t p = m;  // Default: no pivot found
@@ -1574,18 +1705,29 @@ class Matrix {
             if (p == m) {  // no pivot in column -> proceed to next column
                 ++k;
             } else {
-                this->swap_rows(h, p);
+                // this->swap_rows(h, p);
+                if constexpr (!transposed)
+                    std::swap_ranges(data + h * n, data + (h + 1) * n, data + p * n);
+                else
+                    for (size_t j = 0; j < n; ++j) std::swap(data[h + j * m], data[p + j * m]);
 
                 const size_t pivot_idx = transposed ? (h + k * m) : (h * n + k);
                 const T pivot = data[pivot_idx];
-                this->scale_row(T(1) / pivot, h);
+
+                // this->scale_row(T(1) / pivot, h);
+                const T inv = T(1) / pivot;
+                if constexpr (!transposed) {
+                    for (size_t j = k; j < n; ++j) data[h * n + j] *= inv;
+                } else {
+                    for (size_t j = k; j < n; ++j) data[h + j * m] *= inv;
+                }
 
                 // Forward elimination only - eliminate entries BELOW pivot
                 for (size_t i = h + 1; i < m; ++i) {
                     const size_t f_idx = transposed ? (i + k * m) : (i * n + k);
                     const T f = data[f_idx];
 
-                    eliminate_row_kernel<transposed>(data, m, n, i, h, k, f);
+                    if (f != T(0)) eliminate_row_kernel<transposed>(data, m, n, i, h, k, f);
                 }
 
                 ++h;
@@ -1624,9 +1766,7 @@ class Matrix {
                     const size_t f_idx = transposed ? (row + pivot_col * m) : (row * n + pivot_col);
                     const T f = data[f_idx];
 
-                    if (f != T(0)) {
-                        eliminate_row_kernel<transposed>(data, m, n, row, pivot_row, pivot_col, f);
-                    }
+                    if (f != T(0)) eliminate_row_kernel<transposed>(data, m, n, row, pivot_row, pivot_col, f);
                 }
             }
         }
@@ -1642,11 +1782,11 @@ class Matrix {
 /* Matrix member function implementations */
 
 template <ComponentType T>
-constexpr Matrix<T>::Matrix(size_t m, size_t n, const T& l)
+Matrix<T>::Matrix(size_t m, size_t n, const T& l)
     : data(m * n), m(m), n(n), type(l == T(0) ? details::Zero : details::Generic) {
     std::fill(data.begin(), data.end(), l);
     if (l != T(0))
-        cache.template set<Rank>(std::min(m, n));
+        cache.template set<Rank>(1);
     else
         cache.template set<Rank>(0);
 }
@@ -1661,7 +1801,7 @@ constexpr Matrix<T>::Matrix(size_t m, size_t n, std::initializer_list<T> l)
 }
 
 template <ComponentType T>
-constexpr Matrix<T>::Matrix(std::initializer_list<std::initializer_list<T>> l)
+Matrix<T>::Matrix(std::initializer_list<std::initializer_list<T>> l)
     : m(l.size()), n(0), type(details::Generic) {
     if (m == 0) return;
     for (auto it = l.begin(); it != l.end(); ++it) {
@@ -1677,7 +1817,7 @@ constexpr Matrix<T>::Matrix(std::initializer_list<std::initializer_list<T>> l)
         auto col_indices = std::views::iota(size_t{0}, row_it->size());
         auto col_it = row_it->begin();
         std::ranges::for_each(col_indices, [&](size_t j) {
-            (*this)(i, j) = *col_it;
+            set_component(i, j, *col_it);
             ++col_it;
         });
         ++row_it;
@@ -1685,7 +1825,7 @@ constexpr Matrix<T>::Matrix(std::initializer_list<std::initializer_list<T>> l)
 }
 
 template <ComponentType T>
-constexpr Matrix<T>::Matrix(const Vector<T>& v) : data(v.get_n()), m(1), n(v.get_n()), type(details::Toeplitz) {
+Matrix<T>::Matrix(const Vector<T>& v) : data(v.get_n()), m(1), n(v.get_n()), type(details::Toeplitz) {
     // Direct copy from vector data to matrix data for single row
     std::copy(v.data.begin(), v.data.end(), data.begin());
     cache.template set<Rank>(v.is_zero() ? 0 : 1);
@@ -1693,8 +1833,8 @@ constexpr Matrix<T>::Matrix(const Vector<T>& v) : data(v.get_n()), m(1), n(v.get
 
 template <ComponentType T>
 template <FiniteFieldType S>
+constexpr Matrix<T>::Matrix(const Matrix<S>& other)
     requires FiniteFieldType<T> && (T::get_characteristic() == S::get_characteristic())
-constexpr Matrix<T>::Matrix(const Matrix<S>& other) noexcept
     : data(other.get_m() * other.get_n()),
       m(other.get_m()),
       n(other.get_n()),
@@ -1716,8 +1856,75 @@ constexpr Matrix<T>::Matrix(const Matrix<S>& other) noexcept
 }
 
 template <ComponentType T>
+Matrix<T>::Matrix(const std::string& filename)
+    requires FiniteFieldType<T> && (T::get_size() <= 64)
+{
+    std::ifstream in(filename);
+
+    auto next_token = [&](std::string& tok) -> void {
+        for (;;) {
+            in >> tok;
+            if (tok.empty()) continue;
+            if (tok[0] == '#') {
+                in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                continue;
+            }
+            return;
+        }
+    };
+
+    std::string tok;
+    next_token(tok);  // "P3"
+    next_token(tok);
+    size_t w = std::stoul(tok);
+    next_token(tok);
+    size_t h = std::stoul(tok);
+    next_token(tok); /* maxval */  // assumed 255
+
+    *this = Matrix(h, w);
+
+    // "RGB to a" map
+    static const auto rgb_to_a = [] {
+        std::unordered_map<uint32_t, uint8_t> m;
+        m.reserve(64);
+        for (uint8_t a = 0; a < 64; ++a) {
+            const uint32_t key =
+                (uint32_t(colormap[a][0]) << 16) | (uint32_t(colormap[a][1]) << 8) | uint32_t(colormap[a][2]);
+            m.emplace(key, a);
+        }
+        return m;
+    }();
+
+    auto label_from_a = [&](uint8_t a) -> size_t { return ((T::get_size() - 1) * (63 - static_cast<size_t>(a))) / 63; };
+
+    for (size_t i = 0; i < h; ++i) {
+        for (size_t j = 0; j < w; ++j) {
+            next_token(tok);
+            uint8_t r = static_cast<uint8_t>(std::stoi(tok));
+            next_token(tok);
+            uint8_t g = static_cast<uint8_t>(std::stoi(tok));
+            next_token(tok);
+            uint8_t b = static_cast<uint8_t>(std::stoi(tok));
+
+            const uint32_t key = (uint32_t(r) << 16) | (uint32_t(g) << 8) | uint32_t(b);
+
+            const auto it = rgb_to_a.find(key);
+            if (it != rgb_to_a.end()) {
+                set_component(i, j, T(label_from_a(it->second)));
+            } else {
+#ifdef CECCO_ERASURE_SUPPORT
+                erase_component(i, j);
+#else
+                set_component(i, j, T(0).randomize());
+#endif
+            }
+        }
+    }
+}
+
+template <ComponentType T>
 constexpr Matrix<T>& Matrix<T>::operator=(const Matrix& rhs) {
-    if (*this == rhs) return *this;
+    if (this == &rhs) return *this;
     data = rhs.data;
     m = rhs.m;
     n = rhs.n;
@@ -1745,11 +1952,11 @@ constexpr Matrix<T>& Matrix<T>::operator=(const Matrix<S>& other)
 {
     data.resize(other.get_m() * other.get_n());
     std::transform(other.data.cbegin(), other.data.cend(), data.begin(),
-                   [&](S& e) { return T(e); });  // Uses enhanced cross-field constructors
+                   [&](const S& e) { return T(e); });  // Uses enhanced cross-field constructors
     m = other.get_m();
     n = other.get_n();
-    transposed = other.is_transposed();
-    type = other.get_type();
+    transposed = other.transposed;
+    type = other.type;
     cache.invalidate();
     return *this;
 }
@@ -1757,24 +1964,31 @@ constexpr Matrix<T>& Matrix<T>::operator=(const Matrix<S>& other)
 template <ComponentType T>
 constexpr Matrix<T> Matrix<T>::operator-() const& noexcept {
     auto res = *this;
+    auto rank_backup = res.cache.template get<Rank>();
     if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
-        std::for_each(res.data.begin(), res.data.end(), [](T& x) { x = -x; });
+        std::ranges::for_each(res.data, [](T& x) { x = -x; });
         if (type == details::Vandermonde) res.type = details::Generic;
 
     } else if (type == details::Zero) {
         // continue;
     } else if (type == details::Diagonal || type == details::Identity) {
         const auto indices = std::views::iota(size_t{0}, m);
-        std::for_each(indices.begin(), indices.end(), [&res](size_t mu) { res(mu, mu) = -res(mu, mu); });
-        if (type == details::Identity) res.type = details::Diagonal;
+        std::ranges::for_each(indices, [this, &res](size_t mu) { res.data[mu * n + mu] = -res.data[mu * n + mu]; });
+        if constexpr (FiniteFieldType<T>) {
+            if (T::get_characteristic() != 2 && type == details::Identity) res.type = details::Diagonal;
+        } else {
+            if (type == details::Identity) res.type = details::Diagonal;
+        }
     }
+    if (rank_backup) res.cache.template set<Rank>(*rank_backup);
     return res;
 }
 
 template <ComponentType T>
 constexpr Matrix<T> Matrix<T>::operator-() && noexcept {
+    auto rank_backup = cache.template get<Rank>();
     if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
-        std::for_each(data.begin(), data.end(), [](T& x) { x = -x; });
+        std::ranges::for_each(data, [](T& x) { x = -x; });
         if (type == details::Vandermonde) {
             type = details::Generic;
         }
@@ -1782,11 +1996,14 @@ constexpr Matrix<T> Matrix<T>::operator-() && noexcept {
         // continue;
     } else if (type == details::Diagonal || type == details::Identity) {
         const auto indices = std::views::iota(size_t{0}, m);
-        std::for_each(indices.begin(), indices.end(), [this](size_t mu) { (*this)(mu, mu) = -(*this)(mu, mu); });
-        if (type == details::Identity) {
-            type = details::Diagonal;
+        std::ranges::for_each(indices, [this](size_t mu) { data[mu * n + mu] = -data[mu * n + mu]; });
+        if constexpr (FiniteFieldType<T>) {
+            if (T::get_characteristic() != 2 && type == details::Identity) type = details::Diagonal;
+        } else {
+            if (type == details::Identity) type = details::Diagonal;
         }
     }
+    if (rank_backup) cache.template set<Rank>(*rank_backup);
     return std::move(*this);
 }
 
@@ -1805,17 +2022,20 @@ Matrix<T>& Matrix<T>::operator+=(const Matrix& rhs) {
                (type == details::Diagonal && rhs.type == details::Identity) ||
                (type == details::Identity && rhs.type == details::Diagonal)) {
         const auto indices = std::views::iota(size_t{0}, m);
-        std::for_each(indices.begin(), indices.end(), [this, &rhs](size_t mu) { (*this)(mu, mu) += rhs(mu, mu); });
+        std::ranges::for_each(indices, [this, &rhs](size_t mu) { data[mu * n + mu] += rhs.data[mu * n + mu]; });
+        if (type == details::Identity) type = details::Diagonal;
     } else {
         if (!transposed && !rhs.transposed) {
             // Optimized element-wise addition for non-transposed matrices
             std::transform(data.begin(), data.end(), rhs.data.begin(), data.begin(), std::plus<T>{});
+            if (type != details::Generic && !(type == details::Toeplitz && rhs.type == details::Toeplitz))
+                type = details::Generic;
         } else {
             const auto indices = std::views::iota(size_t{0}, m * n);
-            std::for_each(indices.begin(), indices.end(), [this, &rhs](size_t idx) {
+            std::ranges::for_each(indices, [this, &rhs](size_t idx) {
                 size_t mu = idx / n;
                 size_t nu = idx % n;
-                (*this)(mu, nu) += rhs(mu, nu);
+                set_component(mu, nu, (*this)(mu, nu) + rhs(mu, nu));
             });
         }
     }
@@ -1852,22 +2072,22 @@ Matrix<T>& Matrix<T>::operator*=(const Matrix& rhs) {
         // continue;
     } else if (type == details::Diagonal && rhs.type == details::Diagonal) {
         const auto indices = std::views::iota(size_t{0}, m);
-        std::for_each(indices.begin(), indices.end(), [this, &rhs](size_t mu) { (*this)(mu, mu) *= rhs(mu, mu); });
+        std::ranges::for_each(indices, [this, &rhs](size_t mu) { data[mu * n + mu] *= rhs.data[mu * n + mu]; });
     } else if (type == details::Diagonal) {
         auto res = rhs;
         const auto indices = std::views::iota(size_t{0}, m);
-        std::for_each(indices.begin(), indices.end(), [this, &res, &rhs](size_t mu) {
+        std::ranges::for_each(indices, [this, &res, &rhs](size_t mu) {
             auto s = (*this)(mu, mu);
             auto nu_indices = std::views::iota(size_t{0}, rhs.n);
-            std::for_each(nu_indices.begin(), nu_indices.end(), [&](size_t nu) { res(mu, nu) *= s; });
+            std::ranges::for_each(nu_indices, [&](size_t nu) { res.set_component(mu, nu, res(mu, nu) * s); });
         });
         *this = std::move(res);
     } else if (rhs.type == details::Diagonal) {
         const auto indices = std::views::iota(size_t{0}, n);
-        std::for_each(indices.begin(), indices.end(), [this, &rhs](size_t nu) {
+        std::ranges::for_each(indices, [this, &rhs](size_t nu) {
             const auto& s = rhs(nu, nu);
             auto mu_indices = std::views::iota(size_t{0}, m);
-            std::for_each(mu_indices.begin(), mu_indices.end(), [&](size_t mu) { (*this)(mu, nu) *= s; });
+            std::ranges::for_each(mu_indices, [&](size_t mu) { set_component(mu, nu, (*this)(mu, nu) * s); });
         });
     } else {
         const size_t M = get_m();
@@ -1880,8 +2100,8 @@ Matrix<T>& Matrix<T>::operator*=(const Matrix& rhs) {
         const T* __restrict__ rhs_data = rhs.data.data();
         T* __restrict__ res_data = res.data.data();
 
-        // Tune this block/tile size for your arch. 48, 64, 96, 128 are common good starts
-        constexpr size_t BS = 96;
+        // Tune this block/tile size for archicture. 48, 64, 96, 128 are ressonable.
+        constexpr size_t BS = 64;
 
         // Branch ONCE on transpose flags - dispatch to optimized kernels with zero duplication
         if (!this->transposed && !rhs.transposed) {
@@ -1910,12 +2130,13 @@ constexpr Matrix<T>& Matrix<T>::operator*=(const T& s) {
     } else if (s == T(1) || type == details::Zero) {
         // continue;
     } else if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
-        std::for_each(data.begin(), data.end(), [&s](T& x) { x *= s; });
+        std::ranges::for_each(data, [&s](T& x) { x *= s; });
+        if (type == details::Vandermonde) type = details::Generic;
     } else if (type == details::Diagonal || type == details::Identity) {
         const auto indices = std::views::iota(size_t{0}, m);
-        std::for_each(indices.begin(), indices.end(), [this, &s](size_t mu) { (*this)(mu, mu) *= s; });
+        std::ranges::for_each(indices, [this, &s](size_t mu) { data[mu * n + mu] *= s; });
+        if (type == details::Identity) type = details::Diagonal;
     }
-    if (s == T(0)) cache.template set<Rank>(0);
     return *this;
 }
 
@@ -1929,17 +2150,17 @@ Matrix<T>& Matrix<T>::operator/=(const T& s) {
 template <ComponentType T>
 Matrix<T>& Matrix<T>::randomize() {
     if constexpr (FieldType<T>) {
-        std::for_each(data.begin(), data.end(), std::mem_fn(&T::randomize));
+        std::ranges::for_each(data, std::mem_fn(&T::randomize));
     } else if constexpr (std::same_as<T, double>) {
         std::uniform_real_distribution<double> dist(-1.0, 1.0);
-        std::for_each(data.begin(), data.end(), [&](double& val) { val = dist(gen()); });
+        std::ranges::for_each(data, [&](double& val) { val = dist(gen()); });
     } else if constexpr (std::same_as<T, std::complex<double>>) {
         std::uniform_real_distribution<double> dist(-1.0, 1.0);
-        std::for_each(data.begin(), data.end(),
-                      [&](std::complex<double>& val) { val = std::complex<double>(dist(gen()), dist(gen())); });
+        std::ranges::for_each(data,
+                              [&](std::complex<double>& val) { val = std::complex<double>(dist(gen()), dist(gen())); });
     } else if constexpr (SignedIntType<T>) {
         std::uniform_int_distribution<long long> dist(-100, 100);
-        std::for_each(data.begin(), data.end(), [&](T& val) { val = T(dist(gen())); });
+        std::ranges::for_each(data, [&](T& val) { val = T(dist(gen())); });
     }
     type = details::Generic;
     cache.invalidate();
@@ -1961,7 +2182,7 @@ constexpr size_t Matrix<T>::wH() const noexcept
     } else if (type == details::Identity) {
         return m;
     }
-    assert("wH(): should never be here");
+    assert(false && "wH(): should never be here");
     return 0;  // dummy
 }
 
@@ -1995,7 +2216,7 @@ Polynomial<T> Matrix<T>::characteristic_polynomial() const
         std::vector<Matrix<T>> TM;  // details::Toeplitz matrices
         TM.reserve(m);
         for (size_t i = 0; i < m; ++i) {
-            // partion matrix
+            // partition matrix
             T a = (*this)(i, i);
             if (m - i == 1) {
                 Vector<T> v(2);
@@ -2045,17 +2266,18 @@ Polynomial<T> Matrix<T>::characteristic_polynomial() const
 
         return res;
     } else if (type == details::Zero) {
-        return Polynomial<T>({0});
+        Polynomial<T> res({0, 1});
+        return res ^ m;
     } else if (type == details::Diagonal) {
         Polynomial<T> res({1});
         auto mu_indices = std::views::iota(size_t{0}, m);
         std::ranges::for_each(mu_indices, [&](size_t mu) { res *= Polynomial<T>({(*this)(mu, mu), -1}); });
         return res;
     } else if (type == details::Identity) {
-        Polynomial<T> res({0, 1});
+        Polynomial<T> res({-1, 1});
         return res ^ m;
     }
-    assert("characteristic_polynomial(): should never be here");
+    assert(false && "characteristic_polynomial(): should never be here");
     return Polynomial<T>();  // dummy
 }
 
@@ -2089,10 +2311,10 @@ Matrix<T> Matrix<T>::basis_of_nullspace() const
     for (size_t i = 0; i < m + offset + 1; ++i) {
         for (size_t k = offset; k < n - r; ++k) {
             if (i + offset == mocols[k]) {
-                B(k, i + offset) = -T(1);
+                B.set_component(k, i + offset, -T(1));
                 ++offset;
             } else {
-                B(k, i + offset) = temp(i, mocols[k]);
+                B.set_component(k, i + offset, temp(i, mocols[k]));
             }
         }
     }
@@ -2136,13 +2358,13 @@ T Matrix<T>::determinant() const
     } else if (type == details::Identity) {
         return T(1);
     }
-    assert("determinant(): should never be here");
+    assert(false && "determinant(): should never be here");
     return T(0);  // dummy
 }
 
 template <ComponentType T>
 std::vector<T> Matrix<T>::eigenvalues() const
-    requires FieldType<T>
+    requires FiniteFieldType<T>
 {
     const auto p = characteristic_polynomial();
     std::vector<T> res;
@@ -2180,19 +2402,63 @@ std::vector<Vector<T>> Matrix<T>::rowspace() const
         }
         res.push_back(std::move(temp));
     }
+    // sort vectors so that two spans consisting of the same vectors compare (==) to equal
+    std::sort(res.begin(), res.end(), [](Vector<T>& a, Vector<T>& b) { return a.as_integer() > b.as_integer(); });
     return res;
 }
 
 template <ComponentType T>
-T& Matrix<T>::operator()(size_t i, size_t j) {
+template <typename U>
+Matrix<T>& Matrix<T>::set_component(size_t i, size_t j, U&& c)
+    requires std::convertible_to<std::decay_t<U>, T>
+{
     if (i >= m || j >= n) throw std::invalid_argument("trying to access non-existent component of matrix");
-    if (type == details::Vandermonde || type == details::Toeplitz || type == details::Zero ||
-        type == details::Identity || (type == details::Diagonal && i != j)) {
-        type = details::Generic;
+
+    T& old_value = (!transposed) ? data[i * n + j] : data[i + j * m];
+
+    T new_value(std::forward<U>(c));
+    if (old_value == new_value) return *this;
+
+    switch (type) {
+        case details::Generic:
+            break;
+
+        case details::Diagonal:
+            if (i != j) type = details::Generic;
+            break;
+
+        case details::Zero:
+            if (i != j)
+                type = details::Generic;
+            else
+                type = details::Diagonal;
+            break;
+
+        case details::Identity:
+            if (i == j)
+                type = details::Diagonal;  // we already know it is not one
+            else
+                type = details::Generic;  // we already know it is not zero
+            break;
+
+        case details::Vandermonde:
+        case details::Toeplitz:
+            type = details::Generic;
+            break;
+
+        default:
+            type = details::Generic;
+            break;
     }
+
+    if (!transposed)
+        data[i * n + j] = new_value;
+    else
+        data[i + j * m] = new_value;
+
     cache.invalidate();
-    if (!transposed) return data[i * n + j];
-    return data[i + j * m];
+
+    return *this;
 }
 
 template <ComponentType T>
@@ -2250,7 +2516,7 @@ Matrix<T> Matrix<T>::get_submatrix(size_t i, size_t j, size_t h, size_t w) const
             std::ranges::for_each(indices, [&](size_t idx) {
                 size_t mu = idx / w;
                 size_t nu = idx % w;
-                res(mu, nu) = (*this)(i + mu, j + nu);
+                res.set_component(mu, nu, (*this)(i + mu, j + nu));
             });
         }
         if (type == details::Vandermonde && i == 0) {
@@ -2266,7 +2532,7 @@ Matrix<T> Matrix<T>::get_submatrix(size_t i, size_t j, size_t h, size_t w) const
             size_t mu = idx / w;
             size_t nu = idx % w;
             if (i + mu == j + nu) {
-                res(mu, nu) = (*this)(i + mu, j + nu);
+                res.set_component(mu, nu, (*this)(i + mu, j + nu));
             }
         });
         if (i == j) {
@@ -2299,7 +2565,7 @@ Matrix<T>& Matrix<T>::set_submatrix(size_t i, size_t j, const Matrix& N) {
         std::ranges::for_each(indices, [&](size_t idx) {
             size_t mu = idx / N.n;
             size_t nu = idx % N.n;
-            (*this)(i + mu, j + nu) = N(mu, nu);
+            set_component(i + mu, j + nu, N(mu, nu));
         });
     }
     type = details::Generic;
@@ -2313,10 +2579,14 @@ Matrix<T>& Matrix<T>::horizontal_join(const Matrix& other) {
         throw std::invalid_argument(
             "trying to horizontally join two "
             "matrices of incompatible dimensions");
-    Matrix temp(m, n + other.n);
-    temp.set_submatrix(0, 0, *this);
-    temp.set_submatrix(0, n, other);
-    *this = std::move(temp);
+    if (type == details::Zero && other.type == details::Zero) {
+        *this = ZeroMatrix<T>(m, n + other.n);
+    } else {
+        Matrix temp(m, n + other.n);
+        temp.set_submatrix(0, 0, *this);
+        temp.set_submatrix(0, n, other);
+        *this = std::move(temp);
+    }
     return *this;
 }
 
@@ -2326,25 +2596,63 @@ Matrix<T>& Matrix<T>::vertical_join(const Matrix& other) {
         throw std::invalid_argument(
             "trying to vertically join two "
             "matrices of incompatible dimensions");
-    Matrix temp(m + other.m, n);
-    temp.set_submatrix(0, 0, *this);
-    temp.set_submatrix(m, 0, other);
-    *this = std::move(temp);
+    if (type == details::Zero && other.type == details::Zero) {
+        *this = ZeroMatrix<T>(m + other.m, n);
+    } else {
+        Matrix temp(m + other.m, n);
+        temp.set_submatrix(0, 0, *this);
+        temp.set_submatrix(m, 0, other);
+        *this = std::move(temp);
+    }
     return *this;
 }
 
 template <ComponentType T>
-constexpr Matrix<T>& Matrix<T>::diagonal_join(const Matrix& other) noexcept {
-    Matrix temp(m + other.m, n + other.n);
-    temp.set_submatrix(0, 0, *this);
-    temp.set_submatrix(m, n, other);
-    *this = std::move(temp);
+Matrix<T>& Matrix<T>::diagonal_join(const Matrix& other) noexcept {
+    if (type == details::Zero && other.type == details::Zero) {
+        *this = ZeroMatrix<T>(m + other.m, n + other.n);
+    } else if (type == details::Identity && other.type == details::Identity) {
+        *this = IdentityMatrix<T>(m + other.m);
+    } else if ((type == details::Diagonal && other.type == details::Identity) ||
+               (type == details::Identity && other.type == details::Diagonal) ||
+               (type == details::Diagonal && other.type == details::Diagonal)) {
+        *this = DiagonalMatrix<T>(concatenate(diagonal(), other.diagonal()));
+    } else {
+        Matrix temp(m + other.m, n + other.n);
+        temp.set_submatrix(0, 0, *this);
+        temp.set_submatrix(m, n, other);
+        *this = std::move(temp);
+    }
     return *this;
 }
 
 template <ComponentType T>
-constexpr Matrix<T>& Matrix<T>::Kronecker_product(const Matrix& other) {
-    if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
+Matrix<T>& Matrix<T>::Kronecker_product(const Matrix& other) {
+    if (type == details::Zero || other.type == details::Zero) {
+        *this = ZeroMatrix<T>(m * other.m, n * other.n);
+    } else if (type == details::Identity && other.type == details::Identity) {
+        *this = IdentityMatrix<T>(m * other.m);
+    } else if (type == details::Diagonal || type == details::Identity) {
+        if (other.type == details::Diagonal || other.type == details::Identity) {
+            auto d1 = diagonal();
+            auto d2 = other.diagonal();
+            Vector<T> d(m * other.m);
+            const auto indices = std::views::iota(size_t{0}, m * other.m);
+            std::ranges::for_each(indices,
+                                  [&](size_t idx) { d.set_component(idx, d1[idx / other.m] * d2[idx % other.m]); });
+            *this = DiagonalMatrix<T>(std::move(d));
+        } else {
+            Matrix temp(m * other.m, n * other.n);
+            const auto indices = std::views::iota(size_t{0}, m);
+            std::ranges::for_each(indices, [this, &temp, &other](size_t mu) {
+                if (type == details::Identity)
+                    temp.set_submatrix(mu * other.m, mu * other.n, other);
+                else
+                    temp.set_submatrix(mu * other.m, mu * other.n, (*this)(mu, mu) * other);
+            });
+            *this = std::move(temp);
+        }
+    } else {
         Matrix temp(m * other.m, n * other.n);
         const auto indices = std::views::iota(size_t{0}, m * n);
         std::ranges::for_each(indices, [&](size_t idx) {
@@ -2353,16 +2661,8 @@ constexpr Matrix<T>& Matrix<T>::Kronecker_product(const Matrix& other) {
             temp.set_submatrix(mu * other.m, nu * other.n, (*this)(mu, nu) * other);
         });
         *this = std::move(temp);
-    } else if (type == details::Zero) {
-        *this = Matrix(m * other.m, n * other.n);
-    } else if (type == details::Diagonal || type == details::Identity) {
-        Matrix temp(m * other.m, n * other.n);
-        const auto indices = std::views::iota(size_t{0}, m);
-        std::for_each(indices.begin(), indices.end(), [this, &temp, &other](size_t mu) {
-            temp.set_submatrix(mu * other.m, mu * other.n, (*this)(mu, mu) * other);
-        });
-        *this = std::move(temp);
     }
+
     return *this;
 }
 
@@ -2370,23 +2670,29 @@ template <ComponentType T>
 Matrix<T>& Matrix<T>::swap_rows(size_t i, size_t j) {
     if (i >= m || j >= m) throw std::invalid_argument("trying to swap non-existent row(s)");
     if (i == j) return *this;
-    if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
+    if (type != details::Zero) {
         if (!transposed) {
             std::swap_ranges(data.begin() + i * n, data.begin() + (i + 1) * n, data.begin() + j * n);
         } else {
+            auto rank_backup = cache.template get<Rank>();
             const auto indices = std::views::iota(size_t{0}, n);
-            std::for_each(indices.begin(), indices.end(),
-                          [this, i, j](size_t nu) { std::swap((*this)(i, nu), (*this)(j, nu)); });
+            std::ranges::for_each(indices, [this, i, j](size_t nu) {
+                const auto temp = (*this)(i, nu);
+                set_component(i, nu, (*this)(j, nu));
+                set_component(j, nu, temp);
+            });
+            if (rank_backup) cache.template set<Rank>(*rank_backup);
         }
-        if (type == details::Vandermonde || type == details::Toeplitz) {
-            type = details::Generic;
-        }
-    } else if (type == details::Zero) {
-        // continue;
-    } else if (type == details::Diagonal || type == details::Identity) {
-        std::swap((*this)(i, i), (*this)(j, j));
         type = details::Generic;
     }
+    return *this;
+}
+
+template <ComponentType T>
+Matrix<T>& Matrix<T>::swap_columns(size_t i, size_t j) {
+    transpose();
+    swap_rows(i, j);
+    transpose();
     return *this;
 }
 
@@ -2397,22 +2703,28 @@ Matrix<T>& Matrix<T>::scale_row(const T& s, size_t i) {
     if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
         if (!transposed) {
             std::for_each(data.begin() + i * n, data.begin() + (i + 1) * n, [&s](T& x) { x *= s; });
+            if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
+
         } else {
             const auto indices = std::views::iota(size_t{0}, n);
-            std::for_each(indices.begin(), indices.end(), [this, i, &s](size_t nu) { (*this)(i, nu) *= s; });
-        }
-        if (type == details::Vandermonde || type == details::Toeplitz) {
-            type = details::Generic;
+            std::ranges::for_each(indices, [this, i, &s](size_t nu) { data[i + nu * m] *= s; });
+            if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
         }
     } else if (type == details::Zero) {
         // continue;
     } else if (type == details::Diagonal || type == details::Identity) {
-        (*this)(i, i) *= s;
-        if (type == details::Identity) {
-            type = details::Diagonal;
-        }
+        data[i * n + i] *= s;
+        if (type == details::Identity) type = details::Diagonal;
     }
-    if (s == T(0)) cache.template set<Rank>(0);
+    if (s == T(0)) cache.template invalidate<Rank>();
+    return *this;
+}
+
+template <ComponentType T>
+Matrix<T>& Matrix<T>::scale_column(const T& s, size_t i) {
+    transpose();
+    scale_row(s, i);
+    transpose();
     return *this;
 }
 
@@ -2420,26 +2732,32 @@ template <ComponentType T>
 Matrix<T>& Matrix<T>::add_scaled_row(const T& s, size_t i, size_t j) {
     if (i >= m || j >= m)
         throw std::invalid_argument("trying to add scaled row to other row, at least one of them is non-existent");
-    if (i == j || s == T(0)) return *this;
+    if (s == T(0)) return *this;
     if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
         if (!transposed) {
             std::transform(data.begin() + j * n, data.begin() + (j + 1) * n, data.begin() + i * n, data.begin() + j * n,
                            [&s](const T& target, const T& source) { return target + s * source; });
+            if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
         } else {
             const auto indices = std::views::iota(size_t{0}, n);
-            std::for_each(indices.begin(), indices.end(),
-                          [this, i, j, &s](size_t nu) { (*this)(j, nu) += s * (*this)(i, nu); });
-        }
-        if (type == details::Vandermonde || type == details::Toeplitz) {
-            type = details::Generic;
+            std::ranges::for_each(indices, [this, i, j, &s](size_t nu) { data[j + nu * m] += s * data[i + nu * m]; });
+            if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
         }
     } else if (type == details::Zero) {
         // continue;
     } else if (type == details::Diagonal || type == details::Identity) {
-        (*this)(j, i) += s * (*this)(i, i);
+        data[j * n + i] += data[i * n + i] * s;
         type = details::Generic;
     }
-    if (i == j) cache.invalidate();
+    if (i == j) cache.template invalidate<Rank>();
+    return *this;
+}
+
+template <ComponentType T>
+Matrix<T>& Matrix<T>::add_scaled_column(const T& s, size_t i, size_t j) {
+    transpose();
+    add_scaled_row(s, i, j);
+    transpose();
     return *this;
 }
 
@@ -2451,7 +2769,7 @@ Matrix<T>& Matrix<T>::delete_columns(const std::vector<size_t>& v) {
     // Careful: implicit sorting is ascending, so need to use reverse iterators in next loop!
     std::set<size_t> indices(v.begin(), v.end());
     for (size_t idx : indices) {
-        if (idx >= data.size()) throw std::invalid_argument("trying to delete non-existent column");
+        if (idx >= n) throw std::invalid_argument("trying to delete non-existent column");
     }
 
     for (auto it = indices.crbegin(); it != indices.crend(); ++it) {
@@ -2473,7 +2791,7 @@ Matrix<T>& Matrix<T>::delete_rows(const std::vector<size_t>& v) {
     // Careful: implicit sorting is ascending, so need to use reverse iterators in next loop!
     std::set<size_t> indices(v.begin(), v.end());
     for (size_t idx : indices) {
-        if (idx >= data.size()) throw std::invalid_argument("trying to delete non-existent row");
+        if (idx >= m) throw std::invalid_argument("trying to delete non-existent row");
     }
 
     for (auto it = indices.crbegin(); it != indices.crend(); ++it) {
@@ -2493,9 +2811,12 @@ template <ComponentType T>
 Matrix<T>& Matrix<T>::erase_component(size_t i, size_t j)
     requires FieldType<T>
 {
-    if (i >= m || j >= m) throw std::invalid_argument("trying to erase component at invalid index");
+    if (i >= m || j >= n) throw std::invalid_argument("trying to erase component at invalid index");
 
-    (*this)(i, j).erase();
+    if (!transposed)
+        data[i * n + j].erase();
+    else
+        data[i + j * m].erase();
 
     type = details::Generic;
     cache.invalidate();
@@ -2506,9 +2827,12 @@ template <ComponentType T>
 Matrix<T>& Matrix<T>::unerase_component(size_t i, size_t j)
     requires FieldType<T>
 {
-    if (i >= m || j >= m) throw std::invalid_argument("trying to un-erase component at invalid index");
+    if (i >= m || j >= n) throw std::invalid_argument("trying to un-erase component at invalid index");
 
-    (*this)(i, j).unerase();
+    if (!transposed)
+        data[i * n + j].unerase();
+    else
+        data[i + j * m].unerase();
 
     type = details::Generic;
     cache.invalidate();
@@ -2524,12 +2848,12 @@ Matrix<T>& Matrix<T>::erase_columns(const std::vector<size_t>& v)
     // Validate and create sorted set of unique indices (deduplicate)
     std::set<size_t> indices(v.begin(), v.end());
     for (size_t idx : indices) {
-        if (idx >= data.size()) throw std::invalid_argument("trying to erase non-existent column");
+        if (idx >= n) throw std::invalid_argument("trying to erase non-existent column");
     }
 
     // Apply erase using std::for_each
     std::for_each(indices.crbegin(), indices.crend(), [&](auto col) {
-        for (size_t row = 0; row < m; ++row) (*this)(row, col).erase();
+        for (size_t row = 0; row < m; ++row) erase_component(row, col);
     });
 
     type = details::Generic;
@@ -2546,12 +2870,12 @@ Matrix<T>& Matrix<T>::erase_rows(const std::vector<size_t>& v)
     // Validate and create sorted set of unique indices (deduplicate)
     std::set<size_t> indices(v.begin(), v.end());
     for (size_t idx : indices) {
-        if (idx >= data.size()) throw std::invalid_argument("trying to erase non-existent row");
+        if (idx >= m) throw std::invalid_argument("trying to erase non-existent row");
     }
 
     // Apply erase using std::for_each
     std::for_each(indices.crbegin(), indices.crend(), [&](auto row) {
-        for (size_t col = 0; col < n; ++col) (*this)(row, col).erase();
+        for (size_t col = 0; col < n; ++col) erase_component(row, col);
     });
 
     type = details::Generic;
@@ -2566,12 +2890,12 @@ Matrix<T>& Matrix<T>::unerase_columns(const std::vector<size_t>& v)
     // Validate and create sorted set of unique indices (deduplicate)
     std::set<size_t> indices(v.begin(), v.end());
     for (size_t idx : indices) {
-        if (idx >= data.size()) throw std::invalid_argument("trying to un-erase non-existent column");
+        if (idx >= n) throw std::invalid_argument("trying to un-erase non-existent column");
     }
 
     // Apply erase using std::for_each
     std::for_each(indices.crbegin(), indices.crend(), [&](auto col) {
-        for (size_t row = 0; row < m; ++row) (*this)(row, col).unerase();
+        for (size_t row = 0; row < m; ++row) unerase_component(row, col);
     });
 
     type = details::Generic;
@@ -2586,12 +2910,12 @@ Matrix<T>& Matrix<T>::unerase_rows(const std::vector<size_t>& v)
     // Validate and create sorted set of unique indices (deduplicate)
     std::set<size_t> indices(v.begin(), v.end());
     for (size_t idx : indices) {
-        if (idx >= data.size()) throw std::invalid_argument("trying to un-erase non-existent row");
+        if (idx >= m) throw std::invalid_argument("trying to un-erase non-existent row");
     }
 
     // Apply erase using std::for_each
     std::for_each(indices.crbegin(), indices.crend(), [&](auto row) {
-        for (size_t col = 0; col < n; ++col) (*this)(row, col).unerase();
+        for (size_t col = 0; col < n; ++col) unerase_component(row, col);
     });
 
     type = details::Generic;
@@ -2602,8 +2926,8 @@ Matrix<T>& Matrix<T>::unerase_rows(const std::vector<size_t>& v)
 #endif
 
 template <ComponentType T>
-constexpr Matrix<T>& Matrix<T>::reverse_rows() {
-    if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
+Matrix<T>& Matrix<T>::reverse_rows() {
+    if (type != details::Zero) {
         if (!transposed) {
             // For non-transposed matrices, reverse row-wise using STL
             const auto indices = std::views::iota(size_t{0}, m / 2);
@@ -2611,51 +2935,45 @@ constexpr Matrix<T>& Matrix<T>::reverse_rows() {
                 std::swap_ranges(data.begin() + mu * n, data.begin() + (mu + 1) * n, data.begin() + (m - 1 - mu) * n);
             });
         } else {
+            auto rank_backup = cache.template get<Rank>();
             const auto indices = std::views::iota(size_t{0}, m / 2 * n);
             std::ranges::for_each(indices, [this](size_t idx) {
                 size_t mu = idx / n;
                 size_t nu = idx % n;
-                std::swap((*this)(mu, nu), (*this)(m - 1 - mu, nu));
+                const auto temp = (*this)(mu, nu);
+                set_component(mu, nu, (*this)(m - 1 - mu, nu));
+                set_component(m - 1 - mu, nu, temp);
             });
+            if (rank_backup) cache.template set<Rank>(*rank_backup);
         }
-        if (type == details::Vandermonde || type == details::Toeplitz) {
-            type = details::Generic;
-        }
-    } else if (type == details::Zero) {
-        // continue;
-    } else if (type == details::Diagonal || type == details::Identity) {
-        const auto indices = std::views::iota(size_t{0}, m / 2);
-        std::ranges::for_each(indices, [this](size_t mu) { std::swap((*this)(mu, mu), (*this)(m - 1 - mu, mu)); });
         type = details::Generic;
     }
     return *this;
 }
 
 template <ComponentType T>
-constexpr Matrix<T>& Matrix<T>::reverse_columns() {
-    if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
+Matrix<T>& Matrix<T>::reverse_columns() {
+    if (type != details::Zero) {
         if (!transposed) {
             // For non-transposed matrices, reverse elements within each row
             const auto indices = std::views::iota(size_t{0}, m);
             std::ranges::for_each(
                 indices, [this](size_t mu) { std::reverse(data.begin() + mu * n, data.begin() + (mu + 1) * n); });
         } else {
+            auto rank_backup = cache.template get<Rank>();
             const auto indices = std::views::iota(size_t{0}, m * (n / 2));
             std::ranges::for_each(indices, [this](size_t idx) {
                 size_t mu = idx / (n / 2);
                 size_t nu = idx % (n / 2);
-                std::swap((*this)(mu, nu), (*this)(mu, n - 1 - nu));
+                const auto temp = (*this)(mu, nu);
+                set_component(mu, nu, (*this)(mu, n - 1 - nu));
+                set_component(mu, n - 1 - nu, temp);
             });
+            if (rank_backup) cache.template set<Rank>(*rank_backup);
         }
-        if (type == details::Toeplitz) {
+        if (type != details::Vandermonde) {
             type = details::Generic;
         }
-    } else if (type == details::Zero) {
-        // continue;
-    } else if (type == details::Diagonal || type == details::Identity) {
-        const auto indices = std::views::iota(size_t{0}, n / 2);
-        std::ranges::for_each(indices, [this](size_t nu) { std::swap((*this)(nu, nu), (*this)(nu, n - 1 - nu)); });
-        type = details::Generic;
     }
     return *this;
 }
@@ -2669,7 +2987,7 @@ constexpr Matrix<T>& Matrix<T>::fill(const T& s) noexcept {
         type = details::Generic;
 
     if (s != T(0))
-        cache.template set<Rank>(std::min(m, n));
+        cache.template set<Rank>(1);
     else
         cache.template set<Rank>(0);
     return *this;
@@ -2680,7 +2998,7 @@ constexpr Matrix<T>& Matrix<T>::transpose() {
     if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
         transposed = !transposed;
         std::swap(m, n);
-        if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
+        if (type == details::Vandermonde) type = details::Generic;
     } else if (type == details::Zero) {
         std::swap(m, n);
     } else if (type == details::Diagonal || type == details::Identity) {
@@ -2698,16 +3016,15 @@ Matrix<T>& Matrix<T>::ref(size_t* rank)
         size_t k = 0;
 
         // Branch ONCE on transpose flag - dispatch to optimized elimination kernels
-        if (!this->transposed) {
+        if (!this->transposed)
             h = ref_elimination_kernel<false>(this->data.data(), m, n, h, k);
-        } else {
+        else
             h = ref_elimination_kernel<true>(this->data.data(), m, n, h, k);
-        }
+
         cache.template set<Rank>(h);
         if (rank != nullptr) *rank = h;
-        if (type == details::Toeplitz) {
-            type = details::Generic;
-        }
+        if (type == details::Toeplitz) type = details::Generic;
+
     } else if (type == details::Vandermonde) {
         // For Vandermonde matrices, calculate RREF (as special case of REF)
         return rref(rank);
@@ -2748,17 +3065,17 @@ Matrix<T>& Matrix<T>::rref(size_t* rank)
         this->ref(&r);
 
         // Branch ONCE on transpose flag - dispatch to optimized backward elimination kernels
-        if (!this->transposed) {
+        if (!this->transposed)
             rref_backward_elimination_kernel<false>(this->data.data(), m, n, r);
-        } else {
+        else
             rref_backward_elimination_kernel<true>(this->data.data(), m, n, r);
-        }
 
         cache.template set<Rank>(r);
         if (rank != nullptr) *rank = r;
-        if (type == details::Toeplitz) {
+        if (r == m && m == n)
+            type = details::Identity;
+        else if (type == details::Toeplitz)
             type = details::Generic;
-        }
     } else if (type == details::Vandermonde) {
         if (m == n) {
             // Case 1: Square details::Vandermonde -> I
@@ -2797,7 +3114,7 @@ Matrix<T>& Matrix<T>::rref(size_t* rank)
             if ((*this)(i, i) == T(0)) {
                 zero_rows.push_back(i);
             } else {
-                (*this)(i, i) = T(1);  // Normalize to 1 for RREF
+                set_component(i, i, T(1));  // Normalize to 1 for RREF
                 ++r;
             }
         }
@@ -2806,6 +3123,8 @@ Matrix<T>& Matrix<T>::rref(size_t* rank)
             this->delete_rows(zero_rows);
             this->vertical_join(ZeroMatrix<T>(zero_rows.size(), n));
             type = details::Generic;
+        } else {
+            type = details::Identity;
         }
 
         cache.template set<Rank>(r);
@@ -2852,7 +3171,7 @@ Matrix<T>& Matrix<T>::invert()
         std::ranges::for_each(indices, [this, &Lagrange_polynomials](size_t idx) {
             size_t i = idx / m;
             size_t j = idx % m;
-            (*this)(i, j) = Lagrange_polynomials[i][j];
+            set_component(i, j, Lagrange_polynomials[i][j]);
         });
     } else if (type == details::Zero) {
         throw std::invalid_argument("trying to invert a non-invertible matrix/a zero matrix");
@@ -2867,7 +3186,7 @@ Matrix<T>& Matrix<T>::invert()
         }
 
         // Invert all diagonal elements
-        std::ranges::for_each(diag_indices, [this](size_t mu) { (*this)(mu, mu) = T(1) / (*this)(mu, mu); });
+        std::ranges::for_each(diag_indices, [this](size_t mu) { data[mu * n + mu] = T(1) / data[mu * n + mu]; });
     } else if (type == details::Identity) {
         // continue;
     }
@@ -2888,10 +3207,65 @@ constexpr Vector<S> Matrix<T>::as_vector() const
     Tp.transpose();
     auto i_indices = std::views::iota(size_t{0}, get_n());
     std::ranges::for_each(i_indices, [&](size_t i) {
-        auto temp = Tp.get_row(i);
+        const auto temp = Tp.get_row(i);
         res.set_component(i, S(temp));
     });
     return res;
+}
+
+template <ComponentType T>
+Vector<T> Matrix<T>::to_vector() const {
+    const size_t m = get_m();
+    const size_t n = get_n();
+
+    Vector<T> v(m * n);
+
+    size_t k = 0;
+    for (size_t i = 0; i < m; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            v.set_component(k, (*this)(i, j));
+            ++k;
+        }
+    }
+    return v;
+}
+
+template <ComponentType T>
+void Matrix<T>::export_as_ppm(const std::string& filename) const
+    requires FiniteFieldType<T> && (T::get_size() <= 64)
+{
+    std::ofstream file;
+    file.open(filename);
+
+    file << "P3" << std::endl;  // PPM with P3 format
+    file << get_n() << " " << get_m() << std::endl;
+    file << 255 << std::endl;
+
+    for (size_t i = 0; i < get_m(); ++i) {
+        for (size_t j = 0; j < get_n(); ++j) {
+#ifdef CECCO_ERASURE_SUPPORT
+            if ((*this)(i, j).is_erased()) {
+                file << std::setw(3) << 255 << " " << std::setw(3) << 0 << " " << std::setw(3) << 0 << "  ";
+                if (j == get_n() - 1) file << std::endl;
+                continue;
+            }
+#endif
+
+            const auto label = (*this)(i, j).get_label();
+
+            const size_t a = 63 - 63 * static_cast<double>(label) / (T::get_size() - 1);
+
+            const uint8_t r = colormap[a][0];
+            const uint8_t g = colormap[a][1];
+            const uint8_t b = colormap[a][2];
+
+            file << std::setw(3) << static_cast<int>(r) << " " << std::setw(3) << static_cast<int>(g) << " "
+                 << std::setw(3) << static_cast<int>(b) << "  ";
+        }
+        file << std::endl;
+    }
+
+    file.close();
 }
 
 template <ComponentType T>
@@ -2960,7 +3334,7 @@ template <ComponentType T>
 constexpr Matrix<T> operator-(const Matrix<T>& lhs, Matrix<T>&& rhs) {
     Matrix<T> res(-std::move(rhs));
     res += lhs;
-    return -res;
+    return res;
 }
 
 template <ComponentType T>
@@ -3080,17 +3454,15 @@ Matrix<T> set_component(auto&& M, size_t i, size_t j, const T& c)
 }
 
 template <ComponentType T>
-Matrix<T> get_submatrix(const Matrix<T>& M, size_t i, size_t j) {
+Matrix<T> get_submatrix(const Matrix<T>& M, size_t i, size_t j, size_t h, size_t w) {
     Matrix<T> res(M);
-    res.get_submatrix(i, j);
-    return res;
+    return res.get_submatrix(i, j, h, w);
 }
 
 template <ComponentType T>
-Matrix<T> get_submatrix(Matrix<T>&& M, size_t i, size_t j) {
+Matrix<T> get_submatrix(Matrix<T>&& M, size_t i, size_t j, size_t h, size_t w) {
     Matrix<T> res(std::move(M));
-    res.get_submatrix(i, j);
-    return res;
+    return res.get_submatrix(i, j, h, w);
 }
 
 template <ComponentType T>
@@ -3150,42 +3522,42 @@ Matrix<T> vertical_join(Matrix<T>&& lhs, Matrix<T>&& rhs) {
 }
 
 template <ComponentType T>
-constexpr Matrix<T> diagonal_join(const Matrix<T>& lhs, const Matrix<T>& rhs) {
+Matrix<T> diagonal_join(const Matrix<T>& lhs, const Matrix<T>& rhs) {
     Matrix<T> res(lhs);
     res.diagonal_join(rhs);
     return res;
 }
 
 template <ComponentType T>
-constexpr Matrix<T> diagonal_join(Matrix<T>&& lhs, const Matrix<T>& rhs) {
+Matrix<T> diagonal_join(Matrix<T>&& lhs, const Matrix<T>& rhs) {
     Matrix<T> res(std::move(lhs));
     res.diagonal_join(rhs);
     return res;
 }
 
 template <ComponentType T>
-constexpr Matrix<T> diagonal_join(Matrix<T>&& lhs, Matrix<T>&& rhs) {
+Matrix<T> diagonal_join(Matrix<T>&& lhs, Matrix<T>&& rhs) {
     Matrix<T> res(std::move(lhs));
     res.diagonal_join(std::move(rhs));
     return res;
 }
 
 template <ComponentType T>
-constexpr Matrix<T> Kronecker_product(const Matrix<T>& lhs, const Matrix<T>& rhs) {
+Matrix<T> Kronecker_product(const Matrix<T>& lhs, const Matrix<T>& rhs) {
     Matrix<T> res(lhs);
     res.Kronecker_product(rhs);
     return res;
 }
 
 template <ComponentType T>
-constexpr Matrix<T> Kronecker_product(Matrix<T>&& lhs, const Matrix<T>& rhs) {
+Matrix<T> Kronecker_product(Matrix<T>&& lhs, const Matrix<T>& rhs) {
     Matrix<T> res(std::move(lhs));
     res.Kronecker_product(rhs);
     return res;
 }
 
 template <ComponentType T>
-constexpr Matrix<T> Kronecker_product(Matrix<T>&& lhs, Matrix<T>&& rhs) {
+Matrix<T> Kronecker_product(Matrix<T>&& lhs, Matrix<T>&& rhs) {
     Matrix<T> res(std::move(lhs));
     res.Kronecker_product(std::move(rhs));
     return res;
@@ -3199,9 +3571,23 @@ Matrix<T> swap_rows(const Matrix<T>& M, size_t i, size_t j) {
 }
 
 template <ComponentType T>
+Matrix<T> swap_columns(const Matrix<T>& M, size_t i, size_t j) {
+    Matrix<T> res(M);
+    res.swap_columns(i, j);
+    return res;
+}
+
+template <ComponentType T>
 Matrix<T> swap_rows(Matrix<T>&& M, size_t i, size_t j) {
     Matrix<T> res(std::move(M));
     res.swap_rows(i, j);
+    return res;
+}
+
+template <ComponentType T>
+Matrix<T> swap_columns(Matrix<T>&& M, size_t i, size_t j) {
+    Matrix<T> res(std::move(M));
+    res.swap_columns(i, j);
     return res;
 }
 
@@ -3213,9 +3599,23 @@ Matrix<T> scale_row(const Matrix<T>& M, const T& s, size_t i) {
 }
 
 template <ComponentType T>
+Matrix<T> scale_column(const Matrix<T>& M, const T& s, size_t i) {
+    Matrix<T> res(M);
+    res.scale_column(s, i);
+    return res;
+}
+
+template <ComponentType T>
 Matrix<T> scale_row(Matrix<T>&& M, const T& s, size_t i) {
     Matrix<T> res(std::move(M));
     res.scale_row(s, i);
+    return res;
+}
+
+template <ComponentType T>
+Matrix<T> scale_column(Matrix<T>&& M, const T& s, size_t i) {
+    Matrix<T> res(std::move(M));
+    res.scale_column(s, i);
     return res;
 }
 
@@ -3227,9 +3627,23 @@ Matrix<T> add_scaled_row(const Matrix<T>& M, const T& s, size_t i, size_t j) {
 }
 
 template <ComponentType T>
+Matrix<T> add_scaled_column(const Matrix<T>& M, const T& s, size_t i, size_t j) {
+    Matrix<T> res(M);
+    res.add_scaled_column(s, i, j);
+    return res;
+}
+
+template <ComponentType T>
 Matrix<T> add_scaled_row(Matrix<T>&& M, const T& s, size_t i, size_t j) {
     Matrix<T> res(std::move(M));
     res.add_scaled_row(s, i, j);
+    return res;
+}
+
+template <ComponentType T>
+Matrix<T> add_scaled_column(Matrix<T>&& M, const T& s, size_t i, size_t j) {
+    Matrix<T> res(std::move(M));
+    res.add_scaled_column(s, i, j);
     return res;
 }
 
@@ -3241,9 +3655,23 @@ Matrix<T> add_row(const Matrix<T>& M, size_t i, size_t j) {
 }
 
 template <ComponentType T>
+Matrix<T> add_column(const Matrix<T>& M, size_t i, size_t j) {
+    Matrix<T> res(M);
+    res.add_column(i, j);
+    return res;
+}
+
+template <ComponentType T>
 Matrix<T> add_row(Matrix<T>&& M, size_t i, size_t j) {
     Matrix<T> res(std::move(M));
     res.add_row(i, j);
+    return res;
+}
+
+template <ComponentType T>
+Matrix<T> add_column(Matrix<T>&& M, size_t i, size_t j) {
+    Matrix<T> res(std::move(M));
+    res.add_column(i, j);
     return res;
 }
 
@@ -3264,14 +3692,14 @@ constexpr Matrix<T> delete_columns(Matrix<T>&& lhs, const std::vector<size_t>& v
 template <ComponentType T>
 constexpr Matrix<T> delete_column(const Matrix<T>& lhs, size_t i) {
     Matrix<T> res(lhs);
-    res.delete_colum(i);
+    res.delete_column(i);
     return res;
 }
 
 template <ComponentType T>
 constexpr Matrix<T> delete_column(Matrix<T>&& lhs, size_t i) {
     Matrix<T> res(std::move(lhs));
-    res.delete_colum(i);
+    res.delete_column(i);
     return res;
 }
 
@@ -3320,7 +3748,7 @@ constexpr Matrix<T> erase_component(Matrix<T>&& lhs, size_t i, size_t j) {
 }
 
 template <ComponentType T>
-constexpr Matrix<T> unerase_column(const Matrix<T>& lhs, size_t i, size_t j) {
+constexpr Matrix<T> unerase_component(const Matrix<T>& lhs, size_t i, size_t j) {
     Matrix<T> res(lhs);
     res.unerase_component(i, j);
     return res;
@@ -3350,14 +3778,14 @@ constexpr Matrix<T> erase_columns(Matrix<T>&& lhs, const std::vector<size_t>& v)
 template <ComponentType T>
 constexpr Matrix<T> erase_column(const Matrix<T>& lhs, size_t i) {
     Matrix<T> res(lhs);
-    res.erase_colum(i);
+    res.erase_column(i);
     return res;
 }
 
 template <ComponentType T>
 constexpr Matrix<T> erase_column(Matrix<T>&& lhs, size_t i) {
     Matrix<T> res(std::move(lhs));
-    res.erase_colum(i);
+    res.erase_column(i);
     return res;
 }
 
@@ -3378,14 +3806,14 @@ constexpr Matrix<T> unerase_columns(Matrix<T>&& lhs, const std::vector<size_t>& 
 template <ComponentType T>
 constexpr Matrix<T> unerase_column(const Matrix<T>& lhs, size_t i) {
     Matrix<T> res(lhs);
-    res.unerase_colum(i);
+    res.unerase_column(i);
     return res;
 }
 
 template <ComponentType T>
 constexpr Matrix<T> unerase_column(Matrix<T>&& lhs, size_t i) {
     Matrix<T> res(std::move(lhs));
-    res.unerase_colum(i);
+    res.unerase_column(i);
     return res;
 }
 
@@ -3406,14 +3834,14 @@ constexpr Matrix<T> erase_rows(Matrix<T>&& lhs, const std::vector<size_t>& v) {
 template <ComponentType T>
 constexpr Matrix<T> erase_row(const Matrix<T>& lhs, size_t i) {
     Matrix<T> res(lhs);
-    res.erase_colum(i);
+    res.erase_row(i);
     return res;
 }
 
 template <ComponentType T>
 constexpr Matrix<T> erase_row(Matrix<T>&& lhs, size_t i) {
     Matrix<T> res(std::move(lhs));
-    res.erase_colum(i);
+    res.erase_row(i);
     return res;
 }
 
@@ -3434,42 +3862,42 @@ constexpr Matrix<T> unerase_rows(Matrix<T>&& lhs, const std::vector<size_t>& v) 
 template <ComponentType T>
 constexpr Matrix<T> unerase_row(const Matrix<T>& lhs, size_t i) {
     Matrix<T> res(lhs);
-    res.unerase_colum(i);
+    res.unerase_row(i);
     return res;
 }
 
 template <ComponentType T>
 constexpr Matrix<T> unerase_row(Matrix<T>&& lhs, size_t i) {
     Matrix<T> res(std::move(lhs));
-    res.unerase_colum(i);
+    res.unerase_row(i);
     return res;
 }
 
 #endif
 
 template <ComponentType T>
-constexpr Matrix<T> reverse_rows(const Matrix<T>& M) {
+Matrix<T> reverse_rows(const Matrix<T>& M) {
     Matrix<T> res(M);
     res.reverse_rows();
     return res;
 }
 
 template <ComponentType T>
-constexpr Matrix<T> reverse_rows(Matrix<T>&& M) noexcept {
+Matrix<T> reverse_rows(Matrix<T>&& M) noexcept {
     Matrix<T> res(std::move(M));
     res.reverse_rows();
     return res;
 }
 
 template <ComponentType T>
-constexpr Matrix<T> reverse_columns(const Matrix<T>& M) {
+Matrix<T> reverse_columns(const Matrix<T>& M) {
     Matrix<T> res(M);
     res.reverse_columns();
     return res;
 }
 
 template <ComponentType T>
-constexpr Matrix<T> reverse_columns(Matrix<T>&& M) noexcept {
+Matrix<T> reverse_columns(Matrix<T>&& M) noexcept {
     Matrix<T> res(std::move(M));
     res.reverse_columns();
     return res;
@@ -3529,13 +3957,6 @@ Matrix<T> inverse(Matrix<T>&& M) {
     Matrix<T> res(std::move(M));
     res.invert();
     return res;
-}
-
-template <ComponentType T, FiniteFieldType S>
-    requires FiniteFieldType<T> && ExtensionOf<T, S> && (!std::is_same_v<T, S>)
-Vector<S> as_vector(const Matrix<T>& M) {
-    Matrix<T> res(M);
-    return res.template as_vector<S>();
 }
 
 /**
@@ -3731,7 +4152,7 @@ template <ComponentType T>
 constexpr Matrix<T> IdentityMatrix(size_t m) {
     auto res = Matrix<T>(m, m);
     const auto indices = std::views::iota(size_t{0}, m);
-    std::for_each(indices.begin(), indices.end(), [&res](size_t i) { res(i, i) = T(1); });
+    std::ranges::for_each(indices, [&res](size_t i) { res.set_component(i, i, T(1)); });
     res.type = details::Identity;
     return res;
 }
@@ -3783,7 +4204,7 @@ constexpr Matrix<T> DiagonalMatrix(const Vector<T>& v) {
     const size_t m = v.get_n();
     Matrix<T> res(m, m);
     const auto indices = std::views::iota(size_t{0}, m);
-    std::for_each(indices.begin(), indices.end(), [&res, &v](size_t i) { res(i, i) = v[i]; });
+    std::ranges::for_each(indices, [&res, &v](size_t i) { res.set_component(i, i, v[i]); });
     res.type = details::Diagonal;
     return res;
 }
@@ -3819,12 +4240,12 @@ constexpr Matrix<T> ToeplitzMatrix(const Vector<T>& v, size_t m, size_t n) {
 
     // Fill first column: v[0] to v[m-1] in reverse order
     auto row_indices = std::views::iota(size_t{0}, m);
-    std::ranges::for_each(row_indices, [&](size_t i) { res(m - 1 - i, 0) = v[i]; });
+    std::ranges::for_each(row_indices, [&](size_t i) { res.set_component(m - 1 - i, 0, v[i]); });
 
     // Fill first row: v[m-1] to v[m+n-2]
     if (n > 1) {
         auto col_indices = std::views::iota(size_t{1}, n);
-        std::ranges::for_each(col_indices, [&](size_t j) { res(0, j) = v[m - 1 + j]; });
+        std::ranges::for_each(col_indices, [&](size_t j) { res.set_component(0, j, v[m - 1 + j]); });
     }
 
     // Fill remaining elements using diagonal copy pattern
@@ -3832,8 +4253,7 @@ constexpr Matrix<T> ToeplitzMatrix(const Vector<T>& v, size_t m, size_t n) {
     std::ranges::for_each(i_indices, [&](size_t i) {
         if (n > 1) {
             auto col_indices = std::views::iota(size_t{1}, n);
-            std::ranges::for_each(col_indices,
-                                  [&](size_t j) { res(i, j) = const_cast<const Matrix<T>&>(res)(i - 1, j - 1); });
+            std::ranges::for_each(col_indices, [&](size_t j) { res.set_component(i, j, res(i - 1, j - 1)); });
         }
     });
     res.type = details::Toeplitz;
@@ -3906,7 +4326,7 @@ constexpr Matrix<T> VandermondeMatrix(const Vector<T>& v, size_t m) {
         std::fill(res.data.begin(), res.data.begin() + n, T(1));
     } else {
         const auto indices = std::views::iota(size_t{0}, n);
-        std::for_each(indices.begin(), indices.end(), [&](size_t i) { res(0, i) = T(1); });
+        std::ranges::for_each(indices, [&](size_t i) { res.set_component(0, i, T(1)); });
     }
 
     if (m > 1) {
@@ -3915,14 +4335,14 @@ constexpr Matrix<T> VandermondeMatrix(const Vector<T>& v, size_t m) {
             std::copy(v.data.begin(), v.data.end(), res.data.begin() + n);
         } else {
             const auto indices = std::views::iota(size_t{0}, n);
-            std::ranges::for_each(indices, [&](size_t i) { res(1, i) = v[i]; });
+            std::ranges::for_each(indices, [&](size_t i) { res.set_component(1, i, v[i]); });
         }
 
-        // Remaining rows: compute powers using std::for_each
+        // Remaining rows: compute powers using std::ranges::for_each
         auto j_indices = std::views::iota(size_t{2}, m);
         std::ranges::for_each(j_indices, [&](size_t j) {
             const auto indices = std::views::iota(size_t{0}, n);
-            std::ranges::for_each(indices, [&](size_t i) { res(j, i) = res(j - 1, i) * v[i]; });
+            std::ranges::for_each(indices, [&](size_t i) { res.set_component(j, i, res(j - 1, i) * v[i]); });
         });
     }
     res.type = details::Vandermonde;
@@ -3951,7 +4371,7 @@ constexpr Matrix<T> UpperShiftMatrix(size_t m) {
     Matrix<T> res(m, m);
     if (m > 1) {
         const auto indices = std::views::iota(size_t{0}, m - 1);
-        std::ranges::for_each(indices, [&](size_t i) { res(i, i + 1) = T(1); });
+        std::ranges::for_each(indices, [&](size_t i) { res.set_component(i, i + 1, T(1)); });
     }
     return res;
 }
@@ -4005,7 +4425,7 @@ constexpr Matrix<T> CompanionMatrix(const Polynomial<T>& poly) {
 
     // Fill last column with negated polynomial coefficients
     const auto indices = std::views::iota(size_t{0}, poly.get_degree());
-    std::ranges::for_each(indices, [&](size_t i) { res(i, poly.get_degree() - 1) = -poly[i]; });
+    std::ranges::for_each(indices, [&](size_t i) { res.set_component(i, poly.get_degree() - 1, -poly[i]); });
 
     return res;
 }

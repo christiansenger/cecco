@@ -2,11 +2,11 @@
  * @file vectors.hpp
  * @brief Vector arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.3
- * @date 2025
+ * @version 2.1.2
+ * @date 2026
  *
  * @copyright
- * Copyright (c) 2025, Christian Senger <senger@inue.uni-stuttgart.de>
+ * Copyright (c) 2026, Christian Senger <senger@inue.uni-stuttgart.de>
  *
  * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
  * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
@@ -142,8 +142,7 @@ double dE(const Vector<std::complex<double>>& lhs, const Vector<std::complex<dou
  * @note Vector operations require compatible dimensions. Dimension mismatches
  *          throw std::invalid_argument exceptions.
  *
- * @note Additional methods available via concept constraints:
- *       - **Finite fields only**: as_integer(), as_matrix()
+ * @note Additional methods:
  *       - **Finite fields and signed integers**: wH(), dH() (Hamming weight/distance)
  *
  * @see Concept @ref CECCO::ComponentType for supported component types
@@ -181,7 +180,7 @@ class Vector {
      *
      * @throws std::bad_alloc if memory allocation fails
      */
-    Vector(size_t n) : data(n) {}
+    explicit Vector(size_t n) : data(n) {}
 
     /**
      * @brief Constructs a vector with all components set to a specific value
@@ -231,7 +230,7 @@ class Vector {
      * @param mat Matrix over subfield S to convert to vector over extension field T
      *
      * Constructs a vector by interpreting each column of the matrix as an element
-     * of the extension field T. Requires that T::get_m() == mat.get_m().
+     * of the extension field T. Requires that T().template as_vector<S>().get_n() == mat.get_m().
      *
      * @throws std::invalid_argument if matrix dimensions are incompatible with field structure
      * @throws std::bad_alloc if memory allocation fails
@@ -263,10 +262,10 @@ class Vector {
      *
      * @param poly Polynomial whose coefficients become vector components
      *
-     * Creates a vector where componenti contains the coefficient of x^i in the polynomial.
+     * Creates a vector where component i contains the coefficient of x^i in the polynomial.
      * The vector length equals poly.degree() + 1.
      *
-     * @note If you need cross-field polynomial <-> vector conversion then first convert poly into the the other field.
+     * @note If you need cross-field polynomial <-> vector conversion then first convert poly into the other field.
      *
      * @throws std::bad_alloc if memory allocation fails
      */
@@ -405,7 +404,7 @@ class Vector {
      *
      * @throws std::invalid_argument if attempting to divide by zero
      *
-     * @warning Reliable results ( (v / s) *  s == v for a vector v and nonzero scalar s are only guaranteed in case T
+     * @warning Reliable results ((v / s) *  s == v)for a vector v and nonzero scalar s are only guaranteed in case T
      * fulfills concept FieldType<T>
      */
     Vector& operator/=(const T& s);
@@ -469,7 +468,7 @@ class Vector {
      *
      * @note Only for types fulfilling CECCO::ReliablyComparableType.
      */
-    constexpr bool is_pairwisedistinct() const
+    constexpr bool is_pairwise_distinct() const
         requires ReliablyComparableType<T>;
 
     /**
@@ -492,7 +491,7 @@ class Vector {
      *
      * @return Length of burst
      *
-     * For a vector with first non-zero componentat position L and last at position R,
+     * For a vector with first non-zero component at position L and last at position R,
      * returns R - L + 1. Returns 0 for the empty vector and the zero vector.
      */
     constexpr size_t burst_length() const noexcept;
@@ -514,17 +513,6 @@ class Vector {
      */
 
     /**
-     * @brief Set component value by copy
-     *
-     * @param i Index of component to modify (0-based)
-     * @param c New value to assign
-     * @return Reference to this vector after setting component
-     *
-     * Updates the componentat position i.
-     *
-     * @throws std::invalid_argument if index is out of bounds
-     */
-    /**
      * @brief Set component value using perfect forwarding
      *
      * @tparam U Type that can be converted to T
@@ -545,9 +533,9 @@ class Vector {
      * @brief Access component by index (const version)
      *
      * @param i Index of component to access
-     * @return Const reference to the componentat position i
+     * @return Const reference to the component at position i
      *
-     * Provides safe, bounds-checked (read-opnly) access to vector components.
+     * Provides safe, bounds-checked (read-only) access to vector components.
      *
      * @throws std::invalid_argument if index is out of bounds
      */
@@ -607,47 +595,83 @@ class Vector {
     Vector& set_subvector(Vector&& v, size_t i);
 
     /**
-     * @brief Append another vector to the end
+     * @brief Append another vector to the end of this vector
      *
-     * @param rhs Vector to append (on the right)
+     * @param rhs Vector to append
      * @return Reference to this vector after appending
      *
-     * Extends this vector by concatenating rhs to the end.
-     * The result has length get_n() + rhs.get_n().
+     * Concatenates rhs to the end: [this | rhs].
      *
      * @throws std::bad_alloc if memory allocation fails
      */
+    Vector& append(const Vector& rhs);
+
     /**
-     * @brief Append another vector to the end using perfect forwarding
+     * @brief Append another vector to the end of this vector (move version)
      *
-     * @tparam U Type that can be converted to Vector
-     * @param rhs Vector to append (on the right)
+     * @param rhs Vector to move-append
      * @return Reference to this vector after appending
      *
-     * Extends this vector by concatenating rhs to the end.
-     * Handles both lvalue and rvalue references optimally.
+     * More efficient version for temporary vectors.
+     *
+     * @throws std::bad_alloc if memory allocation fails
+     */
+    Vector& append(Vector&& rhs);
+
+    /**
+     * @brief Append a compatible object after converting it to a vector
+     *
+     * @tparam U Type constructible as Vector<T>
+     * @param rhs Object to convert and append
+     * @return Reference to this vector after appending
+     *
+     * Converts rhs to Vector<T> via its constructor, then appends.
      *
      * @throws std::bad_alloc if memory allocation fails
      */
     template <typename U>
     Vector& append(U&& rhs)
-        requires std::convertible_to<std::decay_t<U>, Vector>;
+        requires std::constructible_from<Vector<T>, U>;
 
     /**
-     * @brief Prepend another vector to the beginning using perfect forwarding
+     * @brief Prepend another vector to the beginning of this vector
      *
-     * @tparam U Type that can be converted to Vector
-     * @param lhs Vector to prepend (on the left)
+     * @param rhs Vector to prepend
      * @return Reference to this vector after prepending
      *
-     * Extends this vector by concatenating lhs to the beginning.
-     * Handles both lvalue and rvalue references optimally.
+     * Concatenates rhs before this vector: [rhs | this].
      *
      * @throws std::bad_alloc if memory allocation fails
      */
+    Vector& prepend(const Vector& rhs);
+
+    /**
+     * @brief Prepend another vector to the beginning of this vector (move version)
+     *
+     * @param rhs Vector to move-prepend
+     * @return Reference to this vector after prepending
+     *
+     * More efficient version for temporary vectors.
+     *
+     * @throws std::bad_alloc if memory allocation fails
+     */
+    Vector& prepend(Vector&& rhs);
+
+    /**
+     * @brief Prepend a compatible object after converting it to a vector
+     *
+     * @tparam U Type constructible as Vector<T>
+     * @param lhs Object to convert and prepend
+     * @return Reference to this vector after prepending
+     *
+     * Converts lhs to Vector<T> via its constructor, then prepends.
+     *
+     * @throws std::bad_alloc if memory allocation fails
+     *
+     */
     template <typename U>
     Vector& prepend(U&& lhs)
-        requires std::convertible_to<std::decay_t<U>, Vector>;
+        requires std::constructible_from<Vector<T>, U>;
 
     /**
      * @brief Delete specified components from the vector
@@ -670,7 +694,7 @@ class Vector {
      *
      * Removes component at the specified index, compacting the remaining components.
      *
-     * @throws std::invalid_argument if any index index iis out of bounds
+     * @throws std::invalid_argument if any index i is out of bounds
      * @throws std::bad_alloc if memory allocation fails during compaction
      */
     Vector& delete_component(size_t i) { return delete_components({i}); }
@@ -710,7 +734,7 @@ class Vector {
      *
      * @note Only available for field types (since erasure flag/erase() is required)
      *
-     * @throws std::invalid_argument if any index in v is out of bounds
+     * @throws std::invalid_argument if index i is out of bounds
      */
     Vector& erase_component(size_t i)
         requires FieldType<T>
@@ -734,16 +758,16 @@ class Vector {
         requires FieldType<T>;
 
     /**
-     * @brief Un-erases specified component from the vector (flags it as erasure)
+     * @brief Un-erases specified component from the vector (removes erasure flag)
      *
      * @param i Index of component to un-erase
      * @return Reference to this vector after un-erasing
      *
-     * Erases component at the specified index and sets it to 0.
+     * Un-erases component at the specified index and sets it to 0.
      *
      * @note Only available for field types (since erasure flag/unerase() is required)
      *
-     * @throws std::invalid_argument if any index in v is out of bounds
+     * @throws std::invalid_argument if index i is out of bounds
      */
     Vector& unerase_component(size_t i)
         requires FieldType<T>
@@ -791,7 +815,7 @@ class Vector {
      * @param i Number of positions to rotate left
      * @return Reference to this vector after rotation
      *
-     * Performs circular left shift: componentat position j moves to position (j-i) mod n.
+     * Performs circular left shift: component at position j moves to position (j-i) mod n.
      */
     constexpr Vector& rotate_left(size_t i) noexcept;
 
@@ -801,7 +825,7 @@ class Vector {
      * @param i Number of positions to rotate right
      * @return Reference to this vector after rotation
      *
-     * Performs circular right shift: componentat position j moves to position (j+i) mod n.
+     * Performs circular right shift: component at position j moves to position (j+i) mod n.
      * Equivalent to rotate_left(get_n() - i).
      */
     constexpr Vector& rotate_right(size_t i) noexcept;
@@ -821,7 +845,7 @@ class Vector {
      * @param value Value to assign to all components
      * @return Reference to this vector after filling
      *
-     * Sets every component to the specified value..
+     * Sets every component to the specified value.
      */
     constexpr Vector& fill(const T& value) noexcept;
 
@@ -870,7 +894,7 @@ class Vector {
      * @tparam S Subfield type satisfying SubfieldOf<T, S>
      * @return Matrix where each column represents one vector component over the subfield
      *
-     * Converts each extension field componentto its vector representation over the subfield S,
+     * Converts each extension field component to its vector representation over the subfield S,
      * arranging these as columns of a matrix.
      *
      * @throws std::bad_alloc if memory allocation fails
@@ -880,8 +904,27 @@ class Vector {
      * has the erasure flag.
      */
     template <FiniteFieldType S>
-    Matrix<S> as_matrix() const noexcept
+    Matrix<S> as_matrix() const
         requires FiniteFieldType<T> && SubfieldOf<T, S> && (!std::is_same_v<T, S>);
+
+    Matrix<T> to_matrix(size_t m) const {
+        const double n = static_cast<double>(get_n()) / m;
+        if (n != std::ceil(n))
+            throw std::invalid_argument(std::string("Cannot convert vector into a matrix with ") + std::to_string(m) +
+                                        std::string("rows, number of rows m (") + std::to_string(m) +
+                                        std::string(") is not a divisor of vector length n (") +
+                                        std::to_string(get_n()) + ")!");
+
+        Matrix<T> M(m, static_cast<size_t>(n));
+        size_t k = 0;
+        for (size_t i = 0; i < m; ++i) {
+            for (size_t j = 0; j < static_cast<size_t>(n); ++j) {
+                M.set_component(i, j, data[k]);
+                ++k;
+            }
+        }
+        return M;
+    }
 
     /** @} */
 
@@ -945,7 +988,6 @@ constexpr Vector<T>& Vector<T>::operator=(const Vector<T>& rhs) {
     if (this == &rhs) return *this;
     data = rhs.data;
     cache = rhs.cache;
-    // std::cout << "vector copy assignment" << std::endl;
     return *this;
 }
 
@@ -954,7 +996,6 @@ constexpr Vector<T>& Vector<T>::operator=(Vector<T>&& rhs) noexcept {
     if (this == &rhs) return *this;
     data = std::move(rhs.data);
     cache = std::move(rhs.cache);
-    // std::cout << "vector move assignment" << std::endl;
     return *this;
 }
 
@@ -974,20 +1015,20 @@ Vector<T>& Vector<T>::operator=(const Vector<S>& other)
     for (size_t i = 0; i < other.get_n(); ++i) {
         data[i] = T(other[i]);  // Uses enhanced cross-field constructors
     }
+    cache.invalidate();
     return *this;
 }
 
 template <ComponentType T>
 constexpr Vector<T> Vector<T>::operator-() const& noexcept {
     Vector res(*this);
-    std::for_each(res.data.begin(), res.data.end(), [](T& v) { v = -v; });
+    std::ranges::for_each(res.data, [](T& v) { v = -v; });
     return res;  // move elision
 }
 
 template <ComponentType T>
 constexpr Vector<T> Vector<T>::operator-() && noexcept {
-    std::for_each(data.begin(), data.end(), [](T& v) { v = -v; });
-    cache.invalidate();
+    std::ranges::for_each(data, [](T& v) { v = -v; });
     return std::move(*this);
 }
 
@@ -1012,10 +1053,12 @@ Vector<T>& Vector<T>::operator-=(const Vector<T>& rhs) {
 
 template <ComponentType T>
 constexpr Vector<T>& Vector<T>::operator*=(const T& s) noexcept {
-    if (s == T(0))
+    if (s == T(0)) {
         fill(T(0));
-    else
-        std::for_each(data.begin(), data.end(), [&s](T& v) { v *= s; });
+        cache.invalidate();
+    } else {
+        std::ranges::for_each(data, [&s](T& v) { v *= s; });
+    }
 
     return *this;
 }
@@ -1023,32 +1066,80 @@ constexpr Vector<T>& Vector<T>::operator*=(const T& s) noexcept {
 template <ComponentType T>
 Vector<T>& Vector<T>::operator/=(const T& s) {
     if (s == T(0)) throw std::invalid_argument("trying to divide components of vector by zero");
-    std::for_each(data.begin(), data.end(), [&s](T& v) { v /= s; });
+    std::ranges::for_each(data, [&s](T& v) { v /= s; });
+    return *this;
+}
+
+template <ComponentType T>
+Vector<T>& Vector<T>::append(const Vector& rhs) {
+    if (this == &rhs) {
+        Vector tmp(rhs);
+        return append(std::move(tmp));
+    }
+
+    data.reserve(data.size() + rhs.data.size());
+    data.insert(data.end(), rhs.data.begin(), rhs.data.end());
+    cache.invalidate();
+    return *this;
+}
+
+template <ComponentType T>
+Vector<T>& Vector<T>::append(Vector&& rhs) {
+    if (this == &rhs) return *this;
+
+    data.reserve(data.size() + rhs.data.size());
+    data.insert(data.end(), std::make_move_iterator(rhs.data.begin()), std::make_move_iterator(rhs.data.end()));
+    cache.invalidate();
+    return *this;
+}
+
+template <ComponentType T>
+Vector<T>& Vector<T>::prepend(const Vector& lhs) {
+    if (this == &lhs) {
+        Vector tmp(lhs);
+        return prepend(std::move(tmp));
+    }
+
+    data.reserve(data.size() + lhs.data.size());
+    data.insert(data.begin(), lhs.data.begin(), lhs.data.end());
+    cache.invalidate();
+    return *this;
+}
+
+template <ComponentType T>
+Vector<T>& Vector<T>::prepend(Vector&& lhs) {
+    if (this == &lhs) return *this;
+
+    data.reserve(data.size() + lhs.data.size());
+    data.insert(data.begin(), std::make_move_iterator(lhs.data.begin()), std::make_move_iterator(lhs.data.end()));
+    cache.invalidate();
     return *this;
 }
 
 template <ComponentType T>
 template <typename U>
 Vector<T>& Vector<T>::append(U&& rhs)
-    requires std::convertible_to<std::decay_t<U>, Vector>
+    requires std::constructible_from<Vector<T>, U>
 {
-    const Vector<T>& rhs_ref = std::forward<U>(rhs);
-    data.reserve(data.size() + rhs_ref.data.size());
-    data.insert(data.end(), rhs_ref.data.begin(), rhs_ref.data.end());
-    cache.invalidate();
-    return *this;
+    if constexpr (std::same_as<std::remove_cvref_t<U>, Vector<T>>) {
+        return append(std::forward<U>(rhs));
+    } else {
+        Vector<T> tmp(std::forward<U>(rhs));
+        return append(std::move(tmp));
+    }
 }
 
 template <ComponentType T>
 template <typename U>
 Vector<T>& Vector<T>::prepend(U&& lhs)
-    requires std::convertible_to<std::decay_t<U>, Vector>
+    requires std::constructible_from<Vector<T>, U>
 {
-    const Vector<T>& lhs_ref = std::forward<U>(lhs);
-    data.reserve(data.size() + lhs_ref.data.size());
-    data.insert(data.begin(), lhs_ref.data.begin(), lhs_ref.data.end());
-    cache.invalidate();
-    return *this;
+    if constexpr (std::same_as<std::remove_cvref_t<U>, Vector<T>>) {
+        return prepend(std::forward<U>(lhs));
+    } else {
+        Vector<T> tmp(std::forward<U>(lhs));
+        return prepend(std::move(tmp));
+    }
 }
 
 template <ComponentType T>
@@ -1066,9 +1157,7 @@ Vector<T>& Vector<T>::delete_components(const std::vector<size_t>& v) {
     new_data.reserve(data.size() - indices.size());
 
     for (size_t i = 0; i < data.size(); ++i) {
-        if (indices.find(i) == indices.end()) {
-            new_data.push_back(std::move(data[i]));
-        }
+        if (!indices.contains(i)) new_data.push_back(std::move(data[i]));
     }
 
     data = std::move(new_data);
@@ -1109,7 +1198,6 @@ Vector<T>& Vector<T>::unerase_components(const std::vector<size_t>& v)
     }
 
     for_each(indices.crbegin(), indices.crend(), [&](auto i) { data[i].unerase(); });
-    ;
 
     cache.invalidate();
     return *this;
@@ -1193,8 +1281,15 @@ Vector<T>& Vector<T>::set_component(size_t i, U&& c)
     requires std::convertible_to<std::decay_t<U>, T>
 {
     if (i >= data.size()) throw std::invalid_argument("trying to access non-existent element");
-    data[i] = std::forward<U>(c);
-    if (data[i] != T(0)) cache.invalidate();
+
+    T& old_value = data[i];
+
+    T new_value(std::forward<U>(c));
+    if (old_value == new_value) return *this;
+    old_value = std::move(new_value);
+
+    cache.invalidate();
+
     return *this;
 }
 
@@ -1261,15 +1356,14 @@ constexpr bool Vector<T>::is_zero() const noexcept
 }
 
 template <ComponentType T>
-constexpr bool Vector<T>::is_pairwisedistinct() const
+constexpr bool Vector<T>::is_pairwise_distinct() const
     requires ReliablyComparableType<T>
 {
     if constexpr (FiniteFieldType<T>) {
         std::unordered_set<T, details::FiniteFieldHasher<T>> unique_elems;
         for (const auto& elem : data)
             if (!unique_elems.insert(elem).second) return false;
-    } else if constexpr (ReliablyComparableType<T> ||
-                         std::is_same_v<T, InfInt>) {  // everything InfInt needs special treatment
+    } else if constexpr (std::is_same_v<T, InfInt>) {  // everything InfInt needs special treatment
         for (size_t i = 0; i < data.size(); ++i) {
             for (size_t j = i + 1; j < data.size(); ++j) {
                 if (data[i] == data[j]) return false;
@@ -1354,17 +1448,17 @@ constexpr size_t Vector<T>::cyclic_burst_length() const noexcept {
 template <ComponentType T>
 Vector<T>& Vector<T>::randomize() noexcept {
     if constexpr (FieldType<T>) {
-        std::for_each(data.begin(), data.end(), std::mem_fn(&T::randomize));
+        std::ranges::for_each(data, std::mem_fn(&T::randomize));
     } else if constexpr (std::same_as<T, double>) {
         std::uniform_real_distribution<double> dist(-1.0, 1.0);
-        std::for_each(data.begin(), data.end(), [&](double& val) { val = dist(gen()); });
+        std::ranges::for_each(data, [&](double& val) { val = dist(gen()); });
     } else if constexpr (std::same_as<T, std::complex<double>>) {
         std::uniform_real_distribution<double> dist(-1.0, 1.0);
-        std::for_each(data.begin(), data.end(),
-                      [&](std::complex<double>& val) { val = std::complex<double>(dist(gen()), dist(gen())); });
+        std::ranges::for_each(data,
+                              [&](std::complex<double>& val) { val = std::complex<double>(dist(gen()), dist(gen())); });
     } else if constexpr (SignedIntType<T>) {
         std::uniform_int_distribution<long long> dist(-100, 100);
-        std::for_each(data.begin(), data.end(), [&](T& val) { val = T(dist(gen())); });
+        std::ranges::for_each(data, [&](T& val) { val = T(dist(gen())); });
     }
     cache.invalidate();
     return *this;
@@ -1401,7 +1495,7 @@ Vector<T>& Vector<T>::from_integer(size_t value, size_t n)
 
 template <ComponentType T>
 template <FiniteFieldType S>
-Matrix<S> Vector<T>::as_matrix() const noexcept
+Matrix<S> Vector<T>::as_matrix() const
     requires FiniteFieldType<T> && SubfieldOf<T, S> && (!std::is_same_v<T, S>)
 {
     const auto v = data[0].template as_vector<S>();
@@ -1580,8 +1674,8 @@ Vector<T> set_component(const Vector<T>& v, size_t i, const T& c) {
 }
 
 template <ComponentType T>
-Vector<T> set_component(Vector<T>&& v, size_t i, size_t j, const T& c) {
-    Matrix<T> res(std::move(v));
+Vector<T> set_component(Vector<T>&& v, size_t i, const T& c) {
+    Vector<T> res(std::move(v));
     res.set_component(i, c);
     return res;
 }
@@ -1597,13 +1691,13 @@ constexpr Vector<T> get_subvector(Vector<T>&& v, size_t start, size_t end) {
 }
 
 template <ComponentType T>
-constexpr Vector<T> set_subvector(const Vector<T>& v, size_t start, size_t end, const Vector<T>& w) {
-    return v.set_subvector(start, end, w);
+constexpr Vector<T> set_subvector(Vector<T> v, size_t start, const Vector<T>& w) {
+    return v.set_subvector(w, start);
 }
 
 template <ComponentType T>
-constexpr Vector<T> set_subvector(Vector<T>&& v, size_t start, size_t end, const Vector<T>& w) {
-    return std::move(v).set_subvector(start, end, w);
+constexpr Vector<T> set_subvector(Vector<T>&& v, size_t start, const Vector<T>& w) {
+    return std::move(v).set_subvector(w, start);
 }
 
 template <ComponentType T>
@@ -1792,16 +1886,6 @@ constexpr Vector<T> fill(Vector<T>&& v, const T& value) {
     return res;
 }
 
-template <FiniteFieldType T>
-constexpr auto as_integer(const Vector<T>& v) {
-    return v.as_integer();
-}
-
-template <FiniteFieldType T, FiniteFieldType S>
-constexpr auto as_matrix(const Vector<T>& v) {
-    return v.template as_matrix<S>();
-}
-
 /**
  * @brief Compute inner product (dot product) of two vectors
  *
@@ -1848,7 +1932,7 @@ template <ComponentType T>
 std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) noexcept {
     os << "( ";
     for (auto it = rhs.data.cbegin(); it != rhs.data.cend(); ++it) {
-        std::cout << *it;
+        os << *it;
         if (it != rhs.data.cend() - 1) {
             os << ", ";
         }
@@ -1978,7 +2062,7 @@ inline double dE(const Vector<std::complex<double>>& lhs, const Vector<std::comp
 
     double sum_of_squares = std::transform_reduce(
         lhs.data.begin(), lhs.data.end(), rhs.data.begin(), 0.0, std::plus<double>{},
-        [](const std::complex<double>& l, const std::complex<double>& r) { return powl(abs(l - r), 2); });
+        [](const std::complex<double>& l, const std::complex<double>& r) { return pow(abs(l - r), 2); });
 
     return sqrt(sum_of_squares);
 }

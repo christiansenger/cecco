@@ -2,11 +2,11 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.1
- * @date 2025
+ * @version 2.3.2
+ * @date 2026
  *
  * @copyright
- * Copyright (c) 2025, Christian Senger <senger@inue.uni-stuttgart.de>
+ * Copyright (c) 2026, Christian Senger <senger@inue.uni-stuttgart.de>
  *
  * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
  * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
@@ -31,8 +31,8 @@
  * @warning A field tower in the sense of this library is a sequence of finite fields that are constructed from each
  * other as a sequence of extensions. If for example 𝔽_16 is constructed directly from 𝔽_2, then 𝔽_4 is not an element
  * of the tower (while it certainly is in the mathematical sense). If however we also create 𝔽_16 as an extension of 𝔽_4
- and 𝔽_4 as an extension of 𝔽_2 then we can merge the two towers into one by creating an isomorphic 𝔽_16 (Iso) out of
- the two constructed 𝔽_16. The isomorphic 𝔽_16 then acts as the intersection between the two field towers.
+ * and 𝔽_4 as an extension of 𝔽_2 then we can merge the two towers into one by creating an isomorphic 𝔽_16 (Iso) out of
+ * the two constructed 𝔽_16. The isomorphic 𝔽_16 then acts as the intersection between the two field towers.
  *
  * A **finite field** 𝔽_q with q = p^m elements (p prime, m ≥ 1) is constructed as:
  * - **Prime field**: 𝔽_p ≅ ℤ_p = {0, 1, ..., p-1} with arithmetic mod p (using Fp&lt;p&gt;)
@@ -63,7 +63,7 @@
  * using F16 = Iso<F16_a, F16_b>;             // Isomorphic field with multiple representations (merges...
  *                                            // ... the field towers F2 ⊂ F16_a and F2 ⊂ F4 ⊂ F16_b)...
  * using F256 = Iso<F256_a, F256_b, F256_c>;  // ... directly using F16_a, ... F256_a, ... etc. discouraged,...
-                                              // ... use F16 and F256 instead for maximal compatibility
+ *                                            // ... use F16 and F256 instead for maximal compatibility
  *
  * // Cross-field conversions
  * F9 a(5), b(7);                                // Element generation
@@ -1020,7 +1020,7 @@ class Rationals : public details::Field<Rationals<T>> {
      * @brief Get human-readable field description
      * @return String "rational number"
      */
-    static const std::string& get_info() noexcept {
+    static const std::string get_info() noexcept {
         static const std::string info = "rational number";
         return info;
     }
@@ -1206,6 +1206,7 @@ Rationals<T>& Rationals<T>::randomize_force_change() noexcept {
     } while (T(n) * denominator == numerator * T(d));
     numerator = n;
     denominator = d;
+    simplify();
     return *this;
 }
 
@@ -1215,9 +1216,10 @@ size_t Rationals<T>::get_multiplicative_order() const {
         throw std::invalid_argument(
             "trying to calculate multiplicative order "
             "of additive neutral element");
-    if (numerator == denominator) {
+    if (numerator == denominator)
         return 1;
-    }
+    else if (numerator == -denominator)
+        return 2;
     return 0;
 }
 
@@ -2764,7 +2766,7 @@ class Fp : public details::Field<Fp<p>> {
      *
      * Returns formatted string with field size.
      */
-    static const std::string& get_info() noexcept {
+    static std::string get_info() noexcept {
         static const std::string info = "prime field with " + std::to_string(p) + " elements";
         return info;
     }
@@ -3020,6 +3022,8 @@ Fp<p>::Fp(const Iso<MAIN, OTHERS...>& other)
 
 template <uint16_t p>
 constexpr Fp<p>& Fp<p>::operator=(int l) noexcept {
+    if (l <= -(int)p || l >= (int)p) l %= (int)p;
+    if (l < 0) l += (int)p;
     label = l;
     return *this;
 }
@@ -3333,7 +3337,6 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
    public:
     using label_t = ::CECCO::label_t<Q>;
 
-   public:
     /* constructors */
 
     /**
@@ -4070,7 +4073,7 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 Ext<B, modulus, mode>::Ext(int l) {
-    if (l < 0 || l >= Q) throw std::invalid_argument("l must be positve and no larger than Q-1");
+    if (l < 0 || l >= Q) throw std::invalid_argument("l must be positive and no larger than Q-1");
     label = l;
 }
 
@@ -4110,43 +4113,26 @@ Ext<B, modulus, mode>::Ext(const Ext<S, ext_modulus, ext_mode>& other) {
 
     using IN = Ext<S, ext_modulus, ext_mode>;
     using OUT = Ext;
-#ifdef DEBUG_FIELDS_HPP
-    std::cout << std::endl << "^^^^^^^^^^^^^ Ext -> Ext" << std::endl;
-    std::cout << "IN: " << IN::get_info() << std::endl;
-    std::cout << "OUT: " << OUT::get_info() << std::endl;
-#endif
 
     // Note: same-field case handled by simple copy constructor
     if constexpr (Isomorphic<OUT, IN>) {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 1 (isomorphic)" << std::endl;
-#endif
         // Isomorphic fields - use isomorphism for conversion
         auto iso = Isomorphism<IN, OUT>();
         OUT result = iso(other);
         label = result.get_label();
     } else if constexpr (SubfieldOf<OUT, IN>) {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 2 (upcast)" << std::endl;
-#endif
         // Upcast: Source ⊆ Target (ExtensionOf<Source, Target>) - cannot throw
         // Use cached subfield embedding for mathematically correct embedding
         auto embedding = Embedding<IN, OUT>();
         OUT result = embedding(other);
         label = result.get_label();
     } else if constexpr (SubfieldOf<IN, OUT>) {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 3 (downcast)" << std::endl;
-#endif
         // Downcast: Target ⊆ Source (SubfieldOf<Target, Source>) - may throw
         // Use cached subfield embedding to find if superfield element is in subfield
         auto embedding = Embedding<OUT, IN>();
         OUT result = embedding.extract(other);
         label = result.get_label();
     } else {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 4 (largest_common_subfield)" << std::endl;
-#endif
         // Fields with same characteristic but not directly related - convert via largest common subfield in order
         // to maximize
         using CommonField = details::largest_common_subfield_t<OUT, IN>;
@@ -4237,26 +4223,15 @@ Ext<B, modulus, mode>::Ext(const Iso<MAIN, OTHERS...>& other) {
 
     using IN = Iso<MAIN, OTHERS...>;
     using OUT = Ext;
-#ifdef DEBUG_FIELDS_HPP
-    std::cout << std::endl << "^^^^^^^^^^^^^ Iso -> Ext" << std::endl;
-    std::cout << "IN: " << IN::get_info() << std::endl;
-    std::cout << "OUT: " << OUT::get_info() << std::endl;
-#endif
 
     // Branch 1: If IN is isomorphic to out -> implies IN is isomorphic to MAIN
     if constexpr (Isomorphic<IN, OUT>) {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 1 (isomorphic)" << std::endl;
-#endif
         auto isomorphism = Isomorphism<MAIN, OUT>();
         OUT result = isomorphism(other.main());
         label = result.get_label();
 
         // Branch 2 (upcast): If IN is subfield of OUT
     } else if constexpr (SubfieldOf<OUT, IN>) {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 2 (upcast)" << std::endl;
-#endif
         if constexpr (SubfieldOf<OUT, MAIN>) {
             auto embedding = Embedding<MAIN, OUT>();
             OUT result = embedding(other.main());
@@ -4277,9 +4252,6 @@ Ext<B, modulus, mode>::Ext(const Iso<MAIN, OTHERS...>& other) {
 
         // Branch 3 (downcast): If IN is superfield of OUT
     } else if constexpr (SubfieldOf<IN, OUT>) {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 3 (downcast)" << std::endl;
-#endif
         if constexpr (SubfieldOf<MAIN, OUT>) {
             auto embedding = Embedding<OUT, MAIN>();
             OUT result = embedding.extract(other.main());
@@ -4300,10 +4272,6 @@ Ext<B, modulus, mode>::Ext(const Iso<MAIN, OTHERS...>& other) {
 
         // Branch 4 (cross-cast through largest common subfield): This is the else case
     } else {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 4 (largest_common_subfield)" << std::endl;
-#endif
-
         using CommonField = details::largest_common_subfield_t<OUT, IN>;
 
         if constexpr (details::iso_info<CommonField>::is_iso) {
@@ -4335,7 +4303,7 @@ constexpr Ext<B, modulus, mode>::Ext(const Fp<p>& other)
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator=(int l) {
-    if (l < 0 || l >= Q) throw std::invalid_argument("l must be positve and no larger than Q-1");
+    if (l < 0 || l >= Q) throw std::invalid_argument("l must be positive and no larger than Q-1");
     label = l;
     return *this;
 }
@@ -4477,7 +4445,6 @@ std::string Ext<B, modulus, mode>::get_info() noexcept {
     ss << "finite field with " + std::to_string(Q) + " elements, specified as degree " + std::to_string(m) +
               " extension of (" + B::get_info() + "), irreducible polynomial ";
     ss << get_modulus();
-    std::string s = ss.str();
     return ss.str();
 }
 
@@ -4896,27 +4863,82 @@ class Iso : public details::Base {
     template <FiniteFieldType OTHER_MAIN, FiniteFieldType... OTHER_OTHERS>
     Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other);
 
+    /**
+     * @brief Additive inverse (unary minus)
+     * @return Negated element (mathematically: -a where a + (-a) = 0)
+     */
     constexpr Iso operator-() const noexcept { return Iso{-main_}; }
 
+    /**
+     * @brief Addition assignment
+     * @param other Right-hand side addend
+     * @return Reference to this element after addition
+     */
     constexpr Iso& operator+=(const Iso& other);
 
+    /**
+     * @brief Addition assignment from isomorphic representation
+     * @tparam OTHER One of the OTHERS types (constrained by @ref BelongsTo)
+     * @param other Right-hand side addend in OTHER representation
+     * @return Reference to this element after addition
+     */
     template <BelongsTo<OTHERS...> OTHER>
     constexpr Iso& operator+=(const OTHER& other);
 
+    /**
+     * @brief Subtraction assignment
+     * @param other Right-hand side subtrahend
+     * @return Reference to this element after subtraction
+     */
     constexpr Iso& operator-=(const Iso& other);
 
+    /**
+     * @brief Subtraction assignment from isomorphic representation
+     * @tparam OTHER One of the OTHERS types (constrained by @ref BelongsTo)
+     * @param other Right-hand side subtrahend in OTHER representation
+     * @return Reference to this element after subtraction
+     */
     template <BelongsTo<OTHERS...> OTHER>
     constexpr Iso& operator-=(const OTHER& other);
 
+    /**
+     * @brief Multiplication assignment
+     * @param other Right-hand side multiplier
+     * @return Reference to this element after multiplication
+     */
     constexpr Iso& operator*=(const Iso& other);
 
+    /**
+     * @brief Multiplication assignment from isomorphic representation
+     * @tparam OTHER One of the OTHERS types (constrained by @ref BelongsTo)
+     * @param other Right-hand side multiplier in OTHER representation
+     * @return Reference to this element after multiplication
+     */
     template <BelongsTo<OTHERS...> OTHER>
     constexpr Iso& operator*=(const OTHER& other);
 
+    /**
+     * @brief Scalar multiplication assignment
+     * @param s Integer scalar
+     * @return Reference to this element after scalar multiplication
+     */
     constexpr Iso& operator*=(int s) noexcept;
 
+    /**
+     * @brief Division assignment
+     * @param other Right-hand side divisor
+     * @return Reference to this element after division
+     * @throws std::invalid_argument if other is zero (division by zero)
+     */
     Iso& operator/=(const Iso& other);
 
+    /**
+     * @brief Division assignment from isomorphic representation
+     * @tparam OTHER One of the OTHERS types (constrained by @ref BelongsTo)
+     * @param other Right-hand side divisor in OTHER representation
+     * @return Reference to this element after division
+     * @throws std::invalid_argument if other is zero (division by zero)
+     */
     template <BelongsTo<OTHERS...> OTHER>
     Iso& operator/=(const OTHER& other);
 
@@ -5215,29 +5237,15 @@ Iso<MAIN, OTHERS...>::Iso(const Ext<B, modulus, mode>& other) {
 
     using IN = Ext<B, modulus, mode>;
     using OUT = Iso;
-#ifdef DEBUG_FIELDS_HPP
-    std::cout << std::endl << "^^^^^^^^^^^^^ Ext -> Iso" << std::endl;
-    std::cout << "IN: " << IN::get_info() << std::endl;
-    std::cout << "OUT: " << OUT::get_info() << std::endl;
-#endif
 
     // Branch 1: If MAIN or any of the OTHERS is isomorphic to Ext then use the correct isomorphism
     if constexpr (Isomorphic<MAIN, IN>) {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 1 (isomorphism)" << std::endl;
-#endif
         auto isomorphism = Isomorphism<IN, MAIN>();
         main_ = isomorphism(other);
 
         // Branch 2 (upcast): If IN is a subfield to OUT
     } else if constexpr (SubfieldOf<OUT, IN>) {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 2 (upcast)" << std::endl;
-#endif
         if constexpr (SubfieldOf<MAIN, IN>) {
-#ifdef DEBUG_FIELDS_HPP
-            std::cout << "Branch 2a" << std::endl;
-#endif
             // Ext ⊆ MAIN - use cached embedding from Ext to MAIN
             auto embedding = Embedding<IN, MAIN>();
             main_ = embedding(other);
@@ -5257,19 +5265,10 @@ Iso<MAIN, OTHERS...>::Iso(const Ext<B, modulus, mode>& other) {
         }
         // Branch 3 (downcast): If Iso or MAIN or any of the OTHERS is a subfield of Ext
     } else if constexpr (SubfieldOf<IN, OUT>) {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 3 (downcast)" << std::endl;
-#endif
         if constexpr (SubfieldOf<IN, MAIN>) {
-#ifdef DEBUG_FIELDS_HPP
-            std::cout << "Branch 3a" << std::endl;
-#endif
             auto embedding = Embedding<MAIN, IN>();
             main_ = embedding.extract(other);
         } else if constexpr ((SubfieldOf<OTHERS, IN> || ...)) {
-#ifdef DEBUG_FIELDS_HPP
-            std::cout << "Branch 3b" << std::endl;
-#endif
             bool conversion_done = false;
             auto try_downcast = [&]<typename OtherType>() {
                 if constexpr (SubfieldOf<OtherType, IN>) {
@@ -5283,9 +5282,6 @@ Iso<MAIN, OTHERS...>::Iso(const Ext<B, modulus, mode>& other) {
             (try_downcast.template operator()<OTHERS>(), ...);
         }
     } else {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 4 (largest_common_subfield)" << std::endl;
-#endif
         // Branch 4 (cross-cast through largest common subfield): This is the else case
         using CommonField = details::largest_common_subfield_t<OUT, IN>;
 
@@ -5338,38 +5334,20 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
 
     using IN = Iso<OTHER_MAIN, OTHER_OTHERS...>;
     using OUT = Iso;
-#ifdef DEBUG_FIELDS_HPP
-    std::cout << std::endl << "^^^^^^^^^^^^^ Iso -> Iso" << std::endl;
-    std::cout << "IN: " << IN::get_info() << std::endl;
-    std::cout << "OUT: " << OUT::get_info() << std::endl;
-#endif
 
     // Branch 1: IN and OUT are isomorphic (implies: MAIN and OTHER_MAIN are isomorphic)
     if constexpr (Isomorphic<OTHER_MAIN, MAIN>) {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 1 (isomorphic)" << std::endl;
-#endif
         auto isomorphism = Isomorphism<OTHER_MAIN, MAIN>();
         main_ = isomorphism(other.main());
 
         // Branch 2 (upcast): IN is subfield of OUT (but not the same since this would be caught by copy constr.)
     } else if constexpr (SubfieldOf<OUT, IN>) {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 2 (upcast)" << std::endl;
-#endif
-
         // Sub-branch 2a: OTHER_MAIN is subfield of MAIN
         if constexpr (SubfieldOf<MAIN, OTHER_MAIN>) {
-#ifdef DEBUG_FIELDS_HPP
-            std::cout << "Branch 2a" << std::endl;
-#endif
             main_ = MAIN(other.main());  // Use existing Ext-from-Ext cross-field constructor
 
             // Sub-branch 2b: OTHER_MAIN is subfield of one of OTHERS
         } else if constexpr ((SubfieldOf<OTHERS, OTHER_MAIN> || ...)) {
-#ifdef DEBUG_FIELDS_HPP
-            std::cout << "Branch 2b" << std::endl;
-#endif
             bool conversion_done = false;
             auto try_main_to_others = [&]<typename OutputOtherType>() {
                 if constexpr (SubfieldOf<OutputOtherType, OTHER_MAIN>) {
@@ -5386,9 +5364,6 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
 
             // Sub-branch 2c: One of OTHER_OTHERS is subfield of MAIN
         } else if constexpr ((SubfieldOf<MAIN, OTHER_OTHERS> || ...)) {
-#ifdef DEBUG_FIELDS_HPP
-            std::cout << "Branch 2c" << std::endl;
-#endif
             bool conversion_done = false;
             auto try_others_to_main = [&]<typename InputOtherType>() {
                 if constexpr (SubfieldOf<MAIN, InputOtherType>) {
@@ -5403,9 +5378,6 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
 
             // Sub-branch 2d: One of OTHER_OTHERS is subfield of one of OTHERS
         } else {
-#ifdef DEBUG_FIELDS_HPP
-            std::cout << "Branch 2d" << std::endl;
-#endif
             bool conversion_done = false;
             auto try_others_to_others = [&]<typename OutputOtherType>() {
                 if (conversion_done) return;
@@ -5428,21 +5400,12 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
 
         // Branch 3 (downcast): OUT is subfield of IN (but not the same since this would be caught by copy constr.)
     } else if constexpr (SubfieldOf<IN, OUT>) {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 3 (downcast)" << std::endl;
-#endif
         // Sub-branch 3a: OTHER_MAIN is superfield of MAIN
         if constexpr (SubfieldOf<OTHER_MAIN, MAIN>) {
-#ifdef DEBUG_FIELDS_HPP
-            std::cout << "Branch 3a" << std::endl;
-#endif
             main_ = MAIN(other.main());  // Use existing Ext-from-Ext cross-field constructor
 
             // Sub-branch 3b: OTHER_MAIN is superfield of one of OTHERS
         } else if constexpr ((SubfieldOf<OTHER_MAIN, OTHERS> || ...)) {
-#ifdef DEBUG_FIELDS_HPP
-            std::cout << "Branch 3b" << std::endl;
-#endif
             bool conversion_done = false;
             auto try_main_to_others = [&]<typename OutputOtherType>() {
                 if constexpr (SubfieldOf<OTHER_MAIN, OutputOtherType>) {
@@ -5459,9 +5422,6 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
 
             // Sub-branch 3c: One of OTHER_OTHERS is superfield of MAIN
         } else if constexpr ((SubfieldOf<OTHER_OTHERS, MAIN> || ...)) {
-#ifdef DEBUG_FIELDS_HPP
-            std::cout << "Branch 3c" << std::endl;
-#endif
             bool conversion_done = false;
             auto try_others_to_main = [&]<typename InputOtherType>() {
                 if constexpr (SubfieldOf<InputOtherType, MAIN>) {
@@ -5476,9 +5436,6 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
 
             // Sub-branch 3d: One of OTHER_OTHERS is superfield of one of OTHERS
         } else {
-#ifdef DEBUG_FIELDS_HPP
-            std::cout << "Branch 3d" << std::endl;
-#endif
             bool conversion_done = false;
             auto try_others_to_others = [&]<typename OutputOtherType>() {
                 if (conversion_done) return;
@@ -5499,9 +5456,6 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
         }
 
     } else {
-#ifdef DEBUG_FIELDS_HPP
-        std::cout << "Branch 4 (largest_common_subfield)" << std::endl;
-#endif
         // Branch 4 (cross-cast through largest common subfield): Consistent with Ext-from-Iso constructor
         using CommonField = details::largest_common_subfield_t<OUT, IN>;
 

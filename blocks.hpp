@@ -2,11 +2,11 @@
  * @file blocks.hpp
  * @brief Communication system blocks library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1
- * @date 2025
+ * @version 2.2
+ * @date 2026
  *
  * @copyright
- * Copyright (c) 2025, Christian Senger <senger@inue.uni-stuttgart.de>
+ * Copyright (c) 2026, Christian Senger <senger@inue.uni-stuttgart.de>
  *
  * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
  * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
@@ -17,7 +17,7 @@
  * This header file provides communication system blocks for error control coding experiments/simulations. It supports:
  *
  * - **Channel models**: Symmetric Discrete Memoryless Erasure Channel (SDMEC), Symmetric Discrete Memoryless Channel
- * (SDMC), Binary Symmetric Channel (BSC), Binary Erasure Channel (BED), and Additive White Gaussian Noise (AWGN)
+ * (SDMC), Binary Symmetric Channel (BSC), Binary Erasure Channel (BEC), and Additive White Gaussian Noise (AWGN)
  * channel with accurate error probability calculations
  * - **Modulation schemes**: Non-Return-to-Zero (NRZ) and Binary Phase Shift Keying (BPSK)
  *   with configurable constellation parameters
@@ -34,9 +34,9 @@
  * Vector<F2> message = {1, 0, 1, 1};
  *
  * // Create communication chain components
- * BPSKEncoder enc;                                                 // BPSK modulation (a=0, b=2)
- * AWGN awgn(6.0, enc.get_Eb(), enc.get_b());  // 6 dB SNR
- * BPSKDecoder dec;                                                 // Hard-decision demodulation
+ * BPSKEncoder enc;                           // BPSK modulation (a=0, b=2)
+ * AWGN awgn(6.0, enc.get_a(), enc.get_b());  // 6 dB SNR
+ * BPSKDecoder dec;                           // Hard-decision demodulation
  *
  * // Process through communication chain using operator>>
  * Vector<std::complex<double>> y;
@@ -71,6 +71,7 @@
 // #include <cmath> // transitive through fields.hpp
 // #include <complex> // transitive through fields.hpp
 // #include <random> // transitive through fields.hpp
+#include <numbers>
 
 #include "fields.hpp"
 #include "vectors.hpp"
@@ -129,7 +130,7 @@ class BlockProcessor : private NonCopyable {
     Matrix<OutputType> operator()(const Matrix<InputType>& in) noexcept {
         Matrix<OutputType> res(in.get_m(), in.get_n());
         for (size_t i = 0; i < res.get_m(); ++i) {
-            for (size_t j = 0; j < res.get_n(); ++j) res(i, j) = derived()(in(i, j));
+            for (size_t j = 0; j < res.get_n(); ++j) res.set_component(i, j, derived()(in(i, j)));
         }
         return res;
     }
@@ -143,14 +144,14 @@ class BlockProcessor : private NonCopyable {
         if constexpr (std::is_same_v<InputType, OutputType>) {
             // Same type: process in-place and reuse storage
             for (size_t i = 0; i < in.get_m(); ++i) {
-                for (size_t j = 0; j < in.get_n(); ++j) in(i, j) = derived()(std::move(in(i, j)));
+                for (size_t j = 0; j < in.get_n(); ++j) in.set_component(i, j, derived()(std::move(in(i, j))));
             }
             return std::move(in);
         } else {
             // Different types: create new matrix
             Matrix<OutputType> res(in.get_m(), in.get_n());
             for (size_t i = 0; i < res.get_m(); ++i) {
-                for (size_t j = 0; j < res.get_n(); ++j) res(i, j) = derived()(std::move(in(i, j)));
+                for (size_t j = 0; j < res.get_n(); ++j) res.set_component(i, j, derived()(std::move(in(i, j))));
             }
             return res;
         }
@@ -278,13 +279,11 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
      */
     double get_pe() const noexcept { return error_dist.p(); }
 
-#ifdef CECCO_ERASURE_SUPPORT
     /**
      * @brief Get symbol erasure probability
      * @return Erasure probability px
      */
     double get_px() const noexcept { return erasure_dist.p(); }
-#endif
 
     /**
      * @brief Calculate channel capacity in bits per symbol
@@ -327,44 +326,31 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
     std::geometric_distribution<unsigned int> error_dist;
     unsigned int error_trials{0};
     unsigned int error_failures_before_hit;
-#ifdef CECCO_ERASURE_SUPPORT
     std::geometric_distribution<unsigned int> erasure_dist;
     unsigned int erasure_trials{0};
     unsigned int erasure_failures_before_hit;
-#endif
 };
 
 template <FiniteFieldType T>
-SDMEC<T>::SDMEC(double pe, double px)
-    : error_dist(pe / (1 - px))
-#ifdef CECCO_ERASURE_SUPPORT
-      ,
-      erasure_dist(px)
+SDMEC<T>::SDMEC(double pe, double px) : error_dist(pe / (1 - px)), erasure_dist(px) {
+#ifndef CECCO_ERASURE_SUPPORT
+    if (px != 0) throw std::invalid_argument("px!=0 requires CECCO_ERASURE_SUPPORT");
 #endif
-{
     if (pe < 0.0 || pe > 1.0)
         throw std::out_of_range("SDMEC error probability must be in [0,1], got: " + std::to_string(pe));
     if (pe != 0.0 && pe < 0.000000001) throw std::out_of_range("pe too small");
     error_failures_before_hit = error_dist(gen());
-#ifdef CECCO_ERASURE_SUPPORT
+
     if (px < 0.0 || px > 1.0 - pe)
         throw std::out_of_range("SDMEC erasure probability must be in [0," + std::to_string(1 - pe) +
                                 "], got: " + std::to_string(px));
     if (px != 0.0 && px < 0.000000001) throw std::out_of_range("px too small");
     erasure_failures_before_hit = erasure_dist(gen());
-#else
-    if (px != 0) throw std::invalid_argument("px!=0 requires CECCO_ERASURE_SUPPORT");
-#endif
 }
 
 template <FiniteFieldType T>
 T SDMEC<T>::operator()(const T& in) noexcept {
-    if (error_dist.p() == 0.0
-#ifdef CECCO_ERASURE_SUPPORT
-        && erasure_dist.p() == 0.0
-#endif
-    )
-        return in;
+    if (error_dist.p() == 0.0 && erasure_dist.p() == 0.0) return in;
     T res(in);
     if (error_trials == error_failures_before_hit) {
         res.randomize_force_change();
@@ -396,10 +382,9 @@ double SDMEC<T>::get_capacity() const noexcept {
 
     double res = std::log2(q) + term2 + term1 - pe * std::log2(q - 1);
 
-#ifdef CECCO_ERASURE_SUPPORT
     const double px = erasure_dist.p();
     res *= (1 - px);
-#endif
+
     return res;
 }
 
@@ -454,7 +439,6 @@ class SDMC : public SDMEC<T> {
  */
 using BSC = SDMC<Fp<2>>;
 
-#ifdef CECCO_ERASURE_SUPPORT
 /**
  * @brief Binary Erasure Channel (BEC)
  *
@@ -483,7 +467,6 @@ class BEC : public SDMEC<Fp<2>> {
      */
     BEC(double px) : SDMEC<Fp<2>>(0.0, px) {}
 };
-#endif
 
 /**
  * @brief Binary Asymmetric Channel (BAC) - Z-Channel
@@ -570,12 +553,11 @@ class BAC : public details::SameTypeProcessor<BAC, Fp<2>> {
      * @note Returned value is in bits (log base 2).
      */
     double get_capacity() const noexcept {
-        const double p = bsc.get_pe();
-
-        if (p == 0.0) return 1.0;  // Perfect channel
-        if (p == 1.0) return 0.0;  // Useless channel
-
         const double pe = bsc.get_pe();
+
+        if (pe == 0.0) return 1.0;  // Perfect channel
+        if (pe == 1.0) return 0.0;  // Useless channel
+
         return std::log2(1 + (1 - pe) * pow(pe, pe / (1 - pe)));
     }
 
@@ -748,7 +730,7 @@ class BPSKEncoder : public NRZEncoder {
  * AWGN awgn(6.0, enc.get_a(), enc.get_b());
  * Vector<Fp<2>> message = {0, 1, 1, 0};
  * Vector<std::complex<double>> y;
- * mesage >> enc >> awgn >> y;
+ * message >> enc >> awgn >> y;
  *
  * // Channel noise parameters
  * double sigma = awgn.get_standard_deviation();  // Noise std deviation
@@ -781,7 +763,7 @@ class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
      */
     AWGN(double EbNodB, double a, double b)
         : Eb(NRZEncoder(a, b).get_Eb()),
-          dist(0, std::sqrt(0.5 * Eb / pow(10, EbNodB / 10))),
+          dist(0, std::sqrt(0.5 * Eb / pow(10.0, EbNodB / 10.0))),
           pe(calculate_pe(EbNodB, b)) {}
 
     /** @name Noise Parameters
@@ -794,7 +776,7 @@ class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
      *
      * Returns the variance of the additive noise for both real and imaginary components.
      */
-    double get_variance() const noexcept { return pow(dist.stddev(), 2); }
+    double get_variance() const noexcept { return pow(dist.stddev(), 2.0); }
 
     /**
      * @brief Get noise standard deviation
@@ -808,7 +790,7 @@ class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
      * @brief Get theoretical bit error probability
      * @return Theoretical Pe for the configured modulation and SNR
      *
-     * Returns the mathematically calculated bit error probability based on
+     * Returns the mathematically calculated bit error probability after hard decisions based on
      * the constellation parameters and signal-to-noise ratio.
      */
     constexpr double get_pe() const noexcept { return pe; }
@@ -863,7 +845,7 @@ class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
 double AWGN::calculate_pe(double EbNodB, double b) const noexcept {
     // For NRZ/BPSK: Pe = 0.5 * erfc(b/(2*sigma))
     // where b is constellation distance and sigma is noise std dev
-    const double EbN0_linear = pow(10, EbNodB / 10.0);
+    const double EbN0_linear = pow(10.0, EbNodB / 10.0);
 
     // Signal-to-noise ratio in terms of constellation distance
     // SNR = (b/2)² / σ² = (b/2)² / (No/2) = (b/2)² * 2/No = (b²/2) / No
@@ -948,6 +930,15 @@ class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<doub
      */
     double get_capacity() const noexcept;
 
+    /**
+     * @brief Get theoretical bit error probability
+     * @return Theoretical Pe for the configured modulation and SNR
+     *
+     * Returns the mathematically calculated bit error probability after hard decisions based on
+     * the constellation parameters and signal-to-noise ratio.
+     */
+    constexpr double get_pe() const noexcept { return transmission.get_pe(); }
+
    private:
     NRZEncoder encoder;
     AWGN transmission;
@@ -962,7 +953,7 @@ double BI_AWGN::get_capacity() const noexcept {
     if (sigma == 0.0) return 1.0;  // noiseless -> capacity one
 
     auto f_Y_star = [a, b, sigma](double x) -> double {
-        double m = 1.0 / (2.0 * sigma * std::sqrt(2.0 * M_PI));
+        double m = 1.0 / (2.0 * sigma * std::sqrt(2.0 * std::numbers::pi));
         double s0 = std::exp(-0.5 * std::pow((x - (a - b / 2.0)) / sigma, 2.0));
         double s1 = std::exp(-0.5 * std::pow((x - (a + b / 2.0)) / sigma, 2.0));
         return m * (s0 + s1);
@@ -992,7 +983,7 @@ double BI_AWGN::get_capacity() const noexcept {
 
     const double integral = h * sum / 3.0;  // ≈ ∫ g(x) dx
 
-    return std::clamp(-integral - std::log2(sigma * std::sqrt(2 * M_PI * M_E)), 0.0, 1.0);
+    return std::clamp(-integral - std::log2(sigma * std::sqrt(2 * std::numbers::pi * std::numbers::e)), 0.0, 1.0);
 }
 
 /**
@@ -1025,7 +1016,7 @@ double BI_AWGN::get_capacity() const noexcept {
  * received >> dec >> c_est;  // Result: {0, 1}
  *
  * // BPSK decoding (threshold at zero)
- * BPSKEncoder enc;          // a = 0, constellation: {-1, +1}
+ * BPSKEncoder enc;      // a = 0, constellation: {-1, +1}
  * NRZDecoder dec(enc);  // Threshold at zero
  * @endcode
  *
@@ -1093,7 +1084,7 @@ class NRZDecoder : public details::DecoderProcessor<NRZDecoder> {
  *
  * // Complete BPSK communication chain
  * BPSKEncoder enc;
- * AWGN awgn(6.0, enc.get_Eb(), enc.get_b());
+ * AWGN awgn(6.0, enc.get_a(), enc.get_b());
  * BPSKDecoder dec;
  *
  * Vector<Fp<2>> c = {1, 0, 1, 1, 0};
@@ -1137,7 +1128,7 @@ class BPSKDecoder : public NRZDecoder {
  * @code{.cpp}
  * // BPSK soft demodulation
  * BPSKEncoder enc;  // a = 0, b = 2
- * AWGN awgn(4.0, enc.get_Eb(), enc.get_b());
+ * AWGN awgn(4.0, enc.get_a(), enc.get_b());
  * LLRCalculator llr_calc(enc, awgn);
  *
  * Vector<std::complex<double>> y = {(-0.8, 0.1), (1.2, -0.3), (-0.1, 0.2)};
@@ -1340,10 +1331,10 @@ Matrix<S> DEMUX<E, S>::operator()(const Vector<E>& in) noexcept {
  *
  * // Matrix compression to vector
  * Matrix<F2> M(2, 4);              // 2×4 matrix (2 = [F₄:F₂])
- * M(0,0) = F2(1); M(1,0) = F2(0);  // First column: F₄(1)
- * M(0,1) = F2(0); M(1,1) = F2(1);  // Second column: F₄(α)
- * M(0,2) = F2(1); M(1,2) = F2(1);  // Third column: F₄(α+1)
- * M(0,3) = F2(0); M(1,3) = F2(0);  // Fourth column: F₄(0)
+ * M.set_component(0, 0, F2(1)); M.set_component(1, 0, F2(0));  // First column: F₄(1)
+ * M.set_component(0, 1, F2(0)); M.set_component(1, 1, F2(1));  // Second column: F₄(α)
+ * M.set_component(0, 2, F2(1)); M.set_component(1, 2, F2(1));  // Third column: F₄(α+1)
+ * M.set_component(0, 3, F2(0)); M.set_component(1, 3, F2(0));  // Fourth column: F₄(0)
  * Vector<F4> v;
  * M >> mux >> v;                   // Result: {F₄(1), F₄(α), F₄(α+1), F₄(0)}
  *
@@ -1423,7 +1414,7 @@ Vector<E> MUX<S, E>::operator()(const Matrix<S>& in) noexcept {
  * // Communication chain with processing blocks
  * Vector<Fp<2>> c = {1, 0, 1, 0};
  * BPSKEncoder enc;
- * AWGN awgn(4.0, enc.get_Eb(), enc.get_b());
+ * AWGN awgn(4.0, enc.get_a(), enc.get_b());
  * BPSKDecoder dec;
  *
  * // Chain operations using operator>>
@@ -1465,7 +1456,7 @@ decltype(auto) operator>>(LHS&& lhs, RHS&& rhs) {
  * Vector<Fp<2>> r;
  *
  * BPSKEncoder enc;
- * AWGN awgn(4.0, enc.get_Eb(), enc.get_b());
+ * AWGN awgn(4.0, enc.get_a(), enc.get_b());
  * BPSKDecoder dec;
  *
  * // Chain with intermediate storage

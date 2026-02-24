@@ -51,6 +51,8 @@
 #define ULONG_LONG_MAX ULLONG_MAX
 // #endif
 
+#define INFINT_USE_EXCEPTIONS
+
 #ifdef INFINT_USE_EXCEPTIONS
 #include <exception>
 #endif

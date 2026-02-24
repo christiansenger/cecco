@@ -2,11 +2,11 @@
  * @file field_concepts_traits.hpp
  * @brief Concepts, traits, and type utilities for finite field arithmetic
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.0
- * @date 2025
+ * @version 2.1.1
+ * @date 2026
  *
  * @copyright
- * Copyright (c) 2025, Christian Senger <senger@inue.uni-stuttgart.de>
+ * Copyright (c) 2026, Christian Senger <senger@inue.uni-stuttgart.de>
  *
  * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
  * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
@@ -24,7 +24,6 @@
  * - **SubfieldOf**: Validates mathematical subfield relationships between field types
  * - **Isomorphic**: Ensures field types have the same size and characteristic for safe conversions
  * - **SignedIntType**: Supports both standard signed integers and arbitrary precision InfInt
- * - **UnsignedIntType**: Supports both standard unsigned integers and arbitrary precision InfInt
  * - **Arithmetic types**: Complex number and rational number type validation
  *
  * **Type Traits and Utilities:**
@@ -157,7 +156,6 @@ concept FieldType =
  * template <FiniteFieldType F>
  * void analyze_finite_field() {
  *     std::cout << "Field size (q): " << F::get_q() << std::endl;
- *     std::cout << "Prime characteristic (p): " << F::get_p() << std::endl;
  *     std::cout << "Prime characteristic (p): " << F::get_characteristic() << std::endl;
  *     std::cout << "Extension degree (m): " << F::get_m() << std::endl;
  *     std::cout << "Generator element: " << F::get_generator() << std::endl;
@@ -165,7 +163,7 @@ concept FieldType =
  * }
  * @endcode
  *
- * @note This concept is satisfied by Fp&lt;&gt; Ext<>, and Iso<>, but not by Rationals<>
+ * @note This concept is satisfied by Fp&lt;&gt;, Ext<>, and Iso<>, but not by Rationals<>
  */
 
 template <typename T>
@@ -436,10 +434,6 @@ class Iso;
 template <typename A, typename B>
 concept Isomorphic = FiniteFieldType<A> && FiniteFieldType<B> && requires { requires A::get_size() == B::get_size(); };
 
-// Forward declaration for Iso (constraints are in the class definition)
-template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
-class Iso;
-
 namespace details {
 
 /**
@@ -504,8 +498,8 @@ struct degree_over_prime<Iso<MAIN, OTHERS...>> {
  * parameter B in Ext<B, modulus> constructions.
  *
  * The relationship is **construction-based**, not mathematical containment. For example, if F16 is
- * constructed as Ext<F2, modulus>, then is_subfield_of<F16, F2>::value is true, but is_subfield_ov<F16, F4>::value is
- * false as the field F4 simply was not constructed (even though mathematially it is "in between" F2 and F16).
+ * constructed as Ext<F2, modulus>, then is_subfield_of<F16, F2>::value is true, but is_subfield_of<F16, F4>::value is
+ * false as the field F4 simply was not constructed (even though mathematically it is "in between" F2 and F16).
  *
  * @section is_subfield_of_specializations Specializations
  * - **Prime fields**: Fp<p> contains only itself (reflexivity)
@@ -668,7 +662,7 @@ concept SubfieldOf = details::is_subfield_of_v<SUPERFIELD, SUBFIELD>;
  * using F3 = Fp<3>;
  *
  * // Traditional relationships
-static_assert(Isomorphic<F16, F16>);       // true: every field is its own extension
+ * static_assert(ExtensionOf<F16, F16>);   // true: every field is its own extension
  * static_assert(ExtensionOf<F2, F4_1>);   // true: F4_1 defined based on F2
  * static_assert(ExtensionOf<F4_1, F16>);  // true: F16 defined based on F4_Iso (which contains F4_1)
  *
@@ -894,7 +888,7 @@ template <typename F>
 struct collect_subfields;
 
 // Specialization for prime fields - base case
-template <size_t p>
+template <uint16_t p>
 struct collect_subfields<Fp<p>> {
     using type = type_list<Fp<p>>;
 };
@@ -1061,12 +1055,9 @@ using largest_common_subfield_t = typename largest_common_subfield<F, G>::type;
  * using F16_v2 = Ext<F4, {2, 2, 1}>;
  * using F16_Iso = Iso<F16_v1, F16_v2>;
  *
- * static_assert(is_iso_v<F16_Iso>);       // true
- * static_assert(!is_iso_v<F16_v1>);       // false
- * using main = iso_main_type_t<F16_Iso>;  // F16_v1
+ * static_assert(iso_info<F16_Iso>::is_iso);       // true
+ * static_assert(!iso_info<F16_v1>::is_iso);       // false
  * @endcode
- *
- * @see @ref is_iso_v, @ref iso_main_type_t
  */
 template <typename T>
 struct iso_info {
@@ -1148,8 +1139,8 @@ class NonCopyable {
     NonCopyable& operator=(const NonCopyable&) = delete;
 
     // Allow move operations by changing to default
-    NonCopyable(NonCopyable&&) = delete;
-    NonCopyable& operator=(NonCopyable&&) = delete;
+    NonCopyable(NonCopyable&&) = default;
+    NonCopyable& operator=(NonCopyable&&) = default;
 };
 }  // namespace details
 
