@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.10
+ * @version 2.0.11
  * @date 2026
  *
  * @copyright
@@ -274,8 +274,9 @@ class Code {
     virtual Vector<T> enc(const Vector<T>& u) const = 0;
     virtual Vector<T> encinv(const Vector<T>& c) const = 0;
     virtual Vector<T> dec_BD(const Vector<T>& r) const = 0;
+    virtual Vector<T> dec_boosted_BD(const Vector<T>& r) const = 0;
     virtual Vector<T> dec_ML(const Vector<T>& r) const = 0;
-    virtual Vector<T> dec_ML_soft(const Vector<double>& llrs) const = 0;
+    virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t cache_size) const = 0;
     virtual Vector<T> dec_burst(const Vector<T>& r) const = 0;
 #ifdef CECCO_ERASURE_SUPPORT
     virtual Vector<T> dec_BD_EE(const Vector<T>& r) const = 0;
@@ -524,6 +525,9 @@ class LinearCode : public Code<T> {
             weight_enumerator = other.weight_enumerator;
             weight_enumerator_flag.~once_flag();
             new (&weight_enumerator_flag) std::once_flag();
+            codewords = other.codewords;
+            codewords_flag.~once_flag();
+            new (&codewords_flag) std::once_flag();
             standard_array = other.standard_array;
             standard_array_flag.~once_flag();
             new (&standard_array_flag) std::once_flag();
@@ -562,6 +566,9 @@ class LinearCode : public Code<T> {
             weight_enumerator = std::move(other.weight_enumerator);
             weight_enumerator_flag.~once_flag();
             new (&weight_enumerator_flag) std::once_flag();
+            codewords = std::move(other.codewords);
+            codewords_flag.~once_flag();
+            new (&codewords_flag) std::once_flag();
             standard_array = std::move(other.standard_array);
             standard_array_flag.~once_flag();
             new (&standard_array_flag) std::once_flag();
@@ -798,6 +805,12 @@ class LinearCode : public Code<T> {
         return standard_array.value();
     }
 
+    const std::vector<bool>& get_tainted() const
+        requires FiniteFieldType<T>
+    {
+        return tainted.value();
+    }
+
     CodewordIterator<T> cbegin() const noexcept
         requires FiniteFieldType<T>
     {
@@ -811,6 +824,203 @@ class LinearCode : public Code<T> {
         requires FiniteFieldType<T>
     {
         return CodewordIterator<T>(*this, get_size());
+    }
+
+    /**
+     * @brief Test whether two linear codes are identical
+     *
+     * @tparam S Field type of the other code (must equal T for a meaningful comparison)
+     * @param other Linear code to compare against
+     * @param L_ptr If non-null, receives the invertible k × k matrix L such that G' = L · G
+     * @return True if both codes span the same codebook, false otherwise
+     *
+     * Two [n, k] linear codes are identical if they have the same codebook, which
+     * is the case if and only if their generator matrices have the same RREF.
+     * When n − k < k, the comparison is performed on the parity-check matrices
+     * for efficiency.
+     */
+    template <FieldType S>
+    bool is_identical(const LinearCode<S>& other, Matrix<T>* L_ptr = nullptr) const {
+        if constexpr (!std::is_same_v<T, S>) {
+            return false;
+        } else {
+            if (this->n != other.n || k != other.k) return false;
+            if (this == &other) {
+                if (L_ptr != nullptr) *L_ptr = IdentityMatrix<T>(k);
+                return true;
+            }
+
+            bool res;
+            if (this->n - k < other.k)
+                res = rref(transpose(HT)) == rref(transpose(other.HT));
+            else
+                res = rref(G) == rref(other.G);
+
+            if (res && L_ptr != nullptr) {
+                  auto Bp = transpose(Matrix<T>(other.get_G().get_col(infoset[0])));
+                  for (size_t t = 1; t < k; ++t)
+                      Bp.horizontal_join(transpose(Matrix<T>(other.get_G().get_col(infoset[t]))));
+                  *L_ptr = Bp * MI;
+              }
+
+            return res;
+        }
+    }
+
+    /**
+     * @brief Test whether two linear codes are equivalent
+     *
+     * @tparam S Field type of the other code (must equal T for a meaningful comparison)
+     * @param other Linear code to compare against
+     * @param L_ptr If non-null, receives the invertible k × k matrix L such that G' = L · G · P
+     * @param P_ptr If non-null, receives the n × n permutation matrix P such that G' = L · G · P
+     * @return True if the codes are equivalent, false otherwise
+     *
+     * Two [n, k] linear codes are equivalent if their generator matrices are related
+     * by G' = L · G · P for some invertible matrix L and permutation matrix P.
+     * When n − k < k, the search is performed on the dual codes for efficiency.
+     *
+     * @note The search has combinatorial complexity and may be slow for large codes
+     */
+    template <FieldType S>
+    bool is_equivalent(const LinearCode<S>& other, Matrix<T>* L_ptr = nullptr, Matrix<T>* P_ptr = nullptr) const {
+        if constexpr (!std::is_same_v<T, S>) {
+            return false;
+        } else {
+            if (this->n != other.n || k != other.k) return false;
+
+            if (this == &other) {
+                if (L_ptr != nullptr) *L_ptr = IdentityMatrix<T>(k);
+                if (P_ptr != nullptr) *P_ptr = IdentityMatrix<T>(this->n);
+                return true;
+            }
+
+            if (this->n - k < k) {
+                auto Cperp = this->get_dual();
+                auto Cotherperp = other.get_dual();
+
+                Matrix<T> Pperp;
+                Matrix<T>* Pperp_ptr = (P_ptr != nullptr || L_ptr != nullptr) ? &Pperp : nullptr;
+
+                // L on the dual side is not useful here, so don't request it.
+                if (!Cperp.is_equivalent(Cotherperp, nullptr, Pperp_ptr)) return false;
+
+                if (P_ptr != nullptr) *P_ptr = Pperp;
+
+                if (L_ptr != nullptr) {
+                    std::vector<size_t> p(this->n, this->n);
+                    for (size_t i = 0; i < this->n; ++i) {
+                        for (size_t j = 0; j < this->n; ++j) {
+                            if (Pperp(i, j) == T(1)) {
+                                p[i] = j;
+                                break;
+                            }
+                        }
+                    }
+
+                    auto Bp = transpose(Matrix<T>(other.get_G().get_col(p[this->infoset[0]])));
+                    for (size_t t = 1; t < this->k; ++t)
+                        Bp.horizontal_join(transpose(Matrix<T>(other.get_G().get_col(p[this->infoset[t]]))));
+                    *L_ptr = Bp * this->MI;
+                }
+
+                return true;
+            } else {
+                auto next_combination = [](std::vector<size_t>& comb, size_t n_total) -> bool {
+                    const size_t kk = comb.size();
+                    for (size_t i = kk; i-- > 0;) {
+                        if (comb[i] < n_total - kk + i) {
+                            ++comb[i];
+                            for (size_t j = i + 1; j < kk; ++j) comb[j] = comb[j - 1] + 1;
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+
+                std::vector<Vector<T>> Gp_cols;
+                Gp_cols.reserve(this->n);
+                for (size_t j = 0; j < this->n; ++j) Gp_cols.push_back(other.get_G().get_col(j));
+
+                std::vector<size_t> target_col_keys;
+                target_col_keys.reserve(this->n);
+                for (size_t j = 0; j < this->n; ++j) target_col_keys.push_back(Gp_cols[j].as_integer());
+                std::sort(target_col_keys.begin(), target_col_keys.end());
+
+                std::vector<size_t> J(k);
+                std::iota(J.begin(), J.end(), 0);
+
+                do {
+                    auto Bp_sorted = transpose(Matrix<T>(Gp_cols[J[0]]));
+                    for (size_t t = 1; t < k; ++t) Bp_sorted.horizontal_join(transpose(Matrix<T>(Gp_cols[J[t]])));
+
+                    if (Bp_sorted.rank() != k) continue;
+
+                    std::vector<size_t> Jperm = J;
+                    do {
+                        auto Bp = transpose(Matrix<T>(Gp_cols[Jperm[0]]));
+                        for (size_t t = 1; t < k; ++t) Bp.horizontal_join(transpose(Matrix<T>(Gp_cols[Jperm[t]])));
+
+                        const auto L = Bp * MI;
+                        const auto Lt = transpose(L);  // buffered once per candidate
+
+                        std::vector<size_t> transformed_col_keys;
+                        transformed_col_keys.reserve(this->n);
+
+                        for (size_t col = 0; col < this->n; ++col) {
+                            auto h = Vector<T>(G.get_col(col) * Lt);
+                            transformed_col_keys.push_back(h.as_integer());
+                        }
+                        std::sort(transformed_col_keys.begin(), transformed_col_keys.end());
+
+                        if (transformed_col_keys == target_col_keys) {
+                            // Fast path: caller only wants yes/no
+                            if (L_ptr == nullptr && P_ptr == nullptr) return true;
+
+                            if (L_ptr != nullptr) *L_ptr = L;
+
+                            if (P_ptr != nullptr) {
+                                std::vector<Vector<T>> transformed_cols;
+                                transformed_cols.reserve(this->n);
+                                for (size_t col = 0; col < this->n; ++col)
+                                    transformed_cols.push_back(Vector<T>(G.get_col(col) * Lt));
+
+                                std::vector<size_t> perm(this->n, this->n);
+                                std::vector<bool> used(this->n, false);
+
+                                bool match_ok = true;
+                                for (size_t i = 0; i < this->n && match_ok; ++i) {
+                                    bool found = false;
+                                    for (size_t j = 0; j < this->n; ++j) {
+                                        if (used[j]) continue;
+                                        if (transformed_cols[i] == Gp_cols[j]) {
+                                            perm[i] = j;
+                                            used[j] = true;
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!found) match_ok = false;
+                                }
+
+                                if (!match_ok) {
+                                    // If matching fails, continue searching (e.g. due to key collisions)
+                                    continue;
+                                }
+
+                                *P_ptr = PermutationMatrix<T>(perm);
+                            }
+
+                            return true;
+                        }
+
+                    } while (std::next_permutation(Jperm.begin(), Jperm.end()));
+
+                } while (next_combination(J, this->n));
+
+                return false;
+            }
+        }
     }
 
     bool is_perfect() const {
@@ -967,6 +1177,23 @@ class LinearCode : public Code<T> {
         return c_est;
     }
 
+    virtual Vector<T> dec_boosted_BD(const Vector<T>& r) const final override {
+        static_assert(FiniteFieldType<T>, "BD decoding only available for codes over finite fields!");
+        validate_length(r);
+#ifdef CECCO_ERASURE_SUPPORT
+        if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+#endif
+
+        if (k == 0) return Vector<T>(this->n);
+
+        get_standard_array();
+        const auto s = r * HT;  // calculate syndrome...
+        if (s.is_zero()) return r;
+        const size_t i = s.as_integer();  // ... and interpret it as binary number
+        if (tainted.value()[i]) throw decoding_failure("Linear code boosted BD decoder failed!");
+        return r - standard_array.value()[i];
+    }
+
     virtual Vector<T> dec_ML(const Vector<T>& r) const override {
         static_assert(FiniteFieldType<T>, "ML decoding only available for codes over finite fields!");
         validate_length(r);
@@ -1002,23 +1229,41 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_ML_soft(const Vector<double>& llrs) const override {
+    virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t cache_limit) const override {
+        static_assert(std::is_same_v<T, Fp<2>>, "Soft-input ML decoding only available for codes over F_2!");
         validate_length(llrs);
 
         if (k == 0) return Vector<T>(this->n);
 
-        Vector<T> c_est(this->n);
-        double best;
-        for (auto it = cbegin(); it != cend(); ++it) {
-            double val = 0;
-            for (size_t i = 0; i < this->n; ++i) {
-                if ((*it)[i] != T(0)) val += llrs[i];
+        Vector<T> c_est;
+        double best = std::numeric_limits<double>::max();
+
+        if (this->get_size() <= cache_limit) {
+            std::call_once(codewords_flag, [this] { codewords.emplace(this->get_G().span()); });
+
+            for (auto it = codewords.value().cbegin(); it != codewords.value().cend(); ++it) {
+                double val = 0.0;
+                for (size_t i = 0; i < this->n; ++i) {
+                    if ((*it)[i] != T(0)) val += llrs[i];
+                }
+                if (val < best) {
+                    c_est = *it;
+                    best = val;
+                }
             }
-            if (val < best) {
-                c_est = *it;
-                best = val;
+        } else {
+            for (auto it = cbegin(); it != cend(); ++it) {
+                double val = 0.0;
+                for (size_t i = 0; i < this->n; ++i) {
+                    if ((*it)[i] != T(0)) val += llrs[i];
+                }
+                if (val < best) {
+                    c_est = *it;
+                    best = val;
+                }
             }
         }
+
         return c_est;
     }
 
@@ -1136,7 +1381,7 @@ class LinearCode : public Code<T> {
     }
 #endif
 
-    template <typename S>
+    template<ComponentType S>
     void validate_length(const Vector<S>& r) const {
         if (r.get_n() != this->n)
             throw std::invalid_argument(std::string("Received vector length must be ") + std::to_string(this->n));
@@ -1151,6 +1396,8 @@ class LinearCode : public Code<T> {
     mutable std::once_flag dmin_flag;
     mutable std::optional<Polynomial<InfInt>> weight_enumerator;
     mutable std::once_flag weight_enumerator_flag;
+    mutable std::optional<std::vector<Vector<T>>> codewords;
+    mutable std::once_flag codewords_flag;
     mutable std::optional<std::vector<Vector<T>>> standard_array;
     mutable std::once_flag standard_array_flag;
     mutable std::optional<std::vector<bool>> tainted;
@@ -2705,7 +2952,7 @@ class AugmentedCode : public LinearCode<T> {
     Vector<T> w;
 };
 
-template <typename T>
+template <FieldType T>
 auto dual(const T& C) {
     return C.get_dual();
 }
@@ -2866,21 +3113,22 @@ auto shorten(B&& base, size_t j, size_t i) {
 
 template <FieldType L, FieldType R>
 bool operator==(const LinearCode<L>& lhs, const LinearCode<R>& rhs) {
-    if constexpr (!std::is_same_v<L, R>) {
-        return false;
-    } else {
-        if (lhs.get_n() != rhs.get_n() || lhs.get_k() != rhs.get_k()) return false;
-        if (lhs.get_G() == rhs.get_G() || lhs.get_H() == rhs.get_H()) return true;
-        if (lhs.get_n() - lhs.get_k() < lhs.get_k())
-            return rref(lhs.get_H()) == rref(rhs.get_H());
-        else
-            return rref(lhs.get_G()) == rref(rhs.get_G());
-    }
+    return lhs.is_identical(rhs);
 }
 
 template <FieldType L, FieldType R>
 bool operator!=(const LinearCode<L>& lhs, const LinearCode<R>& rhs) {
     return !(lhs == rhs);
+}
+
+template <FieldType L, FieldType R>
+bool identical(const LinearCode<L>& lhs, const LinearCode<R>& rhs) {
+    return lhs.is_identical(rhs);
+}
+
+template <FieldType L, FieldType R>
+bool equivalent(const LinearCode<L>& lhs, const LinearCode<R>& rhs) {
+    return lhs.is_equivalent(rhs);
 }
 
 template <FieldType T>
@@ -2912,6 +3160,17 @@ class Dec_BD {
 };
 
 template <FieldType T>
+class Dec_boosted_BD {
+   public:
+    Dec_boosted_BD(const Code<T>& C) : C(C) {}
+
+    Vector<T> operator()(const Vector<T>& in) const { return C.dec_boosted_BD(in); }
+
+   private:
+    const Code<T>& C;
+};
+
+template <FieldType T>
 class Dec_ML {
    public:
     Dec_ML(const Code<T>& C) : C(C) {}
@@ -2925,12 +3184,13 @@ class Dec_ML {
 template <FieldType T>
 class Dec_ML_soft {
    public:
-    Dec_ML_soft(const Code<T>& C) : C(C) {}
+    Dec_ML_soft(const Code<T>& C, size_t cache_limit = 10000) : C(C), cache_limit(cache_limit) {}
 
-    Vector<T> operator()(const Vector<double>& in) const { return C.dec_ML_soft(in); }
+    Vector<T> operator()(const Vector<double>& in) const { return C.dec_ML_soft(in, cache_limit); }
 
    private:
     const Code<T>& C;
+    const size_t cache_limit;
 };
 
 #ifdef CECCO_ERASURE_SUPPORT
