@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.2
+ * @version 2.3.3
  * @date 2026
  *
  * @copyright
@@ -4882,8 +4882,9 @@ class Iso : public details::Base {
      * @param other Right-hand side addend in OTHER representation
      * @return Reference to this element after addition
      */
-    template <BelongsTo<OTHERS...> OTHER>
-    constexpr Iso& operator+=(const OTHER& other);
+    template <typename OTHER>
+    constexpr Iso& operator+=(const OTHER& other)
+        requires BelongsTo<OTHER, OTHERS...>;
 
     /**
      * @brief Subtraction assignment
@@ -4898,8 +4899,9 @@ class Iso : public details::Base {
      * @param other Right-hand side subtrahend in OTHER representation
      * @return Reference to this element after subtraction
      */
-    template <BelongsTo<OTHERS...> OTHER>
-    constexpr Iso& operator-=(const OTHER& other);
+    template <typename OTHER>
+    constexpr Iso& operator-=(const OTHER& other)
+        requires BelongsTo<OTHER, OTHERS...>;
 
     /**
      * @brief Multiplication assignment
@@ -4914,8 +4916,9 @@ class Iso : public details::Base {
      * @param other Right-hand side multiplier in OTHER representation
      * @return Reference to this element after multiplication
      */
-    template <BelongsTo<OTHERS...> OTHER>
-    constexpr Iso& operator*=(const OTHER& other);
+    template <typename OTHER>
+    constexpr Iso& operator*=(const OTHER& other)
+        requires BelongsTo<OTHER, OTHERS...>;
 
     /**
      * @brief Scalar multiplication assignment
@@ -4939,8 +4942,9 @@ class Iso : public details::Base {
      * @return Reference to this element after division
      * @throws std::invalid_argument if other is zero (division by zero)
      */
-    template <BelongsTo<OTHERS...> OTHER>
-    Iso& operator/=(const OTHER& other);
+    template <typename OTHER>
+    Iso& operator/=(const OTHER& other)
+        requires BelongsTo<OTHER, OTHERS...>;
 
     /**
      * @brief Convert to specific isomorphic representation
@@ -4955,8 +4959,9 @@ class Iso : public details::Base {
      * F4_b specific = unified.as<F4_b>();  // Explicit conversion
      * @endcode
      */
-    template <BelongsTo<OTHERS...> TO>
-    constexpr TO as() const;
+    template <typename TO>
+    constexpr TO as() const
+        requires BelongsTo<TO, OTHERS...>;
 
     /**
      * @brief Access underlying MAIN representation (const)
@@ -5042,8 +5047,9 @@ class Iso : public details::Base {
      * iso_elem = other_repr;  // Uses this assignment operator
      * @endcode
      */
-    template <BelongsTo<OTHERS...> OTHER>
-    Iso& operator=(const OTHER& other);
+    template <typename OTHER>
+    Iso& operator=(const OTHER& other)
+        requires BelongsTo<OTHER, OTHERS...>;
 
     /**
      * @brief Cross-field assignment from Fp type
@@ -5090,9 +5096,9 @@ class Iso : public details::Base {
      * @throws std::invalid_argument if conversion not possible
      */
     template <FiniteFieldType OTHER_MAIN, FiniteFieldType... OTHER_OTHERS>
+    Iso& operator=(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other)
         requires(OTHER_MAIN::get_characteristic() == MAIN::get_characteristic()) &&
-                (!std::is_same_v<Iso<OTHER_MAIN, OTHER_OTHERS...>, Iso<MAIN, OTHERS...>>)
-    Iso& operator=(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other);
+                (!std::is_same_v<Iso<OTHER_MAIN, OTHER_OTHERS...>, Iso<MAIN, OTHERS...>>);
 
     // Equality operators
     constexpr bool operator==(const Iso& other) const noexcept { return main_ == other.main_; }
@@ -5168,9 +5174,9 @@ class Iso : public details::Base {
 
     // Vector conversion method - handle different target types T
     template <FiniteFieldType T>
+    Vector<T> as_vector() const noexcept
         requires((SubfieldOf<MAIN, T> || ((SubfieldOf<OTHERS, T>) || ...))) &&
-                (!std::is_same_v<Iso<MAIN, OTHERS...>, T>)
-    Vector<T> as_vector() const noexcept;
+                (!std::is_same_v<Iso<MAIN, OTHERS...>, T>);
 };
 
 /* member functions for Iso */
@@ -5194,8 +5200,9 @@ constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator=(int other) {
 }
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
-template <BelongsTo<OTHERS...> OTHER>
-Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator=(const OTHER& other) {
+template <typename OTHER>
+Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator=(const OTHER& other)
+    requires BelongsTo<OTHER, OTHERS...>{
     Iso temp(other);
     std::swap(*this, temp);
     return *this;
@@ -5221,9 +5228,9 @@ Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator=(const Ext<B, ext_modulus, 
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 template <FiniteFieldType OTHER_MAIN, FiniteFieldType... OTHER_OTHERS>
+Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator=(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other)
     requires(OTHER_MAIN::get_characteristic() == MAIN::get_characteristic()) &&
-            (!std::is_same_v<Iso<OTHER_MAIN, OTHER_OTHERS...>, Iso<MAIN, OTHERS...>>)
-Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator=(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
+            (!std::is_same_v<Iso<OTHER_MAIN, OTHER_OTHERS...>, Iso<MAIN, OTHERS...>>){
     Iso temp(other);
     std::swap(*this, temp);
     return *this;
@@ -5500,8 +5507,9 @@ constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator+=(const Iso& othe
 }
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
-template <BelongsTo<OTHERS...> OTHER>
-constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator+=(const OTHER& other) {
+template <typename OTHER>
+constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator+=(const OTHER& other)
+    requires BelongsTo<OTHER, OTHERS...>{
     main_ += Iso(other).main_;
     return *this;
 }
@@ -5513,8 +5521,9 @@ constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator-=(const Iso& othe
 }
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
-template <BelongsTo<OTHERS...> OTHER>
-constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator-=(const OTHER& other) {
+template <typename OTHER>
+constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator-=(const OTHER& other)
+    requires BelongsTo<OTHER, OTHERS...>{
     main_ -= Iso(other).main_;
     return *this;
 }
@@ -5526,8 +5535,9 @@ constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator*=(const Iso& othe
 }
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
-template <BelongsTo<OTHERS...> OTHER>
-constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator*=(const OTHER& other) {
+template <typename OTHER>
+constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator*=(const OTHER& other)
+    requires BelongsTo<OTHER, OTHERS...>{
     main_ *= Iso(other).main_;
     return *this;
 }
@@ -5545,15 +5555,17 @@ Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator/=(const Iso& other) {
 }
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
-template <BelongsTo<OTHERS...> OTHER>
-Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator/=(const OTHER& other) {
+template <typename OTHER>
+Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator/=(const OTHER& other)
+    requires BelongsTo<OTHER, OTHERS...>{
     main_ /= Iso(other).main_;
     return *this;
 }
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
-template <BelongsTo<OTHERS...> TO>
-constexpr TO Iso<MAIN, OTHERS...>::as() const {
+template <typename TO>
+constexpr TO Iso<MAIN, OTHERS...>::as() const
+    requires BelongsTo<TO, OTHERS...>{
     auto phi = Isomorphism<MAIN, TO>();
     return phi(main_);
 }
@@ -5568,8 +5580,8 @@ const std::string Iso<MAIN, OTHERS...>::get_info() noexcept {
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 template <FiniteFieldType T>
-    requires((SubfieldOf<MAIN, T> || ((SubfieldOf<OTHERS, T>) || ...))) && (!std::is_same_v<Iso<MAIN, OTHERS...>, T>)
-Vector<T> Iso<MAIN, OTHERS...>::as_vector() const noexcept {
+Vector<T> Iso<MAIN, OTHERS...>::as_vector() const noexcept
+    requires((SubfieldOf<MAIN, T> || ((SubfieldOf<OTHERS, T>) || ...))) && (!std::is_same_v<Iso<MAIN, OTHERS...>, T>){
     if constexpr (std::is_same_v<T, MAIN>) {
         // T is MAIN - direct conversion
         return main_.template as_vector<T>();
