@@ -60,7 +60,7 @@ template <FiniteFieldType T>
 size_t A(size_t n, size_t d, size_t w) {
     if (2 * w < d) return 1;
     constexpr size_t q = T::get_size();
-    const size_t e = std::ceill(d / 2.0);
+    const size_t e = std::ceil(d / 2.0);
     size_t res = 1;
     for (size_t i = e; i <= w; ++i) res *= (n - w + i) * (q - 1) / (long double)i;
     return res;
@@ -92,11 +92,11 @@ long double PlotkinUpperBound(size_t n, size_t dmin) {
     constexpr size_t q = T::get_size();
     try {
         if ((long double)dmin / n > (long double)(q - 1) / q) {  // conventional
-            return 1 - std::log2l(q - (long double)n * (q - 1) / dmin) / std::log2l(q);
+            return 1 - std::log2(q - (long double)n * (q - 1) / dmin) / std::log2(q);
         } else {  // improved
-            const size_t Delta = n - std::floorl((long double)dmin * q / (q - 1)) + 1;
+            const size_t Delta = n - std::floor((long double)dmin * q / (q - 1)) + 1;
             const size_t M = sqm(q, Delta + 1) * (long double)dmin / ((q * dmin - (n - Delta) * (q - 1)));
-            return std::log2l(M) / std::log2l(q);
+            return std::log2(M) / std::log2(q);
         }
     } catch (const InfIntException& e) {
         std::cerr << " [Plotkin bound overflow]";
@@ -134,7 +134,7 @@ size_t GriesmerUpperBound(size_t n, size_t dmin) {
     size_t k = 0;
     for (size_t kp = 1; kp <= n; ++kp) {
         size_t sum = 0;
-        for (size_t i = 0; i < kp; ++i) sum += std::ceill(dmin / sqm<long double>(q, i));
+        for (size_t i = 0; i < kp; ++i) sum += std::ceil(dmin / sqm<long double>(q, i));
         if (sum <= n)
             k = kp;
         else
@@ -166,7 +166,7 @@ size_t GilbertVarshamovLowerBound(size_t n, size_t dmin) {
     try {
         InfInt sum = 0;
         for (size_t i = 0; i < dmin; ++i) sum += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-        return std::ceill(n - std::log2l(sum.toUnsignedLongLong()) / std::log2l(q));
+        return std::ceil(n - std::log2(sum.toUnsignedLongLong()) / std::log2(q));
     } catch (const InfIntException& e) {
         std::cerr << " [Gilbert-Varshamov bound overflow]";
         return 0;
@@ -176,7 +176,7 @@ size_t GilbertVarshamovLowerBound(size_t n, size_t dmin) {
 template <FiniteFieldType T>
 size_t BurstUpperBound(size_t n, size_t ell) {
     constexpr size_t q = T::get_size();
-    return std::floorl(n - ell - std::log2l(1 + (q - 1) * (n - ell) / q) / std::log2l(q));
+    return std::floor(n - ell - std::log2(1 + (q - 1) * (n - ell) / q) / std::log2(q));
 }
 
 size_t ReigerBurstUpperBound(size_t n, size_t ell) {
@@ -248,7 +248,7 @@ std::ostream& showspecial(std::ostream& os) {
     return os;
 }
 
-template <FieldType T>
+template <ComponentType T>
 class Code {
    public:
     Code(size_t n) : n(n) {}
@@ -287,7 +287,7 @@ class Code {
     size_t n;
 };
 
-template <FieldType T>
+template <ComponentType T>
 class EmptyCode : public Code<T> {
    public:
     EmptyCode(size_t n) : Code<T>(n) {}
@@ -688,6 +688,50 @@ class LinearCode : public Code<T> {
         return weight_enumerator.value();
     }
 
+    long double P_word(double pe) const {
+        const size_t tmax = get_tmax();
+        long double res = 0.0;
+        for (size_t i = tmax + 1; i <= this->n; ++i)
+            res += bin<InfInt>(this->n, i).toUnsignedLongLong() * std::pow(static_cast<long double>(pe), i) * std::pow(1.0L - pe, this->n - i);
+        return res;
+    }
+
+    long double P_error(double pe) const {
+        const auto& A = get_weight_enumerator();
+        const size_t tmax = get_tmax();
+        long double res = 0.0;
+        for (size_t h = 1; h <= this->n; ++h) {
+            InfInt sum = 0;
+            for (size_t s = 0; s <= tmax; ++s) {
+                for (size_t ell = 1; ell <= this->n; ++ell) sum += A[ell] * N(ell, h, s);
+            }
+            res += std::pow(static_cast<long double>(pe) / (T::get_size() - 1), h) * std::pow(1.0L - pe, this->n - h) *
+                   sum.toUnsignedLongLong();
+        }
+        return res;
+    }
+
+    long double P_failure(double pe) const {
+        long double res = P_word(pe) - P_error(pe);
+        if (std::fabs(res) < 10 * std::numeric_limits<long double>::epsilon())
+            return 0;
+        else
+            return res;
+    }
+
+    long double Bhattacharyya_bound(long double gamma) const
+        requires(T::get_size() == 2)
+    {
+        const auto& A = get_weight_enumerator();
+        const size_t dmin = get_dmin();
+
+        long double res = 0;
+        for (size_t i = dmin; i <= A.degree(); ++i)
+            res += A[i].toUnsignedLongLong() * std::pow(gamma, i);
+
+        return res;
+    }
+
     const Polynomial<T>& get_gamma() const {
         if (!is_polynomial())
             throw std::logic_error("Cannot calculate generator polynomial of a code that is not polynomial!");
@@ -857,11 +901,11 @@ class LinearCode : public Code<T> {
                 res = rref(G) == rref(other.G);
 
             if (res && L_ptr != nullptr) {
-                  auto Bp = transpose(Matrix<T>(other.get_G().get_col(infoset[0])));
-                  for (size_t t = 1; t < k; ++t)
-                      Bp.horizontal_join(transpose(Matrix<T>(other.get_G().get_col(infoset[t]))));
-                  *L_ptr = Bp * MI;
-              }
+                auto Bp = transpose(Matrix<T>(other.get_G().get_col(infoset[0])));
+                for (size_t t = 1; t < k; ++t)
+                    Bp.horizontal_join(transpose(Matrix<T>(other.get_G().get_col(infoset[t]))));
+                *L_ptr = Bp * MI;
+            }
 
             return res;
         }
@@ -1025,7 +1069,7 @@ class LinearCode : public Code<T> {
 
     bool is_perfect() const {
         if (k == 0) return false;
-        return std::fabsl(HammingUpperBound<T>(this->n, get_dmin()) - k) <
+        return std::fabs(HammingUpperBound<T>(this->n, get_dmin()) - k) <
                10 * std::numeric_limits<long double>::epsilon();
     }
 
@@ -1036,7 +1080,7 @@ class LinearCode : public Code<T> {
 
     bool is_equidistant() const {
         if (k == 0) return true;
-        return std::fabsl(PlotkinUpperBound<T>(this->n, get_dmin()) - k) <
+        return std::fabs(PlotkinUpperBound<T>(this->n, get_dmin()) - k) <
                10 * std::numeric_limits<long double>::epsilon();
     }
 
@@ -1381,7 +1425,7 @@ class LinearCode : public Code<T> {
     }
 #endif
 
-    template<ComponentType S>
+    template <ComponentType S>
     void validate_length(const Vector<S>& r) const {
         if (r.get_n() != this->n)
             throw std::invalid_argument(std::string("Received vector length must be ") + std::to_string(this->n));
@@ -1433,6 +1477,52 @@ class LinearCode : public Code<T> {
         return offset + rank;
     }
 #endif
+
+    InfInt N(size_t ell, size_t h, size_t s) const noexcept {
+        const size_t n = this->n;
+
+        if (T::get_size() == 2) {
+            InfInt res = 0;
+            for (size_t u = 0; u <= n; ++u) {
+                for (size_t w = 0; w <= n; ++w) {
+                    if (u + w == s && ell + u - w == h) {
+                        res += bin<InfInt>(n - ell, u) * bin<InfInt>(ell, w);
+                    }
+                }
+            }
+            return res;
+        } else {
+            InfInt res = 0;
+
+            bool breakflag = false;
+            for (size_t u = 0; u <= n; ++u) {
+                for (size_t v = 0; v <= n; ++v) {
+                    for (size_t w = 0; w <= n; ++w) {
+                        if (u + v + w == s && ell + u - w == h) {
+                            res += bin<InfInt>(n - ell, u) * bin<InfInt>(ell, v) * bin<InfInt>(ell - v, w) *
+                                   sqm<InfInt>(T::get_size() - 1, u) * sqm<InfInt>(T::get_size() - 2, v);
+                            break;  // no need to check for further matching w
+                        }
+                    }
+                }
+            }
+
+            /*
+            // Blahut alternative
+            for (size_t i=0; i<=n; ++i) {
+                for (size_t j=0; j<=n; ++j) {
+                    if (i+2*j+h==s+ell) {
+                        if (ell>n || j+h-ell>n-ell || ell>j+h || i>ell || i>ell || j>ell-i) continue;
+                        sum+=bin<InfInt>(n-ell, j+h-ell)*bin<InfInt>(ell, i)*bin<InfInt>(ell-i, j)*powl(F::get_size(),
+            j+h-ell)*powl(F::get_size()-2, i);
+                    }
+                }
+            }
+            */
+
+            return res;
+        }
+    }
 };
 
 template <FiniteFieldType T>

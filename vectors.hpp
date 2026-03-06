@@ -907,24 +907,24 @@ class Vector {
     Matrix<S> as_matrix() const
         requires FiniteFieldType<T> && SubfieldOf<T, S> && (!std::is_same_v<T, S>);
 
-    Matrix<T> to_matrix(size_t m) const {
-        const double n = static_cast<double>(get_n()) / m;
-        if (n != std::ceil(n))
-            throw std::invalid_argument(std::string("Cannot convert vector into a matrix with ") + std::to_string(m) +
-                                        std::string("rows, number of rows m (") + std::to_string(m) +
-                                        std::string(") is not a divisor of vector length n (") +
-                                        std::to_string(get_n()) + ")!");
-
-        Matrix<T> M(m, static_cast<size_t>(n));
-        size_t k = 0;
-        for (size_t i = 0; i < m; ++i) {
-            for (size_t j = 0; j < static_cast<size_t>(n); ++j) {
-                M.set_component(i, j, data[k]);
-                ++k;
-            }
-        }
-        return M;
-    }
+    /**
+     * @brief Reshape vector into a matrix by row-major order
+     *
+     * @param m Number of rows in the resulting matrix
+     * @return Matrix of dimensions m × (n / m) containing all vector elements
+     *
+     * Distributes the vector elements into matrix rows. Vector index k maps to
+     * matrix element (k / cols, k % cols) where cols = n / m. This is the inverse
+     * of @ref Matrix::to_vector.
+     *
+     * @throws std::invalid_argument if m does not divide the vector length
+     *
+     * @code{.cpp}
+     * Vector<double> v = {1, 2, 3, 4, 5, 6};
+     * auto M = v.to_matrix(2);  // M = {{1, 2, 3}, {4, 5, 6}}
+     * @endcode
+     */
+    Matrix<T> to_matrix(size_t m) const;
 
     /** @} */
 
@@ -1525,6 +1525,26 @@ Matrix<S> Vector<T>::as_matrix() const
     }
 
     return res;
+}
+
+template <ComponentType T>
+Matrix<T> Vector<T>::to_matrix(size_t m) const {
+    const double n = static_cast<double>(get_n()) / m;
+    if (n != std::ceil(n))
+        throw std::invalid_argument(std::string("Cannot convert vector into a matrix with ") + std::to_string(m) +
+                                    std::string("rows, number of rows m (") + std::to_string(m) +
+                                    std::string(") is not a divisor of vector length n (") +
+                                    std::to_string(get_n()) + ")!");
+
+    Matrix<T> M(m, static_cast<size_t>(n));
+    size_t k = 0;
+    for (size_t i = 0; i < m; ++i) {
+        for (size_t j = 0; j < static_cast<size_t>(n); ++j) {
+            M.set_component(i, j, data[k]);
+            ++k;
+        }
+    }
+    return M;
 }
 
 /* free functions wrt. Vector */

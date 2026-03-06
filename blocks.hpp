@@ -2,7 +2,7 @@
  * @file blocks.hpp
  * @brief Communication system blocks library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2
+ * @version 2.2.1
  * @date 2026
  *
  * @copyright
@@ -321,6 +321,23 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
      * @note Returned value is in bits (log base 2).
      */
     double get_capacity() const noexcept;
+
+    /**
+     * @brief Get Bhattacharyya parameter of the channel
+     * @return Bhattacharyya parameter γ = 2 √(pe (1 − pe))
+     *
+     * @throws std::logic_error if erasure probability px is non-zero
+     *
+     * @note Only available for binary channels (q = 2)
+     */
+    long double get_Bhattacharyya_param() const
+        requires(T::get_size() == 2)
+    {
+        if (get_px() != 0.0)
+            throw std::logic_error("Bhattacharyya parameter is not defined for channels with erasures");
+        const long double pe = get_pe();
+        return 2.0L * sqrtl(pe * (1.0L - pe));
+    }
 
    private:
     std::geometric_distribution<unsigned int> error_dist;
@@ -905,9 +922,15 @@ class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<doub
 
     /**
      * @brief Get reference to internal NRZ encoder
-     * @return Const reference to NRZ encoder (needed for NRZDecoder construction)
+     * @return Const reference to NRZ encoder
      */
     const NRZEncoder& get_encoder() const noexcept { return encoder; }
+
+    /**
+     * @brief Get reference to internal AWGN
+     * @return Const reference to AWGN
+     */
+    const AWGN& get_transmission() const noexcept { return transmission; }
 
     /**
      * @brief Calculate channel capacity in bits per symbol
@@ -938,6 +961,22 @@ class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<doub
      * the constellation parameters and signal-to-noise ratio.
      */
     constexpr double get_pe() const noexcept { return transmission.get_pe(); }
+
+    /**
+     * @brief Get noise standard deviation
+     * @return Standard deviation σ of the AWGN noise
+     */
+    double get_sigma() const noexcept { return transmission.get_standard_deviation(); }
+
+    /**
+     * @brief Get Bhattacharyya parameter of the channel
+     * @return Bhattacharyya parameter γ = exp(−b² / (8σ²))
+     */
+    long double get_Bhattacharyya_param() const noexcept {
+        const long double b = encoder.get_b();
+        const long double sigma = transmission.get_standard_deviation();
+        return expl(-powl(b, 2.0L) / (8.0L * powl(sigma, 2.0L)));
+    }
 
    private:
     NRZEncoder encoder;
@@ -1040,6 +1079,14 @@ class NRZDecoder : public details::DecoderProcessor<NRZDecoder> {
      * DC offset parameter (a) of the NRZ encoder for optimal ML decoding.
      */
     constexpr NRZDecoder(const NRZEncoder& nrz) noexcept : a(nrz.get_a()) {}
+
+    /**
+     * @brief Construct NRZ decoder from BI-AWGN
+     * @param bi_awgn The BI-AWGN channel for which NRZ decoding is performed
+     *
+     * Creates an NRZDecoder configured for the specific BI-AWGN parameters of the communication system.
+     */
+    NRZDecoder(const BI_AWGN& bi_awgn) noexcept : a(bi_awgn.get_encoder().get_a()) {}
 
     /**
      * @brief Decode complex symbol to binary (hard) output
@@ -1171,6 +1218,17 @@ class LLRCalculator : public details::LLRProcessor<LLRCalculator> {
      */
     LLRCalculator(const NRZEncoder& nrz, const AWGN& transmission) noexcept
         : a(nrz.get_a()), b(nrz.get_b()), sigmasq(pow(transmission.get_standard_deviation(), 2.0)) {}
+
+    /**
+     * @brief Construct LLR calculator from BI-AWGN
+     * @param bi_awgn The BI-AWGN channel for which LLRs are calculated
+     *
+     * Creates an LLR calculator configured for the specific BI-AWGN parameters of the communication system.
+     */
+    LLRCalculator(const BI_AWGN& bi_awgn) noexcept
+        : a(bi_awgn.get_encoder().get_a()),
+          b(bi_awgn.get_encoder().get_b()),
+          sigmasq(pow(bi_awgn.get_transmission().get_standard_deviation(), 2.0)) {}
 
     /**
      * @brief Calculate Log-Likelihood Ratio for received symbol

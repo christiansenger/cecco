@@ -45,11 +45,17 @@
 // #include <limits.h>
 // #include <stdlib.h>
 
-// #ifdef defined(_WIN32) || defined(__APPLE__)
+#ifndef LONG_LONG_MIN
 #define LONG_LONG_MIN LLONG_MIN
+#endif
+
+#ifndef LONG_LONG_MAX
 #define LONG_LONG_MAX LLONG_MAX
+#endif
+
+#ifndef ULONG_LONG_MAX
 #define ULONG_LONG_MAX ULLONG_MAX
-// #endif
+#endif
 
 #define INFINT_USE_EXCEPTIONS
 

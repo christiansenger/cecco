@@ -1801,8 +1801,7 @@ constexpr Matrix<T>::Matrix(size_t m, size_t n, std::initializer_list<T> l)
 }
 
 template <ComponentType T>
-Matrix<T>::Matrix(std::initializer_list<std::initializer_list<T>> l)
-    : m(l.size()), n(0), type(details::Generic) {
+Matrix<T>::Matrix(std::initializer_list<std::initializer_list<T>> l) : m(l.size()), n(0), type(details::Generic) {
     if (m == 0) return;
     for (auto it = l.begin(); it != l.end(); ++it) {
         if (it->size() > n) n = it->size();
@@ -4154,6 +4153,24 @@ constexpr Matrix<T> IdentityMatrix(size_t m) {
     const auto indices = std::views::iota(size_t{0}, m);
     std::ranges::for_each(indices, [&res](size_t i) { res.set_component(i, i, T(1)); });
     res.type = details::Identity;
+    return res;
+}
+
+template <ComponentType T>
+constexpr Matrix<T> PermutationMatrix(const std::vector<size_t>& perm) {
+    const size_t m = perm.size();
+    auto res = Matrix<T>(m, m);
+
+    std::vector<bool> seen(m, false);
+    for (size_t i = 0; i < m; ++i) {
+        if (perm[i] >= m || seen[perm[i]])
+            throw std::invalid_argument("Trying to construct permutation matrix from a list that is not a permutation");
+        seen[perm[i]] = true;
+    }
+
+    const auto indices = std::views::iota(size_t{0}, m);
+    std::ranges::for_each(indices, [&](size_t i) { res.set_component(i, perm[i], T(1)); });
+
     return res;
 }
 
