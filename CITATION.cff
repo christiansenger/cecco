@@ -13,4 +13,4 @@ message: "If you use this software, please cite it using the metadata from this 
 repository-code: "https://github.com/christiansenger/cecco"
 title: "C(++)ECCO --- C++ Error Control COding"
 type: software
-version: v2.4.0
+version: v2.5.0
