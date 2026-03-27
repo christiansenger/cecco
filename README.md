@@ -6,6 +6,8 @@ Check the files in the demos folder to get started. Detailed Doxygen documentati
 <a href="https://doi.org/10.5281/zenodo.15685869"><img src="https://zenodo.org/badge/1003774077.svg" alt="DOI"></a>
 
 ![Project Logo](.github/assets/cecco.png)
+<a href="https://christiansenger.github.io/cecco/"><img src="https://raw.githubusercontent.com/christiansenger/cecco/refs/heads/main/.github/assets/cecco.png" align="center" height="200" width="200" ></a>
+
 
 ## License
 
