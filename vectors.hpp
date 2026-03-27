@@ -2,7 +2,7 @@
  * @file vectors.hpp
  * @brief Vector arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.2
+ * @version 2.1.5
  * @date 2026
  *
  * @copyright
@@ -345,7 +345,7 @@ class Vector {
      *
      * @return New vector with all components negated
      */
-    constexpr Vector operator-() const& noexcept;
+    constexpr Vector operator-() const&;
 
     /**
      * @brief Unary minus operator for rvalue references (move optimization)
@@ -447,7 +447,7 @@ class Vector {
      *
      * @return true if vector has zero length, false otherwise
      */
-    constexpr bool is_empty() const noexcept { return data.size() == 0; }
+    constexpr bool is_empty() const noexcept { return data.empty(); }
 
     /**
      * @brief Check if vector is the zero vector
@@ -470,6 +470,25 @@ class Vector {
      */
     constexpr bool is_pairwise_distinct() const
         requires ReliablyComparableType<T>;
+
+    /**
+     * @brief Compute the support of the vector (set of indices of non-zero components)
+     *
+     * @return Sorted vector of indices where the component is non-zero
+     *
+     * Returns an empty std::vector for a zero vector, throws for an empty vector.
+     *
+     * @note Only for types fulfilling CECCO::ReliablyComparableType.
+     */
+    std::vector<size_t> supp() const
+        requires ReliablyComparableType<T>
+    {
+        if (data.empty()) throw std::invalid_argument("Support of an empty (length zero) vector is undefined!");
+        std::vector<size_t> supp;
+        for (size_t i = 0; i < data.size(); ++i)
+            if (data[i] != T(0)) supp.push_back(i);
+        return supp;
+    }
 
     /**
      * @brief Compute Hamming weight (number of non-zero components) for discrete types
@@ -940,9 +959,7 @@ class Vector {
 };
 
 template <ComponentType T>
-Vector<T>::Vector(size_t n, const T& l) : data(n) {
-    std::fill(data.begin(), data.end(), l);
-}
+Vector<T>::Vector(size_t n, const T& l) : data(n, l) {}
 
 template <ComponentType T>
 Vector<T>::Vector(const Vector<T>& other) : data(other.data), cache(other.cache) {}
@@ -1020,7 +1037,7 @@ Vector<T>& Vector<T>::operator=(const Vector<S>& other)
 }
 
 template <ComponentType T>
-constexpr Vector<T> Vector<T>::operator-() const& noexcept {
+constexpr Vector<T> Vector<T>::operator-() const& {
     Vector res(*this);
     std::ranges::for_each(res.data, [](T& v) { v = -v; });
     return res;  // move elision
@@ -1179,7 +1196,7 @@ Vector<T>& Vector<T>::erase_components(const std::vector<size_t>& v)
         if (idx >= data.size()) throw std::invalid_argument("trying to erase non-existent component");
     }
 
-    for_each(indices.crbegin(), indices.crend(), [&](auto i) { data[i].erase(); });
+    std::for_each(indices.cbegin(), indices.cend(), [&](auto i) { data[i].erase(); });
 
     cache.invalidate();
     return *this;
@@ -1197,7 +1214,7 @@ Vector<T>& Vector<T>::unerase_components(const std::vector<size_t>& v)
         if (idx >= data.size()) throw std::invalid_argument("trying to un-erase non-existent component");
     }
 
-    for_each(indices.crbegin(), indices.crend(), [&](auto i) { data[i].unerase(); });
+    std::for_each(indices.cbegin(), indices.cend(), [&](auto i) { data[i].unerase(); });
 
     cache.invalidate();
     return *this;
@@ -1468,10 +1485,10 @@ template <ComponentType T>
 size_t Vector<T>::as_integer() const noexcept
     requires FiniteFieldType<T>
 {
-    auto indices = std::views::iota(size_t{0}, data.size());
-    return std::transform_reduce(indices.begin(), indices.end(), size_t{0}, std::plus<size_t>{}, [this](size_t i) {
-        return data[data.size() - i - 1].get_label() * sqm<size_t>(T::get_size(), i);
-    });
+    size_t result = 0;
+    for (size_t i = 0; i < data.size(); ++i)
+        result += data[data.size() - i - 1].get_label() * sqm<size_t>(T::get_size(), i);
+    return result;
 }
 
 template <ComponentType T>
@@ -1529,17 +1546,18 @@ Matrix<S> Vector<T>::as_matrix() const
 
 template <ComponentType T>
 Matrix<T> Vector<T>::to_matrix(size_t m) const {
-    const double n = static_cast<double>(get_n()) / m;
-    if (n != std::ceil(n))
+    if (m == 0) throw std::invalid_argument("Trying to convert vector into a matrix with zero rows");
+    if (get_n() % m != 0)
         throw std::invalid_argument(std::string("Cannot convert vector into a matrix with ") + std::to_string(m) +
-                                    std::string("rows, number of rows m (") + std::to_string(m) +
-                                    std::string(") is not a divisor of vector length n (") +
-                                    std::to_string(get_n()) + ")!");
+                                    std::string(" rows, number of rows m (") + std::to_string(m) +
+                                    std::string(") is not a divisor of vector length n (") + std::to_string(get_n()) +
+                                    ")!");
 
-    Matrix<T> M(m, static_cast<size_t>(n));
+    const size_t cols = get_n() / m;
+    Matrix<T> M(m, cols);
     size_t k = 0;
     for (size_t i = 0; i < m; ++i) {
-        for (size_t j = 0; j < static_cast<size_t>(n); ++j) {
+        for (size_t j = 0; j < cols; ++j) {
             M.set_component(i, j, data[k]);
             ++k;
         }
@@ -1981,6 +1999,22 @@ constexpr size_t wH(const Vector<T>& v) noexcept {
 }
 
 /**
+ * @brief Compute the support of a vector
+ *
+ * @tparam T Vector component type (must satisfy @ref CECCO::ReliablyComparableType)
+ * @param v Vector to analyze
+ * @return Sorted vector of indices where the component is non-zero
+ *
+ * Returns an empty std::vector for a zero vector, throws for an empty vector.
+ *
+ * @note Only for types fulfilling CECCO::ReliablyComparableType.
+ */
+template <ReliablyComparableType T>
+std::vector<size_t> supp(const Vector<T>& v) {
+    return v.supp();
+}
+
+/**
  * @brief Compute Hamming distance between two vectors of discrete types
  *
  * @tparam T Vector component type (must satisfy @ref CECCO::FiniteFieldType or @ref CECCO::SignedIntType)
@@ -2082,7 +2116,7 @@ inline double dE(const Vector<std::complex<double>>& lhs, const Vector<std::comp
 
     double sum_of_squares = std::transform_reduce(
         lhs.data.begin(), lhs.data.end(), rhs.data.begin(), 0.0, std::plus<double>{},
-        [](const std::complex<double>& l, const std::complex<double>& r) { return pow(abs(l - r), 2); });
+        [](const std::complex<double>& l, const std::complex<double>& r) { return std::norm(l - r); });
 
     return sqrt(sum_of_squares);
 }

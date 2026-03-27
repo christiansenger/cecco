@@ -2,7 +2,7 @@
  * @file matrices.hpp
  * @brief Matrix arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.3
+ * @version 2.2.5
  * @date 2026
  *
  * @copyright
@@ -1591,19 +1591,6 @@ class Matrix {
      */
     details::matrix_type_t type = details::Zero;
 
-    static inline const uint8_t colormap[64][3] = {
-        {0, 0, 0},       {0, 0, 24},      {0, 0, 40},      {0, 0, 56},      {0, 0, 72},      {0, 0, 88},
-        {0, 0, 104},     {0, 0, 120},     {0, 0, 136},     {0, 0, 152},     {0, 0, 167},     {0, 0, 183},
-        {0, 0, 199},     {0, 0, 215},     {0, 0, 231},     {0, 0, 252},     {0, 6, 253},     {0, 24, 232},
-        {0, 40, 216},    {0, 56, 200},    {0, 72, 184},    {0, 88, 168},    {0, 104, 152},   {0, 120, 136},
-        {0, 136, 120},   {0, 152, 104},   {0, 167, 88},    {0, 183, 72},    {0, 199, 56},    {0, 215, 41},
-        {0, 231, 25},    {0, 249, 6},     {6, 255, 0},     {24, 255, 0},    {40, 255, 0},    {56, 255, 0},
-        {72, 255, 0},    {88, 255, 0},    {104, 255, 0},   {120, 255, 0},   {136, 255, 0},   {152, 255, 0},
-        {167, 255, 0},   {183, 255, 0},   {199, 255, 0},   {215, 255, 0},   {231, 255, 0},   {249, 255, 0},
-        {255, 255, 6},   {255, 255, 24},  {255, 255, 40},  {255, 255, 56},  {255, 255, 72},  {255, 255, 88},
-        {255, 255, 104}, {255, 255, 120}, {255, 255, 136}, {255, 255, 152}, {255, 255, 167}, {255, 255, 183},
-        {255, 255, 199}, {255, 255, 215}, {255, 255, 231}, {255, 255, 255}};
-
     /**
      * @brief Cache system for expensive computations
      */
@@ -1809,18 +1796,13 @@ Matrix<T>::Matrix(std::initializer_list<std::initializer_list<T>> l) : m(l.size(
     if (n == 0) return;
     data.resize(m * n);
 
-    // Use enumerate-style iteration with STL algorithms
-    auto row_indices = std::views::iota(size_t{0}, m);
-    auto row_it = l.begin();
-    std::ranges::for_each(row_indices, [&](size_t i) {
-        auto col_indices = std::views::iota(size_t{0}, row_it->size());
-        auto col_it = row_it->begin();
-        std::ranges::for_each(col_indices, [&](size_t j) {
-            set_component(i, j, *col_it);
-            ++col_it;
-        });
-        ++row_it;
-    });
+    size_t i = 0;                    
+      for (const auto& row : l) {
+          size_t j = 0;
+          for (const auto& val : row)
+              set_component(i, j++, val);
+          ++i;
+      }
 }
 
 template <ComponentType T>
@@ -1844,12 +1826,9 @@ constexpr Matrix<T>::Matrix(const Matrix<S>& other)
         std::transform(other.data.begin(), other.data.end(), data.begin(),
                        [](const S& elem) { return T(elem); });  // Uses enhanced cross-field constructors
     } else {
-        const auto indices = std::views::iota(size_t{0}, m * n);
-        std::ranges::transform(indices, data.begin(), [&](size_t idx) {
-            size_t i = idx / n;
-            size_t j = idx % n;
-            return T(other(i, j));  // Uses enhanced cross-field constructors
-        });
+        for (size_t i = 0; i < m; ++i)
+            for (size_t j = 0; j < n; ++j)
+                data[i * n + j] = T(other(i, j));  // Uses enhanced cross-field constructors
     }
     cache.invalidate();
 }
@@ -1888,7 +1867,7 @@ Matrix<T>::Matrix(const std::string& filename)
         m.reserve(64);
         for (uint8_t a = 0; a < 64; ++a) {
             const uint32_t key =
-                (uint32_t(colormap[a][0]) << 16) | (uint32_t(colormap[a][1]) << 8) | uint32_t(colormap[a][2]);
+                (uint32_t(details::colormap[a][0]) << 16) | (uint32_t(details::colormap[a][1]) << 8) | uint32_t(details::colormap[a][2]);
             m.emplace(key, a);
         }
         return m;
@@ -1969,10 +1948,10 @@ constexpr Matrix<T> Matrix<T>::operator-() const& noexcept {
         if (type == details::Vandermonde) res.type = details::Generic;
 
     } else if (type == details::Zero) {
-        // continue;
+        /* no-op */
     } else if (type == details::Diagonal || type == details::Identity) {
-        const auto indices = std::views::iota(size_t{0}, m);
-        std::ranges::for_each(indices, [this, &res](size_t mu) { res.data[mu * n + mu] = -res.data[mu * n + mu]; });
+        for (size_t mu = 0; mu < m; ++mu)
+            res.data[mu * n + mu] = -res.data[mu * n + mu];
         if constexpr (FiniteFieldType<T>) {
             if (T::get_characteristic() != 2 && type == details::Identity) res.type = details::Diagonal;
         } else {
@@ -1992,10 +1971,10 @@ constexpr Matrix<T> Matrix<T>::operator-() && noexcept {
             type = details::Generic;
         }
     } else if (type == details::Zero) {
-        // continue;
+        /* no-op */
     } else if (type == details::Diagonal || type == details::Identity) {
-        const auto indices = std::views::iota(size_t{0}, m);
-        std::ranges::for_each(indices, [this](size_t mu) { data[mu * n + mu] = -data[mu * n + mu]; });
+        for (size_t mu = 0; mu < m; ++mu)
+            data[mu * n + mu] = -data[mu * n + mu];
         if constexpr (FiniteFieldType<T>) {
             if (T::get_characteristic() != 2 && type == details::Identity) type = details::Diagonal;
         } else {
@@ -2015,30 +1994,25 @@ Matrix<T>& Matrix<T>::operator+=(const Matrix& rhs) {
     if (type == details::Zero) {
         *this = rhs;
     } else if (rhs.type == details::Zero) {
-        // continue;
+        /* no-op */
     } else if ((type == details::Diagonal && rhs.type == details::Diagonal) ||
                (type == details::Identity && rhs.type == details::Identity) ||
                (type == details::Diagonal && rhs.type == details::Identity) ||
                (type == details::Identity && rhs.type == details::Diagonal)) {
-        const auto indices = std::views::iota(size_t{0}, m);
-        std::ranges::for_each(indices, [this, &rhs](size_t mu) { data[mu * n + mu] += rhs.data[mu * n + mu]; });
+        for (size_t mu = 0; mu < m; ++mu)
+            data[mu * n + mu] += rhs.data[mu * n + mu];
         if (type == details::Identity) type = details::Diagonal;
     } else {
         if (!transposed && !rhs.transposed) {
-            // Optimized element-wise addition for non-transposed matrices
             std::transform(data.begin(), data.end(), rhs.data.begin(), data.begin(), std::plus<T>{});
             if (type != details::Generic && !(type == details::Toeplitz && rhs.type == details::Toeplitz))
                 type = details::Generic;
         } else {
-            const auto indices = std::views::iota(size_t{0}, m * n);
-            std::ranges::for_each(indices, [this, &rhs](size_t idx) {
-                size_t mu = idx / n;
-                size_t nu = idx % n;
-                set_component(mu, nu, (*this)(mu, nu) + rhs(mu, nu));
-            });
+            for (size_t mu = 0; mu < m; ++mu)
+                for (size_t nu = 0; nu < n; ++nu)
+                    set_component(mu, nu, (*this)(mu, nu) + rhs(mu, nu));
         }
     }
-    // Check if result is zero matrix using STL algorithm
     if (std::all_of(data.cbegin(), data.cend(), [](const T& x) { return x == T(0); })) {
         this->type = details::Zero;
     }
@@ -2068,33 +2042,30 @@ Matrix<T>& Matrix<T>::operator*=(const Matrix& rhs) {
     } else if (type == details::Identity) {
         *this = rhs;
     } else if (rhs.type == details::Identity) {
-        // continue;
+        /* no-op */
     } else if (type == details::Diagonal && rhs.type == details::Diagonal) {
-        const auto indices = std::views::iota(size_t{0}, m);
-        std::ranges::for_each(indices, [this, &rhs](size_t mu) { data[mu * n + mu] *= rhs.data[mu * n + mu]; });
+        for (size_t mu = 0; mu < m; ++mu)
+            data[mu * n + mu] *= rhs.data[mu * n + mu];
     } else if (type == details::Diagonal) {
         auto res = rhs;
-        const auto indices = std::views::iota(size_t{0}, m);
-        std::ranges::for_each(indices, [this, &res, &rhs](size_t mu) {
+        for (size_t mu = 0; mu < m; ++mu) {
             auto s = (*this)(mu, mu);
-            auto nu_indices = std::views::iota(size_t{0}, rhs.n);
-            std::ranges::for_each(nu_indices, [&](size_t nu) { res.set_component(mu, nu, res(mu, nu) * s); });
-        });
+            for (size_t nu = 0; nu < rhs.n; ++nu)
+                res.set_component(mu, nu, res(mu, nu) * s);
+        }
         *this = std::move(res);
     } else if (rhs.type == details::Diagonal) {
-        const auto indices = std::views::iota(size_t{0}, n);
-        std::ranges::for_each(indices, [this, &rhs](size_t nu) {
+        for (size_t nu = 0; nu < n; ++nu) {
             const auto& s = rhs(nu, nu);
-            auto mu_indices = std::views::iota(size_t{0}, m);
-            std::ranges::for_each(mu_indices, [&](size_t mu) { set_component(mu, nu, (*this)(mu, nu) * s); });
-        });
+            for (size_t mu = 0; mu < m; ++mu)
+                set_component(mu, nu, (*this)(mu, nu) * s);
+        }
     } else {
         const size_t M = get_m();
         const size_t K = get_n();
         const size_t N = rhs.get_n();
         Matrix<T> res(M, N, T(0));
 
-        // Get raw data pointers for direct access (bypass operator())
         const T* __restrict__ this_data = this->data.data();
         const T* __restrict__ rhs_data = rhs.data.data();
         T* __restrict__ res_data = res.data.data();
@@ -2127,13 +2098,13 @@ constexpr Matrix<T>& Matrix<T>::operator*=(const T& s) {
     if (s == T(0)) {
         *this = Matrix(m, n);
     } else if (s == T(1) || type == details::Zero) {
-        // continue;
+        /* no-op */
     } else if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
         std::ranges::for_each(data, [&s](T& x) { x *= s; });
         if (type == details::Vandermonde) type = details::Generic;
     } else if (type == details::Diagonal || type == details::Identity) {
-        const auto indices = std::views::iota(size_t{0}, m);
-        std::ranges::for_each(indices, [this, &s](size_t mu) { data[mu * n + mu] *= s; });
+        for (size_t mu = 0; mu < m; ++mu)
+            data[mu * n + mu] *= s;
         if (type == details::Identity) type = details::Diagonal;
     }
     return *this;
@@ -2175,9 +2146,10 @@ constexpr size_t Matrix<T>::wH() const noexcept
     } else if (type == details::Zero) {
         return 0;
     } else if (type == details::Diagonal) {
-        auto diagonal_indices = std::views::iota(size_t{0}, m);
-        return std::count_if(diagonal_indices.begin(), diagonal_indices.end(),
-                             [this](size_t i) { return (*this)(i, i) != T(0); });
+        size_t count = 0;
+        for (size_t i = 0; i < m; ++i)
+            if ((*this)(i, i) != T(0)) ++count;
+        return count;
     } else if (type == details::Identity) {
         return m;
     }
@@ -2196,8 +2168,8 @@ template <ComponentType T>
 Vector<T> Matrix<T>::diagonal() const {
     if (m != n) throw std::invalid_argument("trying to extract diagonal of non-square matrix");
     Vector<T> res(n);
-    const auto indices = std::views::iota(size_t{0}, n);
-    std::transform(indices.begin(), indices.end(), res.data.begin(), [this](size_t i) { return (*this)(i, i); });
+    for (size_t i = 0; i < n; ++i)
+        res.data[i] = (*this)(i, i);
     return res;
 }
 
@@ -2236,11 +2208,10 @@ Polynomial<T> Matrix<T>::characteristic_polynomial() const
                 Matrix A = get_submatrix(i + 1, i + 1, m - i - 1, m - i - 1);
                 const Matrix X = A;
                 Vector<T> v(2 * (m - i));
-                auto j_indices = std::views::iota(size_t{0}, m - i - 2);
-                std::ranges::for_each(j_indices, [&](size_t j) {
+                for (size_t j = 0; j < m - i - 2; ++j) {
                     v.set_component(m - i - 3 - j, -((R * A * C)(0, 0)));
                     A *= X;
-                });
+                }
                 v.set_component(m - i - 2, -(R * C)(0, 0));
                 v.set_component(m - i - 1, -a);
                 v.set_component(m - i, T(1));
@@ -2256,9 +2227,8 @@ Polynomial<T> Matrix<T>::characteristic_polynomial() const
 
         // extract polynomial from solution/column vector
         Polynomial<T> res;
-        auto i_indices = std::views::iota(size_t{0}, m + 1);
-        std::ranges::for_each(i_indices,
-                              [&](size_t i) { res.set_coefficient(m - i, const_cast<const Matrix<T>&>(P)(i, 0)); });
+        for (size_t i = 0; i <= m; ++i)
+            res.set_coefficient(m - i, P(i, 0));
 
         // for odd n: negate characteristic polynomial *ToDo: verify*
         if (m % 2) res *= T(-1);
@@ -2269,8 +2239,8 @@ Polynomial<T> Matrix<T>::characteristic_polynomial() const
         return res ^ m;
     } else if (type == details::Diagonal) {
         Polynomial<T> res({1});
-        auto mu_indices = std::views::iota(size_t{0}, m);
-        std::ranges::for_each(mu_indices, [&](size_t mu) { res *= Polynomial<T>({(*this)(mu, mu), -1}); });
+        for (size_t mu = 0; mu < m; ++mu)
+            res *= Polynomial<T>({(*this)(mu, mu), -1});
         return res;
     } else if (type == details::Identity) {
         Polynomial<T> res({-1, 1});
@@ -2331,29 +2301,20 @@ T Matrix<T>::determinant() const
     if (type == details::Generic || type == details::Toeplitz) {
         return characteristic_polynomial()[0];
     } else if (type == details::Vandermonde) {
-        const auto indices = std::views::iota(size_t{0}, m);
-        return std::accumulate(indices.begin(), indices.end(), T(1), [this](T acc, size_t mu) {
-            if (mu == 0) return acc;
-            auto inner_indices = std::views::iota(size_t{0}, mu);
-            T row_product =
-                std::accumulate(inner_indices.begin(), inner_indices.end(), T(1),
-                                [this, mu](T prod, size_t i) { return prod * ((*this)(1, mu) - (*this)(1, i)); });
-            return acc * row_product;
-        });
+        T acc(1);
+        for (size_t mu = 1; mu < m; ++mu)
+            for (size_t i = 0; i < mu; ++i)
+                acc *= (*this)(1, mu) - (*this)(1, i);
+        return acc;
     } else if (type == details::Zero) {
         return T(0);
     } else if (type == details::Diagonal) {
-        auto diagonal_indices = std::views::iota(size_t{0}, m);
-
-        // Check for any zero on diagonal first
-        if (std::any_of(diagonal_indices.begin(), diagonal_indices.end(),
-                        [this](size_t i) { return (*this)(i, i) == T(0); })) {
-            return T(0);
+        T acc(1);
+        for (size_t i = 0; i < m; ++i) {
+            if ((*this)(i, i) == T(0)) return T(0);
+            acc *= (*this)(i, i);
         }
-
-        // Compute product of diagonal elements
-        return std::accumulate(diagonal_indices.begin(), diagonal_indices.end(), T(1),
-                               [this](T acc, size_t i) { return acc * (*this)(i, i); });
+        return acc;
     } else if (type == details::Identity) {
         return T(1);
     }
@@ -2367,15 +2328,11 @@ std::vector<T> Matrix<T>::eigenvalues() const
 {
     const auto p = characteristic_polynomial();
     std::vector<T> res;
-    const auto indices = std::views::iota(size_t{0}, T::get_size());
-
-    // Collect all j where p(T(j)) == 0
-    std::ranges::for_each(indices, [&p, &res](size_t j) {
+    for (size_t j = 0; j < T::get_size(); ++j) {
         T element = T(j);
-        if (p(element) == T(0)) {
+        if (p(element) == T(0))
             res.push_back(element);
-        }
-    });
+    }
     return res;
 }
 
@@ -2474,8 +2431,8 @@ Vector<T> Matrix<T>::get_row(size_t i) const {
     if (!transposed) {
         std::copy(data.begin() + i * n, data.begin() + (i + 1) * n, res.data.begin());
     } else {
-        const auto indices = std::views::iota(size_t{0}, n);
-        std::transform(indices.begin(), indices.end(), res.data.begin(), [this, i](size_t j) { return (*this)(i, j); });
+        for (size_t j = 0; j < n; ++j)
+            res.data[j] = (*this)(i, j);
     }
     return res;
 }
@@ -2487,8 +2444,8 @@ Vector<T> Matrix<T>::get_col(size_t j) const {
     if (transposed) {
         std::copy(data.begin() + j * m, data.begin() + (j + 1) * m, res.data.begin());
     } else {
-        const auto indices = std::views::iota(size_t{0}, m);
-        std::transform(indices.begin(), indices.end(), res.data.begin(), [this, j](size_t i) { return (*this)(i, j); });
+        for (size_t i = 0; i < m; ++i)
+            res.data[i] = (*this)(i, j);
     }
     return res;
 }
@@ -2502,21 +2459,14 @@ Matrix<T> Matrix<T>::get_submatrix(size_t i, size_t j, size_t h, size_t w) const
     Matrix res(h, w);
     if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
         if (!transposed && !res.transposed) {
-            // Optimized row-wise copying for non-transposed matrices
-            auto mu_indices = std::views::iota(size_t{0}, h);
-            std::ranges::for_each(mu_indices, [&](size_t mu) {
+            for (size_t mu = 0; mu < h; ++mu)
                 std::copy(data.begin() + (i + mu) * n + j, data.begin() + (i + mu) * n + j + w,
                           res.data.begin() + mu * w);
-            });
             res.type = details::Generic;
         } else {
-            // Fall back to element-wise access for transposed matrices
-            const auto indices = std::views::iota(size_t{0}, h * w);
-            std::ranges::for_each(indices, [&](size_t idx) {
-                size_t mu = idx / w;
-                size_t nu = idx % w;
-                res.set_component(mu, nu, (*this)(i + mu, j + nu));
-            });
+            for (size_t mu = 0; mu < h; ++mu)
+                for (size_t nu = 0; nu < w; ++nu)
+                    res.set_component(mu, nu, (*this)(i + mu, j + nu));
         }
         if (type == details::Vandermonde && i == 0) {
             res.type = details::Vandermonde;
@@ -2524,16 +2474,12 @@ Matrix<T> Matrix<T>::get_submatrix(size_t i, size_t j, size_t h, size_t w) const
             res.type = details::Toeplitz;
         }
     } else if (type == details::Zero) {
-        // continue;
+        /* no-op */
     } else if (type == details::Diagonal || type == details::Identity) {
-        const auto indices = std::views::iota(size_t{0}, h * w);
-        std::ranges::for_each(indices, [&](size_t idx) {
-            size_t mu = idx / w;
-            size_t nu = idx % w;
-            if (i + mu == j + nu) {
-                res.set_component(mu, nu, (*this)(i + mu, j + nu));
-            }
-        });
+        for (size_t mu = 0; mu < h; ++mu)
+            for (size_t nu = 0; nu < w; ++nu)
+                if (i + mu == j + nu)
+                    res.set_component(mu, nu, (*this)(i + mu, j + nu));
         if (i == j) {
             if (type == details::Diagonal) {
                 res.type = details::Diagonal;
@@ -2552,20 +2498,13 @@ Matrix<T>& Matrix<T>::set_submatrix(size_t i, size_t j, const Matrix& N) {
             "trying to replace submatrix with "
             "matrix of incompatible dimensions");
 
-    // For non-transposed matrices, use row-wise copying when possible
     if (!transposed && !N.transposed) {
-        auto mu_indices = std::views::iota(size_t{0}, N.m);
-        std::ranges::for_each(mu_indices, [&](size_t mu) {
+        for (size_t mu = 0; mu < N.m; ++mu)
             std::copy(N.data.begin() + mu * N.n, N.data.begin() + (mu + 1) * N.n, data.begin() + (i + mu) * n + j);
-        });
     } else {
-        // Fall back to element-wise access for transposed matrices
-        const auto indices = std::views::iota(size_t{0}, N.m * N.n);
-        std::ranges::for_each(indices, [&](size_t idx) {
-            size_t mu = idx / N.n;
-            size_t nu = idx % N.n;
-            set_component(i + mu, j + nu, N(mu, nu));
-        });
+        for (size_t mu = 0; mu < N.m; ++mu)
+            for (size_t nu = 0; nu < N.n; ++nu)
+                set_component(i + mu, j + nu, N(mu, nu));
     }
     type = details::Generic;
     cache.invalidate();
@@ -2636,29 +2575,24 @@ Matrix<T>& Matrix<T>::Kronecker_product(const Matrix& other) {
             auto d1 = diagonal();
             auto d2 = other.diagonal();
             Vector<T> d(m * other.m);
-            const auto indices = std::views::iota(size_t{0}, m * other.m);
-            std::ranges::for_each(indices,
-                                  [&](size_t idx) { d.set_component(idx, d1[idx / other.m] * d2[idx % other.m]); });
+            for (size_t idx = 0; idx < m * other.m; ++idx)
+                d.set_component(idx, d1[idx / other.m] * d2[idx % other.m]);
             *this = DiagonalMatrix<T>(std::move(d));
         } else {
             Matrix temp(m * other.m, n * other.n);
-            const auto indices = std::views::iota(size_t{0}, m);
-            std::ranges::for_each(indices, [this, &temp, &other](size_t mu) {
+            for (size_t mu = 0; mu < m; ++mu) {
                 if (type == details::Identity)
                     temp.set_submatrix(mu * other.m, mu * other.n, other);
                 else
                     temp.set_submatrix(mu * other.m, mu * other.n, (*this)(mu, mu) * other);
-            });
+            }
             *this = std::move(temp);
         }
     } else {
         Matrix temp(m * other.m, n * other.n);
-        const auto indices = std::views::iota(size_t{0}, m * n);
-        std::ranges::for_each(indices, [&](size_t idx) {
-            size_t mu = idx / n;
-            size_t nu = idx % n;
-            temp.set_submatrix(mu * other.m, nu * other.n, (*this)(mu, nu) * other);
-        });
+        for (size_t mu = 0; mu < m; ++mu)
+            for (size_t nu = 0; nu < n; ++nu)
+                temp.set_submatrix(mu * other.m, nu * other.n, (*this)(mu, nu) * other);
         *this = std::move(temp);
     }
 
@@ -2674,12 +2608,11 @@ Matrix<T>& Matrix<T>::swap_rows(size_t i, size_t j) {
             std::swap_ranges(data.begin() + i * n, data.begin() + (i + 1) * n, data.begin() + j * n);
         } else {
             auto rank_backup = cache.template get<Rank>();
-            const auto indices = std::views::iota(size_t{0}, n);
-            std::ranges::for_each(indices, [this, i, j](size_t nu) {
+            for (size_t nu = 0; nu < n; ++nu) {
                 const auto temp = (*this)(i, nu);
                 set_component(i, nu, (*this)(j, nu));
                 set_component(j, nu, temp);
-            });
+            }
             if (rank_backup) cache.template set<Rank>(*rank_backup);
         }
         type = details::Generic;
@@ -2705,12 +2638,12 @@ Matrix<T>& Matrix<T>::scale_row(const T& s, size_t i) {
             if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
 
         } else {
-            const auto indices = std::views::iota(size_t{0}, n);
-            std::ranges::for_each(indices, [this, i, &s](size_t nu) { data[i + nu * m] *= s; });
+            for (size_t nu = 0; nu < n; ++nu)
+                data[i + nu * m] *= s;
             if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
         }
     } else if (type == details::Zero) {
-        // continue;
+        /* no-op */
     } else if (type == details::Diagonal || type == details::Identity) {
         data[i * n + i] *= s;
         if (type == details::Identity) type = details::Diagonal;
@@ -2738,12 +2671,12 @@ Matrix<T>& Matrix<T>::add_scaled_row(const T& s, size_t i, size_t j) {
                            [&s](const T& target, const T& source) { return target + s * source; });
             if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
         } else {
-            const auto indices = std::views::iota(size_t{0}, n);
-            std::ranges::for_each(indices, [this, i, j, &s](size_t nu) { data[j + nu * m] += s * data[i + nu * m]; });
+            for (size_t nu = 0; nu < n; ++nu)
+                data[j + nu * m] += s * data[i + nu * m];
             if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
         }
     } else if (type == details::Zero) {
-        // continue;
+        /* no-op */
     } else if (type == details::Diagonal || type == details::Identity) {
         data[j * n + i] += data[i * n + i] * s;
         type = details::Generic;
@@ -2929,20 +2862,16 @@ Matrix<T>& Matrix<T>::reverse_rows() {
     if (type != details::Zero) {
         if (!transposed) {
             // For non-transposed matrices, reverse row-wise using STL
-            const auto indices = std::views::iota(size_t{0}, m / 2);
-            std::ranges::for_each(indices, [this](size_t mu) {
+            for (size_t mu = 0; mu < m / 2; ++mu)
                 std::swap_ranges(data.begin() + mu * n, data.begin() + (mu + 1) * n, data.begin() + (m - 1 - mu) * n);
-            });
         } else {
             auto rank_backup = cache.template get<Rank>();
-            const auto indices = std::views::iota(size_t{0}, m / 2 * n);
-            std::ranges::for_each(indices, [this](size_t idx) {
-                size_t mu = idx / n;
-                size_t nu = idx % n;
-                const auto temp = (*this)(mu, nu);
-                set_component(mu, nu, (*this)(m - 1 - mu, nu));
-                set_component(m - 1 - mu, nu, temp);
-            });
+            for (size_t mu = 0; mu < m / 2; ++mu)
+                for (size_t nu = 0; nu < n; ++nu) {
+                    const auto temp = (*this)(mu, nu);
+                    set_component(mu, nu, (*this)(m - 1 - mu, nu));
+                    set_component(m - 1 - mu, nu, temp);
+                }
             if (rank_backup) cache.template set<Rank>(*rank_backup);
         }
         type = details::Generic;
@@ -2955,19 +2884,16 @@ Matrix<T>& Matrix<T>::reverse_columns() {
     if (type != details::Zero) {
         if (!transposed) {
             // For non-transposed matrices, reverse elements within each row
-            const auto indices = std::views::iota(size_t{0}, m);
-            std::ranges::for_each(
-                indices, [this](size_t mu) { std::reverse(data.begin() + mu * n, data.begin() + (mu + 1) * n); });
+            for (size_t mu = 0; mu < m; ++mu)
+                std::reverse(data.begin() + mu * n, data.begin() + (mu + 1) * n);
         } else {
             auto rank_backup = cache.template get<Rank>();
-            const auto indices = std::views::iota(size_t{0}, m * (n / 2));
-            std::ranges::for_each(indices, [this](size_t idx) {
-                size_t mu = idx / (n / 2);
-                size_t nu = idx % (n / 2);
-                const auto temp = (*this)(mu, nu);
-                set_component(mu, nu, (*this)(mu, n - 1 - nu));
-                set_component(mu, n - 1 - nu, temp);
-            });
+            for (size_t mu = 0; mu < m; ++mu)
+                for (size_t nu = 0; nu < n / 2; ++nu) {
+                    const auto temp = (*this)(mu, nu);
+                    set_component(mu, nu, (*this)(mu, n - 1 - nu));
+                    set_component(mu, n - 1 - nu, temp);
+                }
             if (rank_backup) cache.template set<Rank>(*rank_backup);
         }
         if (type != details::Vandermonde) {
@@ -3001,7 +2927,7 @@ constexpr Matrix<T>& Matrix<T>::transpose() {
     } else if (type == details::Zero) {
         std::swap(m, n);
     } else if (type == details::Diagonal || type == details::Identity) {
-        // continue;
+        /* no-op */
     }
     return *this;
 }
@@ -3158,36 +3084,27 @@ Matrix<T>& Matrix<T>::invert()
         if (m != n) throw std::invalid_argument("trying to invert a non-square details::Vandermonde matrix");
         std::vector<Polynomial<T>> Lagrange_polynomials(m);
         std::fill(Lagrange_polynomials.begin(), Lagrange_polynomials.end(), Polynomial<T>(1));
-        auto i_indices = std::views::iota(size_t{0}, m);
-        std::ranges::for_each(i_indices, [this, &Lagrange_polynomials](size_t i) {
-            auto k_indices = std::views::iota(size_t{0}, m);
-            std::ranges::for_each(k_indices, [this, &Lagrange_polynomials, i](size_t k) {
-                if (k == i) return;
+        for (size_t i = 0; i < m; ++i)
+            for (size_t k = 0; k < m; ++k) {
+                if (k == i) continue;
                 Lagrange_polynomials[i] *= Polynomial<T>({-(*this)(1, k), 1}) / ((*this)(1, i) - (*this)(1, k));
-            });
-        });
-        const auto indices = std::views::iota(size_t{0}, m * m);
-        std::ranges::for_each(indices, [this, &Lagrange_polynomials](size_t idx) {
-            size_t i = idx / m;
-            size_t j = idx % m;
-            set_component(i, j, Lagrange_polynomials[i][j]);
-        });
+            }
+        for (size_t i = 0; i < m; ++i)
+            for (size_t j = 0; j < m; ++j)
+                set_component(i, j, Lagrange_polynomials[i][j]);
     } else if (type == details::Zero) {
         throw std::invalid_argument("trying to invert a non-invertible matrix/a zero matrix");
     } else if (type == details::Diagonal) {
-        // Check for zero diagonal elements first
-        auto diag_indices = std::views::iota(size_t{0}, m);
-        auto zero_diag = std::ranges::find_if(diag_indices, [this](size_t mu) { return (*this)(mu, mu) == T(0); });
-        if (zero_diag != diag_indices.end()) {
-            throw std::invalid_argument(
-                "trying to invert a non-invertible matrix/a diagonal matrix with at least one zero on the "
-                "diagonal");
+        // Check for zero diagonal elements and invert
+        for (size_t mu = 0; mu < m; ++mu) {
+            if ((*this)(mu, mu) == T(0))
+                throw std::invalid_argument(
+                    "trying to invert a non-invertible matrix/a diagonal matrix with at least one zero on the "
+                    "diagonal");
+            data[mu * n + mu] = T(1) / data[mu * n + mu];
         }
-
-        // Invert all diagonal elements
-        std::ranges::for_each(diag_indices, [this](size_t mu) { data[mu * n + mu] = T(1) / data[mu * n + mu]; });
     } else if (type == details::Identity) {
-        // continue;
+        /* no-op */
     }
     return *this;
 }
@@ -3204,11 +3121,10 @@ constexpr Vector<S> Matrix<T>::as_vector() const
     Vector<S> res(get_n());
     Matrix<T> Tp(*this);
     Tp.transpose();
-    auto i_indices = std::views::iota(size_t{0}, get_n());
-    std::ranges::for_each(i_indices, [&](size_t i) {
+    for (size_t i = 0; i < get_n(); ++i) {
         const auto temp = Tp.get_row(i);
         res.set_component(i, S(temp));
-    });
+    }
     return res;
 }
 
@@ -3254,9 +3170,9 @@ void Matrix<T>::export_as_ppm(const std::string& filename) const
 
             const size_t a = 63 - 63 * static_cast<double>(label) / (T::get_size() - 1);
 
-            const uint8_t r = colormap[a][0];
-            const uint8_t g = colormap[a][1];
-            const uint8_t b = colormap[a][2];
+            const uint8_t r = details::colormap[a][0];
+            const uint8_t g = details::colormap[a][1];
+            const uint8_t b = details::colormap[a][2];
 
             file << std::setw(3) << static_cast<int>(r) << " " << std::setw(3) << static_cast<int>(g) << " "
                  << std::setw(3) << static_cast<int>(b) << "  ";
@@ -3441,6 +3357,11 @@ Matrix<T> randomize(Matrix<T>&& M) noexcept {
     Matrix<T> res(std::move(M));
     res.randomize();
     return res;
+}
+
+template <ReliablyComparableType T>
+constexpr size_t wH(const Matrix<T>& M) noexcept {
+    return M.wH();
 }
 
 template <ComponentType T>
@@ -3982,17 +3903,11 @@ constexpr bool operator==(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
         return lhs.get_col(0) == rhs.get_col(0);
     } else if (lhs.type == details::Toeplitz && rhs.type == details::Toeplitz) {
         // Compare left column (in reverse order for details::Toeplitz structure)
-        const auto indices = std::views::iota(size_t{0}, lhs.m);
-        if (!std::ranges::equal(indices, indices,
-                                [&](size_t mu, size_t) { return lhs(lhs.m - 1 - mu, 0) == rhs(lhs.m - 1 - mu, 0); })) {
-            return false;
-        }
+        for (size_t mu = 0; mu < lhs.m; ++mu)
+            if (lhs(lhs.m - 1 - mu, 0) != rhs(lhs.m - 1 - mu, 0)) return false;
         // Compare top row (excluding first element)
-        auto col_indices = std::views::iota(size_t{1}, lhs.n);
-        if (!std::ranges::equal(col_indices, col_indices,
-                                [&](size_t nu, size_t) { return lhs(0, nu) == rhs(0, nu); })) {
-            return false;
-        }
+        for (size_t nu = 1; nu < lhs.n; ++nu)
+            if (lhs(0, nu) != rhs(0, nu)) return false;
     } else if (lhs.type == details::Vandermonde && rhs.type == details::Vandermonde) {
         return lhs.get_row(1) == rhs.get_row(1);
     } else if ((lhs.type == details::Diagonal && rhs.type == details::Diagonal) ||
@@ -4000,21 +3915,18 @@ constexpr bool operator==(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
                (lhs.type == details::Identity && rhs.type == details::Diagonal)) {
         return lhs.diagonal() == rhs.diagonal();
     } else if (lhs.type == details::Identity && rhs.type == details::Identity) {
-        // continue;
+        /* no-op */
     } else if ((lhs.type == details::Zero && rhs.type != details::Zero) ||
                (lhs.type != details::Zero && rhs.type == details::Zero)) {
         return false;
     } else {
         if (!lhs.transposed && !rhs.transposed) {
-            // Optimized comparison for non-transposed matrices
             return std::equal(lhs.data.begin(), lhs.data.end(), rhs.data.begin());
         } else {
-            const auto indices = std::views::iota(size_t{0}, lhs.m * lhs.n);
-            return std::ranges::all_of(indices, [&](size_t idx) {
-                size_t mu = idx / lhs.n;
-                size_t nu = idx % lhs.n;
-                return lhs(mu, nu) == rhs(mu, nu);
-            });
+            for (size_t mu = 0; mu < lhs.m; ++mu)
+                for (size_t nu = 0; nu < lhs.n; ++nu)
+                    if (lhs(mu, nu) != rhs(mu, nu)) return false;
+            return true;
         }
     }
     return true;
@@ -4059,45 +3971,37 @@ std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept {
     }
     size_t max = 0;
     std::stringstream ss;
-    const auto indices = std::views::iota(size_t{0}, rhs.m * rhs.n);
-    std::ranges::for_each(indices, [&rhs, &ss, &max](size_t idx) {
-        size_t i = idx / rhs.n;
-        size_t j = idx % rhs.n;
-        ss << rhs(i, j);
-        max = std::max(ss.str().length(), max);
-        ss.str(std::string());  // clear stringstream
-    });
+    for (size_t i = 0; i < rhs.m; ++i)
+        for (size_t j = 0; j < rhs.n; ++j) {
+            ss << rhs(i, j);
+            max = std::max(ss.str().length(), max);
+            ss.str(std::string());  // clear stringstream
+        }
     os << (rhs.m == 1 ? "(" : "⌈");
-    if (rhs.n > 1) {
-        const auto indices = std::views::iota(size_t{0}, rhs.n - 1);
-        std::ranges::for_each(indices, [&rhs, &os, max](size_t j) {
-            os << std::setw(max) << rhs(0, j);
-            os << " ";  // must be in extra line due to set::setw()
-        });
+    for (size_t j = 0; j + 1 < rhs.n; ++j) {
+        os << std::setw(max) << rhs(0, j);
+        os << " ";  // must be in extra line due to set::setw()
     }
     os << std::setw(max) << rhs(0, rhs.n - 1);
     os << (rhs.m == 1 ? ")" : "⌉");
     if (rhs.m > 1) os << std::endl;
     if (rhs.m > 2) {
-        auto i_indices = std::views::iota(size_t{1}, rhs.m - 1);
-        std::ranges::for_each(i_indices, [&](size_t i) {
+        for (size_t i = 1; i + 1 < rhs.m; ++i) {
             os << "|";
-            auto j_indices = std::views::iota(size_t{0}, rhs.n - 1);
-            std::ranges::for_each(j_indices, [&](size_t j) {
+            for (size_t j = 0; j + 1 < rhs.n; ++j) {
                 os << std::setw(max) << rhs(i, j);
                 os << " ";  // must be in extra line due to set::setw()
-            });
+            }
             os << std::setw(max) << rhs(i, rhs.n - 1);
             os << "|" << std::endl;
-        });
+        }
     }
     if (rhs.m > 1) {
         os << "⌊";
-        auto j_indices = std::views::iota(size_t{0}, rhs.n - 1);
-        std::ranges::for_each(j_indices, [&](size_t j) {
+        for (size_t j = 0; j + 1 < rhs.n; ++j) {
             os << std::setw(max) << rhs(rhs.m - 1, j);
             os << " ";  // must be in extra line due to set::setw()
-        });
+        }
         os << std::setw(max) << rhs(rhs.m - 1, rhs.n - 1);
         os << "⌋";
     }
@@ -4150,8 +4054,8 @@ constexpr Matrix<T> ZeroMatrix(size_t m, size_t n) {
 template <ComponentType T>
 constexpr Matrix<T> IdentityMatrix(size_t m) {
     auto res = Matrix<T>(m, m);
-    const auto indices = std::views::iota(size_t{0}, m);
-    std::ranges::for_each(indices, [&res](size_t i) { res.set_component(i, i, T(1)); });
+    for (size_t i = 0; i < m; ++i)
+        res.set_component(i, i, T(1));
     res.type = details::Identity;
     return res;
 }
@@ -4168,8 +4072,8 @@ constexpr Matrix<T> PermutationMatrix(const std::vector<size_t>& perm) {
         seen[perm[i]] = true;
     }
 
-    const auto indices = std::views::iota(size_t{0}, m);
-    std::ranges::for_each(indices, [&](size_t i) { res.set_component(i, perm[i], T(1)); });
+    for (size_t i = 0; i < m; ++i)
+        res.set_component(i, perm[i], T(1));
 
     return res;
 }
@@ -4220,8 +4124,8 @@ template <ComponentType T>
 constexpr Matrix<T> DiagonalMatrix(const Vector<T>& v) {
     const size_t m = v.get_n();
     Matrix<T> res(m, m);
-    const auto indices = std::views::iota(size_t{0}, m);
-    std::ranges::for_each(indices, [&res, &v](size_t i) { res.set_component(i, i, v[i]); });
+    for (size_t i = 0; i < m; ++i)
+        res.set_component(i, i, v[i]);
     res.type = details::Diagonal;
     return res;
 }
@@ -4256,23 +4160,17 @@ constexpr Matrix<T> ToeplitzMatrix(const Vector<T>& v, size_t m, size_t n) {
     Matrix<T> res(m, n);
 
     // Fill first column: v[0] to v[m-1] in reverse order
-    auto row_indices = std::views::iota(size_t{0}, m);
-    std::ranges::for_each(row_indices, [&](size_t i) { res.set_component(m - 1 - i, 0, v[i]); });
+    for (size_t i = 0; i < m; ++i)
+        res.set_component(m - 1 - i, 0, v[i]);
 
     // Fill first row: v[m-1] to v[m+n-2]
-    if (n > 1) {
-        auto col_indices = std::views::iota(size_t{1}, n);
-        std::ranges::for_each(col_indices, [&](size_t j) { res.set_component(0, j, v[m - 1 + j]); });
-    }
+    for (size_t j = 1; j < n; ++j)
+        res.set_component(0, j, v[m - 1 + j]);
 
     // Fill remaining elements using diagonal copy pattern
-    auto i_indices = std::views::iota(size_t{1}, m);
-    std::ranges::for_each(i_indices, [&](size_t i) {
-        if (n > 1) {
-            auto col_indices = std::views::iota(size_t{1}, n);
-            std::ranges::for_each(col_indices, [&](size_t j) { res.set_component(i, j, res(i - 1, j - 1)); });
-        }
-    });
+    for (size_t i = 1; i < m; ++i)
+        for (size_t j = 1; j < n; ++j)
+            res.set_component(i, j, res(i - 1, j - 1));
     res.type = details::Toeplitz;
     return res;
 }
@@ -4332,35 +4230,26 @@ constexpr Matrix<T> VandermondeMatrix(const Vector<T>& v, size_t m) {
             "vector for constructing details::Vandermonde matrix must have "
             "at least one element");
     if (m == 0) throw std::invalid_argument("trying to construct details::Vandermonde matrix with zero rows");
-    if (!v.is_pairwisedistinct())
+    if (!v.is_pairwise_distinct())
         throw std::invalid_argument(
             "vector for constructing details::Vandermonde matrix must have pairwise distinct elements");
 
     Matrix<T> res(m, n);
 
-    // First row: all ones using std::fill
-    if (!res.transposed) {
-        std::fill(res.data.begin(), res.data.begin() + n, T(1));
-    } else {
-        const auto indices = std::views::iota(size_t{0}, n);
-        std::ranges::for_each(indices, [&](size_t i) { res.set_component(0, i, T(1)); });
-    }
+    // First row: all ones
+
+        for (size_t i = 0; i < n; ++i)
+            res.set_component(0, i, T(1));
 
     if (m > 1) {
         // Second row: copy from vector v
-        if (!res.transposed) {
-            std::copy(v.data.begin(), v.data.end(), res.data.begin() + n);
-        } else {
-            const auto indices = std::views::iota(size_t{0}, n);
-            std::ranges::for_each(indices, [&](size_t i) { res.set_component(1, i, v[i]); });
-        }
+            for (size_t i = 0; i < n; ++i)
+                res.set_component(1, i, v[i]);
 
-        // Remaining rows: compute powers using std::ranges::for_each
-        auto j_indices = std::views::iota(size_t{2}, m);
-        std::ranges::for_each(j_indices, [&](size_t j) {
-            const auto indices = std::views::iota(size_t{0}, n);
-            std::ranges::for_each(indices, [&](size_t i) { res.set_component(j, i, res(j - 1, i) * v[i]); });
-        });
+        // Remaining rows: compute powers
+        for (size_t j = 2; j < m; ++j)
+            for (size_t i = 0; i < n; ++i)
+                res.set_component(j, i, res(j - 1, i) * v[i]);
     }
     res.type = details::Vandermonde;
     return res;
@@ -4386,10 +4275,8 @@ constexpr Matrix<T> VandermondeMatrix(const Vector<T>& v, size_t m) {
 template <ComponentType T>
 constexpr Matrix<T> UpperShiftMatrix(size_t m) {
     Matrix<T> res(m, m);
-    if (m > 1) {
-        const auto indices = std::views::iota(size_t{0}, m - 1);
-        std::ranges::for_each(indices, [&](size_t i) { res.set_component(i, i + 1, T(1)); });
-    }
+    for (size_t i = 0; i + 1 < m; ++i)
+        res.set_component(i, i + 1, T(1));
     return res;
 }
 
@@ -4441,8 +4328,8 @@ constexpr Matrix<T> CompanionMatrix(const Polynomial<T>& poly) {
     Matrix<T> res(transpose(UpperShiftMatrix<T>(poly.get_degree())));
 
     // Fill last column with negated polynomial coefficients
-    const auto indices = std::views::iota(size_t{0}, poly.get_degree());
-    std::ranges::for_each(indices, [&](size_t i) { res.set_component(i, poly.get_degree() - 1, -poly[i]); });
+    for (size_t i = 0; i < poly.get_degree(); ++i)
+        res.set_component(i, poly.get_degree() - 1, -poly[i]);
 
     return res;
 }

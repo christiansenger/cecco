@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.3
+ * @version 2.3.5
  * @date 2026
  *
  * @copyright
@@ -1694,7 +1694,6 @@ constexpr auto compute_modular_multiplication_table()
 {
     Lut2D<LabelType, FieldSize> lut_mul;
 
-    // Main computation loop with symmetry optimization
     for (LabelType i = 0; i < FieldSize; ++i) {
         for (LabelType j = i; j < FieldSize; ++j) lut_mul(i, j) = (i * j) % FieldSize;
     }
@@ -1729,7 +1728,6 @@ constexpr auto compute_polynomial_multiplication_table(const LutCoeffType& lut_c
     constexpr auto q = BaseFieldType::get_size();
     constexpr auto m = ExtensionDegree;
 
-    // Handle special cases: multiplication by 0 and 1
     for (LabelType i = 0; i < FieldSize; ++i) {
         lut_mul(0, i) = 0;
         lut_mul(i, 0) = 0;
@@ -1737,7 +1735,6 @@ constexpr auto compute_polynomial_multiplication_table(const LutCoeffType& lut_c
         lut_mul(i, 1) = i;
     }
 
-    // Main computation for elements >= 2
     for (LabelType i = 2; i < FieldSize; ++i) {
         const auto lhs = lut_coeff.values[i];
 
@@ -2143,13 +2140,10 @@ std::vector<size_t> Embedding<SUBFIELD, SUPERFIELD>::compute_embedding() {
         super_gen_to_power_factor *= super_gen;
     }
 
-    // Map subfield generator powers to superfield generator powers
-    auto sub_elem = sub_gen;                     // Start with subfield generator
-    auto sup_elem = super_gen_to_power_factor;   // Start with super_gen^power_factor
-    for (size_t i = 1; i < sub_size - 1; ++i) {  // Skip 0 and 1, already handled
-                                                 // for (size_t i = sub_size - 1; i < sub_size - 1; ++i) {
+    auto sub_elem = sub_gen;
+    auto sup_elem = super_gen_to_power_factor;
+    for (size_t i = 1; i < sub_size - 1; ++i) {
         embedding[sub_elem.get_label()] = sup_elem.get_label();
-        // Move to next powers
         sub_elem *= sub_gen;
         sup_elem *= super_gen_to_power_factor;
     }
@@ -2242,8 +2236,8 @@ struct IsomorphismPair {
             }
 
             // Compute reverse mapping B -> A (inverse of forward mapping)
-            auto indices = std::views::iota(size_t{0}, size);
-            std::ranges::for_each(indices, [&](size_t i) { reverse_iso[forward_iso[i]] = i; });
+            for (size_t i = 0; i < size; ++i)
+                reverse_iso[forward_iso[i]] = i;
         });
     }
 };
@@ -2430,8 +2424,8 @@ template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
 constexpr Isomorphism<B, A> Isomorphism<A, B>::inverse() const {
     std::vector<size_t> iso_inv(A::get_size());
-    auto indices = std::views::iota(size_t{0}, A::get_size());
-    std::ranges::for_each(indices, [&](size_t i) { iso_inv[iso[i]] = i; });
+    for (size_t i = 0; i < A::get_size(); ++i)
+        iso_inv[iso[i]] = i;
     return Isomorphism<B, A>(std::move(iso_inv));
 }
 
@@ -4150,8 +4144,9 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
             throw std::invalid_argument(
                 "trying to construct extension field element using base field vector of wrong length");
 
-        bool erased =
-            std::ranges::any_of(std::views::iota(size_t{0}, v.get_n()), [&](size_t i) { return v[i].is_erased(); });
+        bool erased = false;
+        for (size_t i = 0; i < v.get_n(); ++i)
+            if (v[i].is_erased()) { erased = true; break; }
 
         if (erased)
             this->erase();
@@ -4166,8 +4161,9 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
             throw std::invalid_argument(
                 "trying to construct extension field element using subfield vector of wrong length");
 
-        bool erased =
-            std::ranges::any_of(std::views::iota(size_t{0}, v.get_n()), [&](size_t i) { return v[i].is_erased(); });
+        bool erased = false;
+        for (size_t i = 0; i < v.get_n(); ++i)
+            if (v[i].is_erased()) { erased = true; break; }
 
         if (erased) {
             this->erase();
@@ -4237,14 +4233,12 @@ Ext<B, modulus, mode>::Ext(const Iso<MAIN, OTHERS...>& other) {
             OUT result = embedding(other.main());
             label = result.get_label();
         } else if constexpr ((SubfieldOf<OUT, OTHERS> || ...)) {
-            bool conversion_done = false;
             auto try_embedding = [&]<typename OtherType>() {
                 if constexpr (SubfieldOf<OUT, OtherType>) {
                     auto embedding = Embedding<OtherType, OUT>();
                     OtherType other_repr(other);
                     OUT result = embedding(other_repr);
                     label = result.get_label();
-                    conversion_done = true;
                 }
             };
             (try_embedding.template operator()<OTHERS>(), ...);
@@ -4257,14 +4251,12 @@ Ext<B, modulus, mode>::Ext(const Iso<MAIN, OTHERS...>& other) {
             OUT result = embedding.extract(other.main());
             label = result.get_label();
         } else if constexpr ((SubfieldOf<OTHERS, OUT> || ...)) {
-            bool conversion_done = false;
             auto try_downcast = [&]<typename OtherType>() {
                 if constexpr (SubfieldOf<OtherType, OUT>) {
                     auto embedding = Embedding<OUT, OtherType>();
                     OtherType other_repr(other);
                     OUT result = embedding.extract(other_repr);
                     label = result.get_label();
-                    conversion_done = true;
                 }
             };
             (try_downcast.template operator()<OTHERS>(), ...);

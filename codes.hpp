@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.11
+ * @version 2.0.14
  * @date 2026
  *
  * @copyright
@@ -28,7 +28,10 @@
 // #include <ranges> // transitive through blocks.hpp
 // #include <algorithm> // transitive through blocks.hpp
 // #include <vector> // transitive through blocks.hpp
+// #include <fstream> // transitive through matrices.hpp
 // #include <iostream> // transitive through blocks.hpp
+// #include <variant> // transitive through blocks.hpp
+// #include <optional> // transitive through blocks.hpp
 // #include "InfInt.hpp" // transitive through blocks.hpp
 // #include "field_concepts_traits.hpp" // transitive through blocks.hpp
 // #include "helpers.hpp" // transitive through blocks.hpp
@@ -248,6 +251,379 @@ std::ostream& showspecial(std::ostream& os) {
     return os;
 }
 
+namespace details {
+
+template <FieldType T>
+struct Vertex {
+    explicit Vertex(uint16_t id) : id(id) {}
+
+    uint16_t id;
+};
+
+template <FieldType T>
+struct Edge {
+    Edge(uint16_t from_id, uint16_t to_id, T value) : from_id(from_id), to_id(to_id), value(value) {}
+
+    uint16_t from_id;
+    uint16_t to_id;
+    T value;
+};
+
+inline double max_star(double a, double b) noexcept {
+    const double d = std::abs(a - b);
+    return std::max(a, b) + ((d > 500.0) ? 0.0 : std::log(1.0 + std::exp(-d)));
+}
+
+}  // namespace details
+
+template <FieldType T>
+struct Trellis {
+    Trellis() : V(1) { V[0].emplace_back(details::Vertex<T>(0)); }
+
+    void add_edge(size_t segment, uint16_t id_from, uint16_t id_to, T value) {
+        if (segment >= E.size()) {
+            V.resize(segment + 2);
+            E.resize(segment + 1);
+        }
+
+        auto& Vf = V[segment];
+        if (std::ranges::find_if(Vf, [id_from](const auto& v) { return v.id == id_from; }) == Vf.cend())
+            throw std::invalid_argument("Start node of edge does not exist in the segment!");
+
+        auto& Vt = V[segment + 1];
+        if (std::ranges::find_if(Vt, [id_to](const auto& v) { return v.id == id_to; }) == Vt.cend())
+            Vt.emplace_back(id_to);
+
+        auto& Es = E[segment];
+        if (std::ranges::any_of(Es, [&](const auto& e) { return e.from_id == id_from && e.to_id == id_to; }))
+            throw std::invalid_argument("Edge already exists in the segment!");
+        Es.emplace_back(id_from, id_to, value);
+    }
+
+    Trellis operator*(const Trellis& other) const {
+        if (E.size() != other.E.size()) throw std::invalid_argument("Trellises must have the same number of segments!");
+
+        const size_t num_segments = E.size();
+        std::vector<std::unordered_map<uint32_t, uint16_t>> vmap(num_segments + 1);
+
+        auto get_or_add = [&](size_t s, uint16_t a, uint16_t b) -> uint16_t {
+            const uint32_t key = (static_cast<uint32_t>(a) << 16) | b;
+            auto [it, inserted] = vmap[s].try_emplace(key, static_cast<uint16_t>(vmap[s].size()));
+            return it->second;
+        };
+
+        get_or_add(0, 0, 0);
+
+        Trellis result;
+
+        for (size_t s = 0; s < num_segments; ++s) {
+            for (const auto& e1 : E[s]) {
+                for (const auto& e2 : other.E[s]) {
+                    result.add_edge(s, get_or_add(s, e1.from_id, e2.from_id), get_or_add(s + 1, e1.to_id, e2.to_id),
+                                    e1.value + e2.value);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    size_t get_maximum_depth() const noexcept {
+        size_t max = 0;
+        for (const auto& seg : V)
+            if (seg.size() > max) max = seg.size();
+        return max;
+    }
+
+    struct Viterbi_Workspace {
+        explicit Viterbi_Workspace(const Trellis& tr) : owner(&tr) {
+            vertex_costs.reserve(tr.V.size());
+            backptrs.reserve(tr.V.size());
+            tie_counts.reserve(tr.V.size());
+            for (const auto& seg : tr.V) {
+                vertex_costs.emplace_back(seg.size(), std::numeric_limits<double>::max());
+                backptrs.emplace_back(seg.size(), nullptr);
+                tie_counts.emplace_back(seg.size(), uint16_t{0});
+            }
+            edge_costs.reserve(tr.E.size());
+            for (const auto& seg : tr.E) edge_costs.emplace_back(seg.size(), std::numeric_limits<double>::quiet_NaN());
+        }
+
+        void reset() noexcept {
+            for (auto& seg : vertex_costs) std::ranges::fill(seg, std::numeric_limits<double>::max());
+            for (auto& seg : backptrs) std::ranges::fill(seg, nullptr);
+            for (auto& seg : tie_counts) std::ranges::fill(seg, uint16_t{0});
+            for (auto& seg : edge_costs) std::ranges::fill(seg, std::numeric_limits<double>::quiet_NaN());
+            v.reset();
+        }
+
+        void calculate_edge_costs(const Trellis& tr, const Vector<T>& r) {
+            if (r.get_n() != tr.E.size())
+                throw std::invalid_argument("Vector length must match number of trellis segments!");
+            reset();
+            for (size_t s = 0; s < tr.E.size(); ++s)
+                for (size_t j = 0; j < tr.E[s].size(); ++j)
+#ifdef CECCO_ERASURE_SUPPORT
+                    edge_costs[s][j] = r[s].is_erased() ? 0.0 : ((tr.E[s][j].value != r[s]) ? 1.0 : 0.0);
+#else
+                    edge_costs[s][j] = (tr.E[s][j].value != r[s]) ? 1.0 : 0.0;
+#endif
+        }
+
+        void calculate_edge_costs(const Trellis& tr, const Vector<double>& llrs) {
+            if (llrs.get_n() != tr.E.size())
+                throw std::invalid_argument("Vector length must match number of trellis segments!");
+            reset();
+            for (size_t s = 0; s < tr.E.size(); ++s)
+                for (size_t j = 0; j < tr.E[s].size(); ++j)
+                    edge_costs[s][j] = (tr.E[s][j].value != T(0)) ? llrs[s] : 0.0;
+        }
+
+        const Trellis* owner;
+        std::vector<std::vector<double>> vertex_costs;
+        std::vector<std::vector<const details::Edge<T>*>> backptrs;
+        std::vector<std::vector<uint16_t>> tie_counts;
+        std::vector<std::vector<double>> edge_costs;
+        std::optional<std::variant<Vector<T>, Vector<double>>> v;
+    };
+
+    struct BCJR_Workspace {
+        explicit BCJR_Workspace(const Trellis& tr) : owner(&tr) {
+            for (const auto& seg : tr.V) {
+                alpha.emplace_back(seg.size(), -1e300);
+                beta.emplace_back(seg.size(), -1e300);
+            }
+            for (const auto& seg : tr.E) edge_costs.emplace_back(seg.size(), 0.0);
+        }
+
+        void calculate_edge_costs(const Trellis& tr, const Vector<double>& llrs) {
+            if (llrs.get_n() != tr.E.size())
+                throw std::invalid_argument("Vector length must match number of trellis segments!");
+            for (size_t s = 0; s < tr.E.size(); ++s)
+                for (size_t j = 0; j < tr.E[s].size(); ++j)
+                    edge_costs[s][j] = (tr.E[s][j].value != T(0)) ? llrs[s] : 0.0;
+            for (auto& seg : alpha) std::ranges::fill(seg, -1e300);
+            for (auto& seg : beta) std::ranges::fill(seg, -1e300);
+        }
+
+        const Trellis* owner;
+        std::vector<std::vector<double>> alpha;
+        std::vector<std::vector<double>> beta;
+        std::vector<std::vector<double>> edge_costs;
+    };
+
+    template <typename WS>
+    std::ostream& print(std::ostream& os, const WS* ws) const {
+        if (E.empty()) return os;
+        for (size_t i = 0; i < E.size(); ++i) {
+            if (E[i].empty()) return os;
+            for (size_t j = 0; j < E[i].size(); ++j) {
+                os << "(" << E[i][j].from_id << "--" << E[i][j].value;
+                if (ws) os << "[" << ws->edge_costs[i][j] << "]";
+                os << "--" << E[i][j].to_id << ")";
+                if (j < E[i].size() - 1) os << ", ";
+            }
+            if (i != E.size() - 1) os << std::endl;
+        }
+        return os;
+    }
+
+    std::ostream& print(std::ostream& os) const { return print<Viterbi_Workspace>(os, nullptr); }
+
+    friend std::ostream& operator<<(std::ostream& os, const Trellis& Tr) { return Tr.print(os); }
+
+    template <typename WS>
+    void export_as_tikz(const std::string& filename, const WS* ws) const
+        requires FiniteFieldType<T> && (T::get_size() <= 64)
+    {
+        std::ofstream file;
+        file.open(filename);
+
+        file << R"(% required in preamble:
+% \usepackage{amsfonts}
+% \usepackage{bm}
+% \usepackage{tikz}
+% \usetikzlibrary{arrows.meta, backgrounds, calc, positioning}
+
+\definecolor{vertexcolor}{RGB}{62, 68, 76}
+\definecolor{red}{RGB}{230, 0, 50}
+\tikzset{>={Stealth[scale=)";
+        file << std::min(1.4 / E.size() * 9.0, 1.4);
+        file << R"(]}}
+\tikzstyle{trellisvertex}=[circle, left color=vertexcolor!80, right color=vertexcolor!20, draw = black, inner sep = 0pt, outer sep = 0pt, minimum size = )";
+        file << std::min(5.0 / E.size() * 9.0, 5.0);
+        file << R"(pt]
+\tikzstyle{trellisarrow}=[draw, ->, fill=black]
+\tikzstyle{trellisarrowone}=[trellisarrow, fill=red, draw=red]
+\tikzstyle{trellisarrowzero}=[trellisarrow, densely dashed, fill=black, draw=black]
+\tikzstyle{trellisedgelabel}=[below, sloped]
+
+\begin{tikzpicture}[x=\linewidth/)";
+        file << E.size() << ", y=1cm]";
+
+        for (size_t s = 0; s < V.size(); ++s) {
+            for (size_t i = 0; i < V[s].size(); ++i) {
+                if (V[s][i].id > 2) continue;
+
+                file << R"(
+    \node[trellisvertex])";
+                file << " (" << s << "_" << V[s][i].id << ") at";
+                file << " (" << s << ", " << -static_cast<int>(V[s][i].id) << ") {\\tiny$";
+                if (ws) {
+                    if constexpr (std::is_same_v<WS, BCJR_Workspace>)
+                        file << std::defaultfloat << std::setprecision(2) << ws->alpha[s][i] << "\\mid "
+                             << ws->beta[s][i];
+                    else
+                        file << std::defaultfloat << std::setprecision(2) << (int)ws->vertex_costs[s][i];
+                }
+                file << "$};";
+            }
+        }
+
+        for (size_t s = 0; s < E.size(); ++s) {
+            for (size_t j = 0; j < E[s].size(); ++j) {
+                const auto& e = E[s][j];
+                const auto label = e.value.get_label();
+
+                if (e.from_id > 2 || e.to_id > 2) continue;
+
+                if (label == 0) {
+                    file << R"(
+    \path[trellisarrowzero])";
+                } else if (label == T::get_size() - 1) {
+                    file << R"(
+    \path[trellisarrowone])";
+                } else {
+                    const size_t a = 63 - 63 * static_cast<double>(label) / (T::get_size() - 1);
+
+                    const uint8_t r = details::colormap[a][0];
+                    const uint8_t g = details::colormap[a][1];
+                    const uint8_t b = details::colormap[a][2];
+
+                    file << R"(
+    \definecolor{color}{RGB}{)"
+                         << static_cast<int>(r) << ", " << static_cast<int>(g) << ", " << static_cast<int>(b) << "}";
+                    file << R"(\path[trellisarrow, draw=color, fill=color])";
+                }
+                file << " (" << s << "_" << e.from_id << ")";
+                if (ws && !std::isnan(ws->edge_costs[s][j]))
+                    file << " edge[trellisedgelabel] node[black] {\\tiny$" << std::defaultfloat << std::setprecision(2)
+                         << ws->edge_costs[s][j] << "$}";
+                else
+                    file << " --";
+                file << " (" << s + 1 << "_" << e.to_id << ");";
+            }
+        }
+
+        file << R"(
+    \begin{scope}[on background layer])";
+        for (size_t s = 0; s < V.size(); ++s) {
+            const size_t maxdepth = get_maximum_depth();
+            file << R"(
+        \draw [dotted, shorten >=-5mm] ()"
+                 << s << "_0) to (" << s << ", " << -static_cast<int>(maxdepth) + 1 << R"();)";
+        }
+        file << R"(
+    \end{scope})";
+
+        file << R"(
+    \node[node distance=.0cm, below left=of 0_0] {$\mathfrak{s}$};
+    \node[node distance=.0cm, below right=of )";
+        file << E.size();
+        file << R"(_0] {$\mathfrak{t}$};)";
+
+        if constexpr (requires { ws->v; }) {
+            if (ws && ws->v.has_value()) {
+                file << R"(
+    \node[anchor=west] at ($(0_0)+ (0, .5)$) {$\bm{v}=$};)";
+                file << R"(
+    \node at ($(0_0)!0.5!(1_0)+ (0, .5)$) {$()";
+                std::visit([&](const auto& w) { file << w[0]; }, *(ws->v));
+                file << ",$};";
+                for (size_t s = 1; s < E.size() - 1; ++s) {
+                    file << R"(
+    \node at ($()";
+                    file << s;
+                    file << "_0)!0.5!(";
+                    file << s + 1;
+                    file << "_0)+ (0, .5)$) {$";
+                    std::visit([&](const auto& w) { file << w[s]; }, *(ws->v));
+                    file << ",$};";
+                }
+                file << R"(
+    \node at ($()";
+                file << E.size() - 1;
+                file << "_0)!0.5!(";
+                file << E.size();
+                file << "_0)+ (0, .5)$) {$";
+                std::visit([&](const auto& w) { file << w[E.size() - 1]; }, *(ws->v));
+                file << ")$};";
+            }
+        }
+
+        file << R"(
+\end{tikzpicture}
+        )" << std::endl;
+        file.close();
+    }
+
+    void export_as_tikz(const std::string& filename) const
+        requires FiniteFieldType<T> && (T::get_size() <= 64)
+    {
+        export_as_tikz<Viterbi_Workspace>(filename, nullptr);
+    }
+
+    template <FiniteFieldType U>
+        requires SubfieldOf<U, T>
+    Trellis<U> merge_segments() const {
+        constexpr size_t m = details::degree_over_prime_v<U> / details::degree_over_prime_v<T>;
+        const size_t n = E.size();
+        const size_t full_groups = n / m;
+
+        Trellis<U> result;
+        size_t seg = 0;
+
+        for (size_t g = 0; g < full_groups; ++g) {
+            std::vector<std::vector<const details::Edge<T>*>> paths;
+
+            for (const auto& e : E[g * m]) paths.push_back({&e});
+
+            for (size_t step = 1; step < m; ++step) {
+                std::vector<std::vector<const details::Edge<T>*>> next;
+                for (const auto& path : paths)
+                    for (const auto& e : E[g * m + step])
+                        if (e.from_id == path.back()->to_id) {
+                            auto ext = path;
+                            ext.push_back(&e);
+                            next.push_back(std::move(ext));
+                        }
+                paths = std::move(next);
+            }
+
+            for (const auto& path : paths) {
+                Vector<T> v(m);
+                for (size_t i = 0; i < m; ++i) v.set_component(i, path[i]->value);
+                result.add_edge(seg, path.front()->from_id, path.back()->to_id, U(v));
+            }
+            ++seg;
+        }
+
+        for (size_t s = full_groups * m; s < n; ++s) {
+            for (const auto& e : E[s]) {
+                Vector<T> v(m, T(0));
+                v.set_component(0, e.value);
+                result.add_edge(seg, e.from_id, e.to_id, U(v));
+            }
+            ++seg;
+        }
+
+        return result;
+    }
+
+    std::vector<std::vector<details::Vertex<T>>> V;
+    std::vector<std::vector<details::Edge<T>>> E;
+};
+
 template <ComponentType T>
 class Code {
    public:
@@ -271,16 +647,50 @@ class Code {
     size_t get_n() const noexcept { return n; }
 
     virtual void get_info(std::ostream& os) const {};
-    virtual Vector<T> enc(const Vector<T>& u) const = 0;
-    virtual Vector<T> encinv(const Vector<T>& c) const = 0;
-    virtual Vector<T> dec_BD(const Vector<T>& r) const = 0;
-    virtual Vector<T> dec_boosted_BD(const Vector<T>& r) const = 0;
-    virtual Vector<T> dec_ML(const Vector<T>& r) const = 0;
-    virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t cache_size) const = 0;
-    virtual Vector<T> dec_burst(const Vector<T>& r) const = 0;
+    virtual Vector<T> enc(const Vector<T>& u) const { throw std::logic_error("Encoding not supported for this code!"); }
+    virtual Vector<T> encinv(const Vector<T>& c) const {
+        throw std::logic_error("Inverse encoding not supported for this code!");
+    }
+    virtual Vector<T> dec_BD(const Vector<T>& r) const {
+        throw std::logic_error("Bounded distance decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_boosted_BD(const Vector<T>& r) const {
+        throw std::logic_error("Boosted bounded distance decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_ML(const Vector<T>& r) const {
+        throw std::logic_error("ML decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_Viterbi(const Vector<T>& r, const std::string& filename = "") const {
+        throw std::logic_error("Viterbi decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t cache_size) const {
+        throw std::logic_error("Soft-input ML decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_Viterbi_soft(const Vector<double>& llrs, const std::string& filename = "") const {
+        throw std::logic_error("Soft-input Viterbi decoding not supported for this code!");
+    }
+    virtual Vector<double> dec_BCJR(const Vector<double>& llrs, const std::string& filename = "") const {
+        throw std::logic_error("BCJR decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_burst(const Vector<T>& r) const {
+        throw std::logic_error("Burst decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_recursive(const Vector<T>& r) const {
+        throw std::logic_error("Recursive decoding not supported for this code!");
+    }
 #ifdef CECCO_ERASURE_SUPPORT
-    virtual Vector<T> dec_BD_EE(const Vector<T>& r) const = 0;
-    virtual Vector<T> dec_ML_EE(const Vector<T>& r) const = 0;
+    virtual Vector<T> dec_BD_EE(const Vector<T>& r) const {
+        throw std::logic_error("BD error/erasure decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_ML_EE(const Vector<T>& r) const {
+        throw std::logic_error("ML error/erasure decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_Viterbi_EE(const Vector<T>& r, const std::string& filename = "") const {
+        throw std::logic_error("Viterbi error/erasure decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_recursive_EE(const Vector<T>& r) const {
+        throw std::logic_error("Recursive error/erasure decoding not supported for this code!");
+    }
 #endif
 
    protected:
@@ -302,30 +712,6 @@ class EmptyCode : public Code<T> {
             Code<T>::get_info(os);
             os << "Empty code";
         }
-    }
-
-    Vector<T> enc(const Vector<T>& u) const override { throw std::logic_error("Cannot encode wrt. an empty code!"); }
-
-    Vector<T> encinv(const Vector<T>& c) const override {
-        throw std::logic_error("Cannot invert encoding wrt. an empty code!");
-    }
-
-    Vector<T> dec_BD(const Vector<T>& r) const override { throw std::logic_error("Cannot BD decode an empty code!"); }
-
-    Vector<T> dec_ML(const Vector<T>& r) const override { throw std::logic_error("Cannot ML decode an empty code!"); }
-
-#ifdef CECCO_ERASURE_SUPPORT
-    Vector<T> dec_BD_EE(const Vector<T>& r) const override {
-        throw std::logic_error("Cannot BD error/erasure decode an empty code!");
-    }
-
-    Vector<T> dec_ML_EE(const Vector<T>& r) const override {
-        throw std::logic_error("Cannot ML error/erasure decode an empty code!");
-    }
-#endif
-
-    Vector<T> dec_burst(const Vector<T>& r) const override {
-        throw std::logic_error("Cannot burst decode an empty code!");
     }
 };
 
@@ -481,7 +867,9 @@ class LinearCode : public Code<T> {
           polynomial(other.polynomial),
           polynomial_flag(),
           gamma(other.gamma),
-          gamma_flag() {
+          gamma_flag(),
+          minimal_trellis(other.minimal_trellis),
+          minimal_trellis_flag() {
     }
 
     LinearCode(LinearCode&& other)
@@ -508,7 +896,9 @@ class LinearCode : public Code<T> {
           polynomial(std::move(other.polynomial)),
           polynomial_flag(),
           gamma(std::move(other.gamma)),
-          gamma_flag() {
+          gamma_flag(),
+          minimal_trellis(std::move(other.minimal_trellis)),
+          minimal_trellis_flag() {
     }
 
     LinearCode& operator=(const LinearCode& other) {
@@ -548,6 +938,9 @@ class LinearCode : public Code<T> {
             gamma = other.gamma;
             gamma_flag.~once_flag();
             new (&gamma_flag) std::once_flag();
+            minimal_trellis = other.minimal_trellis;
+            minimal_trellis_flag.~once_flag();
+            new (&minimal_trellis_flag) std::once_flag();
         }
         return *this;
     }
@@ -589,6 +982,9 @@ class LinearCode : public Code<T> {
             gamma = std::move(other.gamma);
             gamma_flag.~once_flag();
             new (&gamma_flag) std::once_flag();
+            minimal_trellis = std::move(other.minimal_trellis);
+            minimal_trellis_flag.~once_flag();
+            new (&minimal_trellis_flag) std::once_flag();
         }
         return *this;
     }
@@ -692,7 +1088,8 @@ class LinearCode : public Code<T> {
         const size_t tmax = get_tmax();
         long double res = 0.0;
         for (size_t i = tmax + 1; i <= this->n; ++i)
-            res += bin<InfInt>(this->n, i).toUnsignedLongLong() * std::pow(static_cast<long double>(pe), i) * std::pow(1.0L - pe, this->n - i);
+            res += bin<InfInt>(this->n, i).toUnsignedLongLong() * std::pow(static_cast<long double>(pe), i) *
+                   std::pow(1.0L - pe, this->n - i);
         return res;
     }
 
@@ -726,8 +1123,7 @@ class LinearCode : public Code<T> {
         const size_t dmin = get_dmin();
 
         long double res = 0;
-        for (size_t i = dmin; i <= A.degree(); ++i)
-            res += A[i].toUnsignedLongLong() * std::pow(gamma, i);
+        for (size_t i = dmin; i <= A.degree(); ++i) res += A[i].toUnsignedLongLong() * std::pow(gamma, i);
 
         return res;
     }
@@ -788,6 +1184,9 @@ class LinearCode : public Code<T> {
             std::vector<size_t> leader_wH(standard_array.value().size(), std::numeric_limits<size_t>::max());
             std::vector<size_t> leader_cyclic_burst_length(standard_array.value().size(),
                                                            std::numeric_limits<size_t>::max());
+            std::vector<size_t> leader_tie_count(standard_array.value().size(), 0);
+            std::mt19937 rng(std::random_device{}());
+            std::uniform_real_distribution<double> uniform(0.0, 1.0);
 
             for (size_t wt = 0; wt <= this->n; ++wt) {
                 std::vector<bool> mask(this->n, false);
@@ -814,12 +1213,18 @@ class LinearCode : public Code<T> {
 
                             leader_wH[i] = wt;
                             leader_cyclic_burst_length[i] = cyclic_burst_length(v);
+                            leader_tie_count[i] = 1;
 
                             ++count;
                             if (count == nof_cosets) done = true;
                         } else {
                             if (wt == leader_wH[i]) {
                                 tainted.value()[i] = true;
+                                ++leader_tie_count[i];
+                                if (uniform(rng) < 1.0 / leader_tie_count[i]) {
+                                    standard_array.value()[i] = v;
+                                    leader_cyclic_burst_length[i] = cyclic_burst_length(v);
+                                }
                                 if (!tainted_burst.value()[i]) {
                                     const size_t cbl = cyclic_burst_length(v);
                                     if (cbl == leader_cyclic_burst_length[i]) tainted_burst.value()[i] = true;
@@ -1193,6 +1598,163 @@ class LinearCode : public Code<T> {
         return dual_code;
     }
 
+    Matrix<T> get_G_in_standard_form() const noexcept {
+        auto Gp = get_G();
+        Gp.rref();
+        for (size_t i = 0; i < k; ++i) {
+            const auto u = unit_vector<T>(k, i);
+            for (size_t j = 0; j < this->n; ++j) {
+                if (Gp.get_col(j) == u) {
+                    Gp.swap_columns(i, j);
+                    break;
+                }
+            }
+        }
+        return Gp;
+    }
+
+    Matrix<T> get_G_in_polynomial_form() const {
+        if (!is_polynomial()) throw std::invalid_argument("Code is not polynomial, cannot bring G in polynomial form!");
+
+        auto g = get_gamma();
+        auto Gp = ToeplitzMatrix(pad_back(pad_front(Vector<T>(g), this->n), this->n + k - 1), k, this->n);
+        return Gp;
+    }
+
+    Matrix<T> get_G_in_trellis_oriented_form() const {
+        auto Gp = G;
+        for (;;) {
+            // find start and end indices
+            std::vector<size_t> starts(k);
+            std::vector<size_t> ends(k);
+            for (size_t i = 0; i < k; ++i) {
+                for (size_t j = 0; j < this->n; ++j) {
+                    if (Gp(i, j) != T(0)) {
+                        starts[i] = j;
+                        break;
+                    }
+                }
+                for (size_t j = this->n; j-- > 0;) {
+                    if (Gp(i, j) != T(0)) {
+                        ends[i] = j;
+                        break;
+                    }
+                }
+            }
+
+            // break if in trellis-oriented form
+            std::set<size_t> start_set(starts.cbegin(), starts.cend());
+            std::set<size_t> end_set(ends.cbegin(), ends.cend());
+
+            if (start_set.size() == k && end_set.size() == k) break;
+
+            bool found_start = false;
+            for (size_t i = 0; i < k; ++i) {
+                for (size_t j = i + 1; j < k; ++j) {
+                    if (starts[i] == starts[j]) {
+                        const size_t s = starts[i];
+                        Gp.scale_row(T(1) / Gp(i, s), i);
+                        Gp.scale_row(T(1) / Gp(j, s), j);
+                        if (ends[i] < ends[j])
+                            Gp.add_scaled_row(-T(1), i, j);
+                        else
+                            Gp.add_scaled_row(-T(1), j, i);
+                        found_start = true;
+                        break;
+                    }
+                }
+                if (found_start) break;
+            }
+
+            if (!found_start) {
+                bool found_end = false;
+                for (size_t i = 0; i < k; ++i) {
+                    for (size_t j = i + 1; j < k; ++j) {
+                        if (ends[i] == ends[j]) {
+                            const size_t e = ends[i];
+                            Gp.scale_row(T(1) / Gp(i, e), i);
+                            Gp.scale_row(T(1) / Gp(j, e), j);
+                            if (starts[i] > starts[j])
+                                Gp.add_scaled_row(-T(1), i, j);
+                            else
+                                Gp.add_scaled_row(-T(1), j, i);
+                            found_end = true;
+                            break;
+                        }
+                    }
+                    if (found_end) break;
+                }
+            }
+        }
+
+        return Gp;
+    }
+
+    Trellis<T> get_trivial_trellis() const {
+        const size_t n = this->n;
+
+        Trellis<T> res;
+        size_t i = 0;
+        for (auto it = cbegin(); it != cend(); ++it) {
+            res.add_edge(0, 0, i, (*it)[0]);
+            for (size_t j = 1; j < n - 1; ++j) {
+                res.add_edge(j, i, i, (*it)[j]);
+            }
+            res.add_edge(n - 1, i, 0, (*it)[n - 1]);
+            ++i;
+        }
+
+        return res;
+    }
+
+    const Trellis<T>& get_minimal_trellis() const {
+        std::call_once(minimal_trellis_flag, [this] {
+            const size_t q = T::get_size();
+            const size_t n = this->n;
+            const auto Gp = get_G_in_trellis_oriented_form();
+
+            auto row_trellis = [q, n, &Gp](size_t i) {
+                size_t s = 0, e = 0;
+                for (size_t j = 0; j < n; ++j) {
+                    if (Gp(i, j) != T(0)) {
+                        s = j;
+                        break;
+                    }
+                }
+                for (size_t j = n; j-- > 0;) {
+                    if (Gp(i, j) != T(0)) {
+                        e = j;
+                        break;
+                    }
+                }
+
+                Trellis<T> tr;
+                for (size_t j = 0; j < n; ++j) {
+                    if (j < s || j > e) {
+                        // outside span: single zero edge
+                        tr.add_edge(j, 0, 0, T(0));
+                    } else if (j == s) {
+                        // fan out: q edges from state 0
+                        for (uint16_t a = 0; a < q; ++a) tr.add_edge(j, 0, a, T(a) * Gp(i, j));
+                    } else if (j == e) {
+                        // fan in: all states merge to 0
+                        for (uint16_t a = 0; a < q; ++a) tr.add_edge(j, a, 0, T(a) * Gp(i, j));
+                    } else {
+                        // interior: each state stays
+                        for (uint16_t a = 0; a < q; ++a) tr.add_edge(j, a, a, T(a) * Gp(i, j));
+                    }
+                }
+                return tr;
+            };
+
+            auto result = row_trellis(0);
+            for (size_t i = 1; i < k; ++i) result = result * row_trellis(i);
+
+            minimal_trellis.emplace(std::move(result));
+        });
+        return *minimal_trellis;
+    }
+
     Vector<T> enc(const Vector<T>& u) const override { return u * G; }
 
     Vector<T> encinv(const Vector<T>& c) const override {
@@ -1208,7 +1770,8 @@ class LinearCode : public Code<T> {
     }
 
     virtual Vector<T> dec_BD(const Vector<T>& r) const override {
-        static_assert(FiniteFieldType<T>, "BD decoding only available for codes over finite fields!");
+        if constexpr (!FiniteFieldType<T>)
+            throw std::logic_error("BD decoding only available for codes over finite fields!");
         validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
@@ -1222,7 +1785,8 @@ class LinearCode : public Code<T> {
     }
 
     virtual Vector<T> dec_boosted_BD(const Vector<T>& r) const final override {
-        static_assert(FiniteFieldType<T>, "BD decoding only available for codes over finite fields!");
+        if constexpr (!FiniteFieldType<T>)
+            throw std::logic_error("BD decoding only available for codes over finite fields!");
         validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
@@ -1239,7 +1803,8 @@ class LinearCode : public Code<T> {
     }
 
     virtual Vector<T> dec_ML(const Vector<T>& r) const override {
-        static_assert(FiniteFieldType<T>, "ML decoding only available for codes over finite fields!");
+        if constexpr (!FiniteFieldType<T>)
+            throw std::logic_error("ML decoding only available for codes over finite fields!");
         validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
@@ -1255,7 +1820,8 @@ class LinearCode : public Code<T> {
     }
 
     virtual Vector<T> dec_burst(const Vector<T>& r) const override {
-        static_assert(FiniteFieldType<T>, "Burst decoding only available for codes over finite fields!");
+        if constexpr (!FiniteFieldType<T>)
+            throw std::logic_error("Burst decoding only available for codes over finite fields!");
         validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r))
@@ -1273,8 +1839,63 @@ class LinearCode : public Code<T> {
         }
     }
 
+    virtual Vector<T> dec_Viterbi(const Vector<T>& r, const std::string& filename = "") const final {
+        if constexpr (!FiniteFieldType<T>)
+            throw std::logic_error("Viterbi decoding only available for codes over finite fields!");
+        validate_length(r);
+#ifdef CECCO_ERASURE_SUPPORT
+        if (LinearCode<T>::erasures_present(r)) return dec_Viterbi_EE(r);
+#endif
+        if (k == 0) return Vector<T>(this->n);
+
+        const auto& Tr = get_minimal_trellis();
+        thread_local typename Trellis<T>::Viterbi_Workspace ws(Tr);
+        if (ws.owner != &Tr) ws = typename Trellis<T>::Viterbi_Workspace(Tr);
+        ws.calculate_edge_costs(Tr, r);
+        auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
+        if (!filename.empty()) {
+            ws.v.emplace(r);
+            Tr.export_as_tikz(filename, &ws);
+        }
+        return c_est;
+    }
+
+    virtual Vector<T> dec_Viterbi_soft(const Vector<double>& llrs, const std::string& filename = "") const override {
+        if constexpr (!std::is_same_v<T, Fp<2>>)
+            throw std::logic_error("Soft-input Viterbi decoding only available for codes over F_2!");
+        validate_length(llrs);
+        if (k == 0) return Vector<T>(this->n);
+
+        const auto& Tr = get_minimal_trellis();
+        thread_local typename Trellis<T>::Viterbi_Workspace ws(Tr);
+        if (ws.owner != &Tr) ws = typename Trellis<T>::Viterbi_Workspace(Tr);
+        ws.calculate_edge_costs(Tr, llrs);
+        auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
+        if (!filename.empty()) {
+            ws.v.emplace(llrs);
+            Tr.export_as_tikz(filename, &ws);
+        }
+        return c_est;
+    }
+
+    virtual Vector<double> dec_BCJR(const Vector<double>& llrs, const std::string& filename = "") const override {
+        if constexpr (!std::is_same_v<T, Fp<2>>)
+            throw std::logic_error("BCJR decoding only available for codes over F_2!");
+        validate_length(llrs);
+        if (k == 0) return Vector<double>(this->n, 0.0);
+
+        const auto& Tr = get_minimal_trellis();
+        thread_local typename Trellis<T>::BCJR_Workspace ws(Tr);
+        if (ws.owner != &Tr) ws = typename Trellis<T>::BCJR_Workspace(Tr);
+        ws.calculate_edge_costs(Tr, llrs);
+        auto result = bcjr_forward_backward(Tr, ws);
+        if (!filename.empty()) Tr.export_as_tikz(filename, &ws);
+        return result;
+    }
+
     virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t cache_limit) const override {
-        static_assert(std::is_same_v<T, Fp<2>>, "Soft-input ML decoding only available for codes over F_2!");
+        if constexpr (!std::is_same_v<T, Fp<2>>)
+            throw std::logic_error("Soft-input ML decoding only available for codes over F_2!");
         validate_length(llrs);
 
         if (k == 0) return Vector<T>(this->n);
@@ -1313,7 +1934,8 @@ class LinearCode : public Code<T> {
 
 #ifdef CECCO_ERASURE_SUPPORT
     virtual Vector<T> dec_BD_EE(const Vector<T>& r) const override {
-        static_assert(FiniteFieldType<T>, "BD error/erasure decoding only available for codes over finite fields!");
+        if constexpr (!FiniteFieldType<T>)
+            throw std::logic_error("BD error/erasure decoding only available for codes over finite fields!");
         validate_length(r);
 
         if (k == 0) return Vector<T>(this->n);
@@ -1339,8 +1961,27 @@ class LinearCode : public Code<T> {
             return c_est;
     }
 
+    virtual Vector<T> dec_Viterbi_EE(const Vector<T>& r, const std::string& filename = "") const override {
+        if constexpr (!FiniteFieldType<T>)
+            throw std::logic_error("Viterbi error/erasure decoding only available for codes over finite fields!");
+        validate_length(r);
+        if (k == 0) return Vector<T>(this->n);
+
+        const auto& Tr = get_minimal_trellis();
+        thread_local typename Trellis<T>::Viterbi_Workspace ws(Tr);
+        if (ws.owner != &Tr) ws = typename Trellis<T>::Viterbi_Workspace(Tr);
+        ws.calculate_edge_costs(Tr, r);
+        auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
+        if (!filename.empty()) {
+            ws.v.emplace(r);
+            Tr.export_as_tikz(filename, &ws);
+        }
+        return c_est;
+    }
+
     virtual Vector<T> dec_ML_EE(const Vector<T>& r) const override {
-        static_assert(FiniteFieldType<T>, "ML error/erasure decoding only available for codes over finite fields!");
+        if constexpr (!FiniteFieldType<T>)
+            throw std::logic_error("ML error/erasure decoding only available for codes over finite fields!");
         validate_length(r);
 
         if (k == 0) return Vector<T>(this->n);
@@ -1456,8 +2097,86 @@ class LinearCode : public Code<T> {
     mutable std::once_flag polynomial_flag;
     mutable std::optional<Polynomial<T>> gamma;
     mutable std::once_flag gamma_flag;
+    mutable std::optional<Trellis<T>> minimal_trellis;
+    mutable std::once_flag minimal_trellis_flag;
 
    private:
+    Vector<T> viterbi_forward_pass_and_traceback(const Trellis<T>& Tr,
+                                                 typename Trellis<T>::Viterbi_Workspace& ws) const {
+        thread_local std::mt19937 rng(std::random_device{}());
+        thread_local std::uniform_real_distribution<double> uniform(0.0, 1.0);
+
+        const size_t n = this->n;
+
+        ws.vertex_costs[0][0] = 0.0;
+
+        for (size_t s = 0; s < n; ++s) {
+            for (size_t j = 0; j < Tr.E[s].size(); ++j) {
+                const auto& e = Tr.E[s][j];
+                const double cost = ws.vertex_costs[s][e.from_id] + ws.edge_costs[s][j];
+                if (cost < ws.vertex_costs[s + 1][e.to_id]) {
+                    ws.vertex_costs[s + 1][e.to_id] = cost;
+                    ws.backptrs[s + 1][e.to_id] = &e;
+                    ws.tie_counts[s + 1][e.to_id] = 1;
+                } else if (cost == ws.vertex_costs[s + 1][e.to_id]) {
+                    ++ws.tie_counts[s + 1][e.to_id];
+                    if (uniform(rng) < 1.0 / ws.tie_counts[s + 1][e.to_id]) ws.backptrs[s + 1][e.to_id] = &e;
+                }
+            }
+        }
+
+        Vector<T> c_est(n);
+
+        size_t v = 0;
+        for (size_t s = n; s > 0; --s) {
+            const auto* e = ws.backptrs[s][v];
+            if (e == nullptr) throw std::runtime_error("Traceback failed: missing predecessor edge!");
+            c_est.set_component(s - 1, e->value);
+            v = e->from_id;
+        }
+
+        return c_est;
+    }
+
+    Vector<double> bcjr_forward_backward(const Trellis<T>& Tr, typename Trellis<T>::BCJR_Workspace& ws) const {
+        const size_t n = this->n;
+
+        ws.alpha[0][0] = 0.0;
+        for (size_t s = 0; s < n; ++s) {
+            for (size_t j = 0; j < Tr.E[s].size(); ++j) {
+                const auto& e = Tr.E[s][j];
+                const double val = ws.alpha[s][e.from_id] - ws.edge_costs[s][j];
+                ws.alpha[s + 1][e.to_id] = details::max_star(ws.alpha[s + 1][e.to_id], val);
+            }
+        }
+
+        ws.beta[n][0] = 0.0;
+        for (size_t s = n; s > 0; --s) {
+            for (size_t j = 0; j < Tr.E[s - 1].size(); ++j) {
+                const auto& e = Tr.E[s - 1][j];
+                const double val = ws.beta[s][e.to_id] - ws.edge_costs[s - 1][j];
+                ws.beta[s - 1][e.from_id] = details::max_star(ws.beta[s - 1][e.from_id], val);
+            }
+        }
+
+        Vector<double> res(n);
+        for (size_t s = 0; s < n; ++s) {
+            double L0 = -1e300;
+            double L1 = -1e300;
+            for (size_t j = 0; j < Tr.E[s].size(); ++j) {
+                const auto& e = Tr.E[s][j];
+                const double val = ws.alpha[s][e.from_id] - ws.edge_costs[s][j] + ws.beta[s + 1][e.to_id];
+                if (e.value == T(0))
+                    L0 = details::max_star(L0, val);
+                else
+                    L1 = details::max_star(L1, val);
+            }
+            res.set_component(s, L0 - L1);
+        }
+
+        return res;
+    }
+
 #ifdef CECCO_ERASURE_SUPPORT
     size_t pos_to_index(const std::vector<size_t>& pos) const {
         const size_t tau = pos.size();
@@ -1667,7 +2386,6 @@ class HammingCode : public LinearCode<T> {
     }
 
     SimplexCode<T> get_dual() const noexcept { return SimplexCode<T>(s); }
-
     Vector<T> dec_BD(const Vector<T>& r) const override {
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
@@ -1696,7 +2414,7 @@ class HammingCode : public LinearCode<T> {
         if (LinearCode<T>::erasures_present(r)) return LinearCode<T>::dec_ML_EE(r);
 #endif
 
-        return LinearCode<T>::dec_BD(r);
+        return dec_BD(r);
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
@@ -1821,7 +2539,6 @@ class SimplexCode : public LinearCode<T> {
     }
 
     HammingCode<T> get_dual() const noexcept { return HammingCode<T>(s); }
-
     Vector<T> dec_BD(const Vector<T>& r) const override {
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
@@ -2109,7 +2826,6 @@ class SingleParityCheckCode : public LinearCode<T> {
     }
 
     RepetitionCode<T> get_dual() const noexcept { return RepetitionCode<T>(this->n); }
-
     Vector<T> dec_BD(const Vector<T>& r) const override {
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
@@ -2473,7 +3189,7 @@ class LDCCode : public LinearCode<typename BU::field> {
         }
     }
 
-    Vector<T> dec_recursive(const Vector<T>& r) const {
+    Vector<T> dec_recursive(const Vector<T>& r) const override {
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_recursive_EE(r);
 #endif
@@ -2482,8 +3198,12 @@ class LDCCode : public LinearCode<typename BU::field> {
         auto rl = r.get_subvector(0, U.get_n());
         auto rr = r.get_subvector(U.get_n(), U.get_n());
 
-        const Vector<T> cr_hat = dec_wrapper(V, rl + rr);
+        // U code
         const Vector<T> cl_hat_1 = dec_wrapper(U, rl);
+
+        // V code
+        const Vector<T> cr_hat = dec_wrapper(V, rr - rl);
+        // ... then U code
         const Vector<T> cl_hat_2 = dec_wrapper(U, rr - cr_hat);
 
         const auto c_hat_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
@@ -2495,7 +3215,7 @@ class LDCCode : public LinearCode<typename BU::field> {
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
-    Vector<T> dec_recursive_EE(const Vector<T>& r) const {
+    Vector<T> dec_recursive_EE(const Vector<T>& r) const override {
         this->validate_length(r);
 
         size_t tau = 0;
@@ -2509,8 +3229,12 @@ class LDCCode : public LinearCode<typename BU::field> {
         auto rl = r.get_subvector(0, U.get_n());
         auto rr = r.get_subvector(U.get_n(), U.get_n());
 
-        const Vector<T> cr_hat = dec_wrapper_EE(V, rl + rr);
+        // U code
         const Vector<T> cl_hat_1 = dec_wrapper_EE(U, rl);
+
+        // V code
+        const Vector<T> cr_hat = dec_wrapper_EE(V, rr - rl);
+        // ... then U code
         const Vector<T> cl_hat_2 = dec_wrapper_EE(U, rr - cr_hat);
 
         const auto c_hat_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
@@ -2578,13 +3302,13 @@ class RMCode : public LinearCode<Fp<2>> {
     // Documentation note: there is no dec_ML, falls back to LinearCode since dec_recursive is only approximative
     // ML!
 
-    Vector<T> dec_recursive(const Vector<T>& r) const {
+    Vector<T> dec_recursive(const Vector<T>& r) const override {
         this->validate_length(r);
         return dec_wrapper(this->r, m, r);
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
-    Vector<T> dec_recursive_EE(const Vector<T>& r) const {
+    Vector<T> dec_recursive_EE(const Vector<T>& r) const override {
         this->validate_length(r);
 
         size_t tau = 0;
@@ -2624,39 +3348,69 @@ class RMCode : public LinearCode<Fp<2>> {
     static Vector<T> dec_wrapper(size_t r, size_t m, const Vector<T>& v) {
         const size_t n = sqm(2, m);
 
-        if (r == m) return UniverseCode<T>(n).dec_ML(v);
-        if (r == 0) return RepetitionCode<T>(n).dec_ML(v);
+        // UC, decoding means returning v
+        if (r == m) return v;
 
-        const size_t np = sqm(2, m - 1);
+        // RepC, majority decision
+        if (r == 0) {
+            constexpr size_t q = T::get_size();
+            std::array<size_t, q> counters{};
+            for (size_t i = 0; i < n; ++i) ++counters[v[i].get_label()];
+            const auto it = std::max_element(counters.cbegin(), counters.cend());
+            return Vector<T>(n, T(static_cast<size_t>(std::distance(counters.cbegin(), it))));
+        }
+
+        const size_t np = n / 2;
         auto vl = v.get_subvector(0, np);
         auto vr = v.get_subvector(np, np);
 
-        const Vector<T> cr_hat = dec_wrapper(r - 1, m - 1, vl + vr);
+
+        // U code
         const Vector<T> cl_hat_1 = dec_wrapper(r, m - 1, vl);
+
+        // V code
+        const Vector<T> cr_hat = dec_wrapper(r - 1, m - 1, vr - vl);
+        // ... then U code
         const Vector<T> cl_hat_2 = dec_wrapper(r, m - 1, vr - cr_hat);
 
-        const auto c_hat_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
-        const auto c_hat_2 = concatenate(cl_hat_2, cl_hat_2 + cr_hat);
-
-        if (dH(v, c_hat_1) < dH(v, c_hat_2))
-            return c_hat_1;
+        if (dH(vl, cl_hat_1) + dH(vr, cl_hat_1 + cr_hat) < dH(vl, cl_hat_2) + dH(vr, cl_hat_2 + cr_hat))
+            return concatenate(cl_hat_1, cl_hat_1 + cr_hat);
         else
-            return c_hat_2;
+            return concatenate(cl_hat_2, cl_hat_2 + cr_hat);
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
     static Vector<T> dec_wrapper_EE(size_t r, size_t m, const Vector<T>& v) {
         const size_t n = sqm(2, m);
 
-        if (r == m) return UniverseCode<T>(n).dec_ML_EE(v);
-        if (r == 0) return RepetitionCode<T>(n).dec_ML_EE(v);
+        if (r == m) {
+            auto c = v;
+            for (size_t i = 0; i < n; ++i)
+                if (c[i].is_erased()) c.set_component(i, T(0));
+            return c;
+        }
 
-        const size_t np = sqm(2, m - 1);
+        if (r == 0) {
+            constexpr size_t q = T::get_size();
+            std::array<size_t, q> counters{};
+            for (size_t i = 0; i < n; ++i)
+                if (!v[i].is_erased()) ++counters[v[i].get_label()];
+            const auto it = std::max_element(counters.cbegin(), counters.cend());
+            return Vector<T>(n, T(static_cast<size_t>(std::distance(counters.cbegin(), it))));
+        }
+
+        const size_t np = n / 2;
         auto vl = v.get_subvector(0, np);
         auto vr = v.get_subvector(np, np);
 
-        const Vector<T> cr_hat = dec_wrapper_EE(r - 1, m - 1, vl + vr);
+  
+
+        // U code
         const Vector<T> cl_hat_1 = dec_wrapper_EE(r, m - 1, vl);
+  
+        // V code...
+        const Vector<T> cr_hat = dec_wrapper_EE(r - 1, m - 1, vr + vl);
+        // ... then U code
         const Vector<T> cl_hat_2 = dec_wrapper_EE(r, m - 1, vr - cr_hat);
 
         const auto c_hat_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
@@ -2830,7 +3584,6 @@ class ExtendedCode : public LinearCode<T> {
         for (size_t j = 0; j < i; ++j) G.set_submatrix(0, j, Gp.get_submatrix(0, j, k, 1));
         G.set_submatrix(0, i, transpose(Matrix<T>(v)));
         for (size_t j = i; j < n; ++j) G.set_submatrix(0, j + 1, Gp.get_submatrix(0, j, k, 1));
-        std::cout << G << std::endl;
         return G;
     }
 
@@ -3163,7 +3916,7 @@ auto puncture(C&& code, size_t i) {
 template <FieldType T>
 LinearCode<T> expurgate(const LinearCode<T>& C, const std::vector<size_t>& v) {
     if (!details::validate(v, C.get_k())) throw std::invalid_argument("Invalid pattern for expurgating linear code!");
-    if (C.get_k() == 0) EmptyCode<T>(C.get_n());
+    if (C.get_k() == 0) return EmptyCode<T>(C.get_n());
 
     auto G = C.get_G();
     G.delete_rows(v);
@@ -3238,111 +3991,90 @@ class Enc {
     const Code<T>& C;
 };
 
-template <FieldType T>
-class Dec_BD {
-   public:
-    Dec_BD(const Code<T>& C) : C(C) {}
-
-    Vector<T> operator()(const Vector<T>& in) const { return C.dec_BD(in); }
-
-   private:
-    const Code<T>& C;
-};
-
-template <FieldType T>
-class Dec_boosted_BD {
-   public:
-    Dec_boosted_BD(const Code<T>& C) : C(C) {}
-
-    Vector<T> operator()(const Vector<T>& in) const { return C.dec_boosted_BD(in); }
-
-   private:
-    const Code<T>& C;
-};
-
-template <FieldType T>
-class Dec_ML {
-   public:
-    Dec_ML(const Code<T>& C) : C(C) {}
-
-    Vector<T> operator()(const Vector<T>& in) const { return C.dec_ML(in); }
-
-   private:
-    const Code<T>& C;
-};
-
-template <FieldType T>
-class Dec_ML_soft {
-   public:
-    Dec_ML_soft(const Code<T>& C, size_t cache_limit = 10000) : C(C), cache_limit(cache_limit) {}
-
-    Vector<T> operator()(const Vector<double>& in) const { return C.dec_ML_soft(in, cache_limit); }
-
-   private:
-    const Code<T>& C;
-    const size_t cache_limit;
-};
-
+enum class Method {
+    BD,
+    boosted_BD,
+    ML,
+    ML_soft,
+    Viterbi,
+    Viterbi_soft,
+    BCJR,
+    recursive,
 #ifdef CECCO_ERASURE_SUPPORT
-template <FieldType T>
-class Dec_BD_EE {
-   public:
-    explicit Dec_BD_EE(const Code<T>& code) : C(code) {}
-
-    Vector<T> operator()(const Vector<T>& in) const { return C.dec_BD_EE(in); }
-
-   private:
-    const Code<T>& C;
-};
-
-template <FieldType T>
-class Dec_ML_EE {
-   public:
-    explicit Dec_ML_EE(const Code<T>& code) : C(code) {}
-
-    Vector<T> operator()(const Vector<T>& in) const { return C.dec_ML_EE(in); }
-
-   private:
-    const Code<T>& C;
-};
+    BD_EE,
+    ML_EE,
+    Viterbi_EE,
+    recursive_EE
 #endif
-
-namespace details {
-
-template <class C>
-concept HasRecursive = requires(const C& c, const Vector<typename std::remove_cvref_t<C>::field>& v) {
-    { c.dec_recursive(v) } -> std::same_as<Vector<typename std::remove_cvref_t<C>::field>>;
 };
 
-}  // namespace details
-
-template <details::HasRecursive C>
-class Dec_recursive {
+template <FieldType T>
+class Dec {
    public:
-    using T = typename std::remove_cvref_t<C>::field;
-
-    explicit Dec_recursive(const C& code) : C_(code) {}
-
-    Vector<T> operator()(const Vector<T>& in) const { return C_.dec_recursive(in); }
-
-   private:
-    const C& C_;
-};
-
+    explicit Dec(const Code<T>& C, Method method = Method::ML, size_t cache_limit = 10000)
+        : C(C), method(method), cache_limit(cache_limit) {
+        switch (method) {
+            case Method::BD:
+                dec = [this](const Vector<T>& r) { return this->C.dec_BD(r); };
+                break;
+            case Method::boosted_BD:
+                dec = [this](const Vector<T>& r) { return this->C.dec_boosted_BD(r); };
+                break;
+            case Method::ML:
+                dec = [this](const Vector<T>& r) { return this->C.dec_ML(r); };
+                break;
+            case Method::Viterbi:
+                dec = [this](const Vector<T>& r) { return this->C.dec_Viterbi(r); };
+                break;
+            case Method::recursive:
+                dec = [this](const Vector<T>& r) { return this->C.dec_recursive(r); };
+                break;
+            case Method::ML_soft:
+            case Method::Viterbi_soft:
+            case Method::BCJR:
+                break;
 #ifdef CECCO_ERASURE_SUPPORT
-template <details::HasRecursive C>
-class Dec_recursive_EE {
-   public:
-    using T = typename std::remove_cvref_t<C>::field;
+            case Method::BD_EE:
+                dec = [this](const Vector<T>& r) { return this->C.dec_BD_EE(r); };
+                break;
+            case Method::ML_EE:
+                dec = [this](const Vector<T>& r) { return this->C.dec_ML_EE(r); };
+                break;
+            case Method::Viterbi_EE:
+                dec = [this](const Vector<T>& r) { return this->C.dec_Viterbi_EE(r); };
+                break;
+            case Method::recursive_EE:
+                dec = [this](const Vector<T>& r) { return this->C.dec_recursive_EE(r); };
+                break;
+#endif
+            default:
+                break;
+        }
+    }
 
-    explicit Dec_recursive_EE(const C& code) : C_(code) {}
+    Vector<T> operator()(const Vector<T>& in) const {
+        if (!dec) throw std::logic_error("Selected decoding method does not support hard-decision input!");
+        return dec(in);
+    }
 
-    Vector<T> operator()(const Vector<T>& in) const { return C_.dec_recursive_EE(in); }
+    Vector<T> operator()(const Vector<double>& in) const {
+        if (method == Method::Viterbi || method == Method::Viterbi_soft) return C.dec_Viterbi_soft(in);
+        if (method == Method::BCJR) {
+            const auto llrs = C.dec_BCJR(in);
+            Vector<T> c_est(llrs.get_n());
+            for (size_t i = 0; i < llrs.get_n(); ++i)
+                if (llrs[i] < 0.0) c_est.set_component(i, T(1));
+            return c_est;
+        }
+        return C.dec_ML_soft(in, cache_limit);
+    }
 
    private:
-    const C& C_;
+    const Code<T>& C;
+    std::function<Vector<T>(const Vector<T>&)> dec;
+    Method method;
+    size_t cache_limit;
 };
-#endif
 
 template <FiniteFieldType T>
 class Encinv {

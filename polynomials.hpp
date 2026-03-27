@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.3
+ * @version 2.2.4
  * @date 2026
  *
  * @copyright
@@ -620,7 +620,7 @@ class Polynomial {
      * An empty polynomial represents an uninitialized state, distinct from
      * the zero polynomial which has degree 0.
      */
-    constexpr bool is_empty() const noexcept { return data.size() == 0; }
+    constexpr bool is_empty() const noexcept { return data.empty(); }
 
     /**
      * @brief Check if polynomial is the zero polynomial
@@ -822,15 +822,14 @@ template <FiniteFieldType S>
     requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
 Polynomial<T>::Polynomial(const Polynomial<S>& other) {
     const size_t deg = other.degree();
-    auto indices = std::views::iota(size_t{0}, deg + 1);
-    std::ranges::for_each(
-        indices, [&](size_t i) { this->set_coefficient(i, T(other[i])); });  // Uses enhanced cross-field constructors
+    for (size_t i = 0; i <= deg; ++i)
+        set_coefficient(i, T(other[i]));  // Uses enhanced cross-field constructors
 }
 
 template <ComponentType T>
 Polynomial<T>::Polynomial(const Vector<T>& v) : data(v.get_n()) {
-    auto indices = std::views::iota(size_t{0}, data.size());
-    std::ranges::transform(indices, data.begin(), [&v](size_t i) { return v[i]; });
+    for (size_t i = 0; i < data.size(); ++i)
+        data[i] = v[i];
     prune();
 }
 
@@ -888,7 +887,7 @@ constexpr Polynomial<T> Polynomial<T>::operator-() && noexcept {
 
 template <ComponentType T>
 T Polynomial<T>::operator()(const T& s) const {
-    if (data.size() == 0) throw std::invalid_argument("trying to evaluate empty polynomial");
+    if (data.empty()) throw std::invalid_argument("trying to evaluate empty polynomial");
     if (data.size() == 1) return data.front();
 
     // Use std::accumulate with Horner's method for polynomial evaluation
@@ -1060,7 +1059,7 @@ template <ComponentType T>
 Polynomial<T>& Polynomial<T>::differentiate(size_t s)
     requires FieldType<T>
 {
-    if (data.size() == 0) throw std::invalid_argument("trying to differentiate empty polynomial");
+    if (data.empty()) throw std::invalid_argument("trying to differentiate empty polynomial");
 
     if (s == 0) return *this;
     const size_t d = data.size() - 1;
@@ -1069,8 +1068,8 @@ Polynomial<T>& Polynomial<T>::differentiate(size_t s)
         data[0] = T(0);
         return *this;
     }
-    auto indices = std::views::iota(size_t{0}, d - s + 1);
-    std::ranges::for_each(indices, [&](size_t i) { data[i] = fac<size_t>(i + s) / fac<size_t>(i) * data[i + s]; });
+    for (size_t i = 0; i <= d - s; ++i)
+        data[i] = fac<size_t>(i + s) / fac<size_t>(i) * data[i + s];
     data.resize(data.size() - s);
     prune();
     cache.invalidate();
@@ -1081,7 +1080,7 @@ template <ComponentType T>
 Polynomial<T>& Polynomial<T>::Hasse_differentiate(size_t s)
     requires FieldType<T>
 {
-    if (data.size() == 0) throw std::invalid_argument("trying to Hasse differentiate empty polynomial");
+    if (data.empty()) throw std::invalid_argument("trying to Hasse differentiate empty polynomial");
 
     if (s == 0) return *this;
     const size_t d = data.size() - 1;
@@ -1090,8 +1089,8 @@ Polynomial<T>& Polynomial<T>::Hasse_differentiate(size_t s)
         data[0] = T(0);
         return *this;
     }
-    auto indices = std::views::iota(size_t{0}, d - s + 1);
-    std::ranges::for_each(indices, [&](size_t i) { data[i] = bin<size_t>(i + s, s) * data[i + s]; });
+    for (size_t i = 0; i <= d - s; ++i)
+        data[i] = bin<size_t>(i + s, s) * data[i + s];
     data.resize(data.size() - s);
     prune();
     cache.invalidate();
@@ -1147,7 +1146,7 @@ constexpr Polynomial<T>& Polynomial<T>::add_to_coefficient(size_t i, U&& c)
     if (c_converted == T(0)) return *this;
 
     cache.invalidate();
-    if (data.size() == 0 || i >= data.size()) {
+    if (data.empty() || i >= data.size()) {
         // automatic growth, change zero coefficient beyond degree
         data.resize(i + 1);
         data.back() = std::move(c_converted);
@@ -1168,7 +1167,7 @@ constexpr Polynomial<T>& Polynomial<T>::set_coefficient(size_t i, U&& c)
     requires std::convertible_to<std::decay_t<U>, T>
 {
     T new_value = std::forward<U>(c);
-    if (data.size() == 0 || i >= data.size()) {
+    if (data.empty() || i >= data.size()) {
         if (new_value == T(0)) return *this;
         cache.invalidate();
         data.resize(i + 1);
@@ -1212,7 +1211,7 @@ constexpr size_t Polynomial<T>::calculate_weight() const noexcept
 
 template <ComponentType T>
 constexpr Polynomial<T>& Polynomial<T>::prune() noexcept {
-    if (data.size() == 0) return *this;
+    if (data.empty()) return *this;
 
     const auto lc = std::find_if(data.crbegin(), data.crend(), [](const T& e) { return e != T(0); });
     if (lc != data.crend()) {
@@ -1501,7 +1500,7 @@ constexpr bool operator!=(const Polynomial<T>& lhs, const Polynomial<T>& rhs) no
 
 template <ComponentType T>
 std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) noexcept {
-    if (rhs.data.size() == 0) {
+    if (rhs.data.empty()) {
         os << "()";
         return os;
     }
@@ -1522,7 +1521,7 @@ std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) noexcept {
                 bool positive_sign;
                 if constexpr (FieldType<T>) {
                     positive_sign = rhs.data[i + 1].has_positive_sign();
-                } else if constexpr (std::is_same<T, std::complex<double>>()) {
+                } else if constexpr (std::is_same_v<T, std::complex<double>>) {
                     positive_sign = rhs.data[i + 1].real() >= 0 || rhs.data[i + 1].imag() >= 0;
                 } else {
                     positive_sign = rhs.data[i + 1] >= 0;

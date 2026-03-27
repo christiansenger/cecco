@@ -218,7 +218,7 @@ constexpr bool is_prime(T a) noexcept {
  */
 template <class T>
 constexpr T GCD(T a, T b, T* s = nullptr, T* t = nullptr) noexcept {
-    static_assert((std::is_integral<T>::value && std::is_signed<T>::value) || std::is_same_v<T, InfInt>,
+    static_assert((std::is_integral_v<T> && std::is_signed_v<T>) || std::is_same_v<T, InfInt>,
                   "GCD requires signed integral type or InfInt");
     if (s != nullptr && t != nullptr) {  // extended EA
         *s = T(1);
@@ -336,7 +336,7 @@ T bin(const T& n, T k) noexcept {
  * @note Suitable for combinatorics problems requiring exact large integer results
  */
 template <>
-InfInt bin(const InfInt& n, InfInt k) noexcept {
+inline InfInt bin(const InfInt& n, InfInt k) noexcept {
     if (k > n) return 0;
     if (k == 0 || n == k) return 1;
     if (n == 0) return 0;
@@ -371,7 +371,7 @@ InfInt bin(const InfInt& n, InfInt k) noexcept {
  */
 template <class T>
 constexpr T sqm(T b, int e) {
-    static_assert(std::is_integral<decltype(e)>::value, "exponent must be integral type");
+    static_assert(std::is_integral_v<decltype(e)>, "exponent must be integral type");
     if (e == 0) return T(1);
     if (e < 0) {
         b = T(1) / b;
@@ -410,8 +410,8 @@ constexpr T sqm(T b, int e) {
  * @endcode
  */
 template <class T>
-constexpr T daa(T b, int m) noexcept {
-    static_assert(std::is_integral<decltype(m)>::value, "multiplicand must be integral type");
+constexpr T daa(T b, int m) {
+    static_assert(std::is_integral_v<decltype(m)>, "multiplicand must be integral type");
     if (m == 0) return T(0);
     if (m < 0) {
         b = -b;
@@ -542,8 +542,7 @@ class Cache {
     using type_for_id_t = typename type_finder_impl<ID, ENTRIES...>::type;
 
    public:
-    // Default constructor - initializes all cache slots to empty
-    Cache() { cache_data.fill(std::monostate{}); }
+    Cache() = default;
 
     // Check if specific ID is cached
     template <auto ID>
@@ -608,7 +607,7 @@ class Cache {
     }
 };
 
-std::string basename(const char* path) {
+inline std::string basename(const char* path) {
     std::string s(path);
 
     const auto pos = s.find_last_of("/\\");
@@ -619,6 +618,19 @@ std::string basename(const char* path) {
 
     return s;
 }
+
+static const uint8_t colormap[64][3] = {
+    {0, 0, 0},       {0, 0, 24},      {0, 0, 40},      {0, 0, 56},      {0, 0, 72},      {0, 0, 88},
+    {0, 0, 104},     {0, 0, 120},     {0, 0, 136},     {0, 0, 152},     {0, 0, 167},     {0, 0, 183},
+    {0, 0, 199},     {0, 0, 215},     {0, 0, 231},     {0, 0, 252},     {0, 6, 253},     {0, 24, 232},
+    {0, 40, 216},    {0, 56, 200},    {0, 72, 184},    {0, 88, 168},    {0, 104, 152},   {0, 120, 136},
+    {0, 136, 120},   {0, 152, 104},   {0, 167, 88},    {0, 183, 72},    {0, 199, 56},    {0, 215, 41},
+    {0, 231, 25},    {0, 249, 6},     {6, 255, 0},     {24, 255, 0},    {40, 255, 0},    {56, 255, 0},
+    {72, 255, 0},    {88, 255, 0},    {104, 255, 0},   {120, 255, 0},   {136, 255, 0},   {152, 255, 0},
+    {167, 255, 0},   {183, 255, 0},   {199, 255, 0},   {215, 255, 0},   {231, 255, 0},   {249, 255, 0},
+    {255, 255, 6},   {255, 255, 24},  {255, 255, 40},  {255, 255, 56},  {255, 255, 72},  {255, 255, 88},
+    {255, 255, 104}, {255, 255, 120}, {255, 255, 136}, {255, 255, 152}, {255, 255, 167}, {255, 255, 183},
+    {255, 255, 199}, {255, 255, 215}, {255, 255, 231}, {255, 255, 255}};
 
 }  // namespace details
 

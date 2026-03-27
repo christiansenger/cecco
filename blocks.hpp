@@ -2,7 +2,7 @@
  * @file blocks.hpp
  * @brief Communication system blocks library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.1
+ * @version 2.2.3
  * @date 2026
  *
  * @copyright
@@ -34,17 +34,17 @@
  * Vector<F2> message = {1, 0, 1, 1};
  *
  * // Create communication chain components
- * BPSKEncoder enc;                           // BPSK modulation (a=0, b=2)
+ * BPSKMapper map;                            // BPSK modulation (a=0, b=2)
  * AWGN awgn(6.0, enc.get_a(), enc.get_b());  // 6 dB SNR
- * BPSKDecoder dec;                           // Hard-decision demodulation
+ * BPSKDemapper demap;                        // Hard-decision demodulation
  *
  * // Process through communication chain using operator>>
  * Vector<std::complex<double>> y;
  * Vector<F2> r;
- * message >> enc >> awgn >> y >> dec >> r;
+ * message >> map >> awgn >> y >> demap >> r;
  *
  * // Soft-decision processing with LLR
- * LLRCalculator calc(enc, awgn);
+ * LLRCalculator calc(map, awgn);
  * Vector<double> llrs;
  * y >> calc >> llrs;
  *
@@ -601,13 +601,13 @@ class BAC : public details::SameTypeProcessor<BAC, Fp<2>> {
  * **Usage Examples**:
  * @code{.cpp}
  * // BPSK modulation (optimal for AWGN)
- * NRZEncoder bpsk(0.0, 2.0);
+ * NRZMapper bpsk(0.0, 2.0);
  * Vector<std::complex<double>> signal;
  * Fp<2>(1) >> bpsk >> signal;          // Result: ( (1.0, 0.0) )
  * double energy = bpsk.get_Eb();       // Result: 1.0
  *
  * // On-Off Keying (OOK)
- * NRZEncoder ook(1.0, 2.0);
+ * NRZMapper ook(1.0, 2.0);
  * Vector<Fp<2>> bits = {0, 1, 0, 1};
  * Vector<std::complex<double>> signal;
  * bits >> ook >> signal;  // ( (0, 0), (2, 0), (0, 0), (2, 0) )
@@ -616,13 +616,13 @@ class BAC : public details::SameTypeProcessor<BAC, Fp<2>> {
  * @note This encoder assumes symbol duration Δ = 1 for energy calculations.
  *       For different symbol durations, scale energy results accordingly.
  *
- * @see @ref CECCO::BPSKEncoder for convenient BPSK configuration
+ * @see @ref CECCO::BPSKMapper for convenient BPSK configuration
  * @see @ref CECCO::AWGN for compatible channel model with accurate Pe calculations
  */
-class NRZEncoder : public details::EncoderProcessor<NRZEncoder> {
+class NRZMapper : public details::EncoderProcessor<NRZMapper> {
    public:
     // Bring base class operator() overloads into scope
-    using details::EncoderProcessor<NRZEncoder>::operator();
+    using details::EncoderProcessor<NRZMapper>::operator();
 
     /**
      * @brief Construct NRZ encoder with constellation parameters
@@ -632,7 +632,7 @@ class NRZEncoder : public details::EncoderProcessor<NRZEncoder> {
      * Creates NRZ encoder with constellation points at (a ± b/2, 0).
      * Common values: BPSK (0, 2), OOK (1, 2).
      */
-    constexpr NRZEncoder(double a, double b) noexcept : a(a), b(b) {}
+    constexpr NRZMapper(double a, double b) noexcept : a(a), b(b) {}
 
     /** @name Constellation Parameters
      * @{
@@ -695,7 +695,7 @@ class NRZEncoder : public details::EncoderProcessor<NRZEncoder> {
  * **Usage Examples**:
  * @code{.cpp}
  * // Standard BPSK encoding
- * BPSKEncoder enc;
+ * BPSKMapper enc;
  * Vector<Fp<2>> message = {0, 1, 1, 0};
  * Vector<std::complex<double>> signal;
  * message >> enc >> signal;              // Result: ( (-1, 0), (1, 0), (1, 0), (-1, 0) )
@@ -708,17 +708,17 @@ class NRZEncoder : public details::EncoderProcessor<NRZEncoder> {
  * double theoretical_pe = awgn.get_pe();
  * @endcode
  *
- * @see @ref CECCO::NRZEncoder for general constellation configuration
- * @see @ref CECCO::BPSKDecoder for corresponding demodulator
+ * @see @ref CECCO::NRZMapper for general constellation configuration
+ * @see @ref CECCO::BPSKDemapper for corresponding demodulator
  */
-class BPSKEncoder : public NRZEncoder {
+class BPSKMapper : public NRZMapper {
    public:
     /**
      * @brief Construct BPSK encoder with optimal parameters
      *
      * Creates BPSK encoder with a=0, b=2 for constellation {-1, +1}.
      */
-    constexpr BPSKEncoder() noexcept : NRZEncoder(0.0, 2.0) {}
+    constexpr BPSKMapper() noexcept : NRZMapper(0.0, 2.0) {}
 };
 
 /**
@@ -743,7 +743,7 @@ class BPSKEncoder : public NRZEncoder {
  * **Usage Examples**:
  * @code{.cpp}
  * // BPSK over AWGN at 6 dB SNR
- * BPSKEncoder enc;  // Eb = 1, d = 2
+ * BPSKMapper enc;  // Eb = 1, d = 2
  * AWGN awgn(6.0, enc.get_a(), enc.get_b());
  * Vector<Fp<2>> message = {0, 1, 1, 0};
  * Vector<std::complex<double>> y;
@@ -761,7 +761,7 @@ class BPSKEncoder : public NRZEncoder {
  * @note The channel assumes complex-valued input symbols and adds independent
  *       Gaussian noise to both real and imaginary components.
  *
- * @see @ref CECCO::NRZEncoder, @ref CECCO::BPSKEncoder for compatible modulation schemes
+ * @see @ref CECCO::NRZMapper, @ref CECCO::BPSKMapper for compatible modulation schemes
  * @see @ref CECCO::LLRCalculator for soft-decision demodulation using this channel
  */
 class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
@@ -779,7 +779,7 @@ class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
      * The error probability is calculated based on the DC offset and constellation distance.
      */
     AWGN(double EbNodB, double a, double b)
-        : Eb(NRZEncoder(a, b).get_Eb()),
+        : Eb(NRZMapper(a, b).get_Eb()),
           dist(0, std::sqrt(0.5 * Eb / pow(10.0, EbNodB / 10.0))),
           pe(calculate_pe(EbNodB, b)) {}
 
@@ -876,7 +876,7 @@ double AWGN::calculate_pe(double EbNodB, double b) const noexcept {
  * @brief Binary Input - Additive White Gaussian Noise (BI-AWGN) channel
  *
  * Combines NRZ modulation and AWGN transmission into a single block that maps binary inputs
- * to noisy complex-valued channel outputs. Compatible with NRZDecoder for hard decisions
+ * to noisy complex-valued channel outputs. Compatible with NRZDemapper for hard decisions
  * or LLRCalculator for soft decisions.
  *
  * **Usage Example**:
@@ -886,16 +886,16 @@ double AWGN::calculate_pe(double EbNodB, double b) const noexcept {
  * Vector<Fp<2>> c = {1, 0, 1, 0};
  * Vector<std::complex<double>> y;
  * Vector<Fp<2>> r;
- * c >> channel >> y >> NRZDecoder(channel.get_encoder()) >> r;
+ * c >> channel >> y >> NRZDemapper(channel.get_encoder()) >> r;
  *
  * // Custom NRZ constellation
  * BI_AWGN ook(8.0, 1.0, 2.0); // OOK: a=1, b=2
  * @endcode
  *
  * @note Default parameters implement BPSK (a=0, b=2)
- * @see @ref CECCO::NRZEncoder for constellation parameters
+ * @see @ref CECCO::NRZMapper for constellation parameters
  * @see @ref CECCO::AWGN for transmission/noise model
- * @see @ref CECCO::NRZDecoder for hard-decision
+ * @see @ref CECCO::NRZDemapper for hard-decision
  * @see @ref CECCO::LLRCalculator for soft-decision
  */
 class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<double>> {
@@ -922,15 +922,15 @@ class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<doub
 
     /**
      * @brief Get reference to internal NRZ encoder
-     * @return Const reference to NRZ encoder
+     * @return Reference to NRZ encoder
      */
-    const NRZEncoder& get_encoder() const noexcept { return encoder; }
+    NRZMapper& get_encoder() noexcept { return encoder; }
 
     /**
      * @brief Get reference to internal AWGN
-     * @return Const reference to AWGN
+     * @return Reference to AWGN
      */
-    const AWGN& get_transmission() const noexcept { return transmission; }
+    AWGN& get_transmission() noexcept { return transmission; }
 
     /**
      * @brief Calculate channel capacity in bits per symbol
@@ -979,7 +979,7 @@ class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<doub
     }
 
    private:
-    NRZEncoder encoder;
+    NRZMapper encoder;
     AWGN transmission;
 };
 
@@ -1047,29 +1047,29 @@ double BI_AWGN::get_capacity() const noexcept {
  * **Usage Examples**:
  * @code{.cpp}
  * // Standard NRZ decoding
- * NRZEncoder enc(0.5, 1.0);  // Constellation: {0, 1}
- * NRZDecoder dec(enc);       // Threshold at a = 0.5
+ * NRZMapper enc(0.5, 1.0);  // Constellation: {0, 1}
+ * NRZDemapper dec(enc);       // Threshold at a = 0.5
  *
  * Vector<std::complex<double>> received = {(0.3, 0.1), (0.8, -0.2)};
  * Vector<Fp<2>> c_est;
  * received >> dec >> c_est;  // Result: {0, 1}
  *
  * // BPSK decoding (threshold at zero)
- * BPSKEncoder enc;      // a = 0, constellation: {-1, +1}
- * NRZDecoder dec(enc);  // Threshold at zero
+ * BPSKMapper enc;      // a = 0, constellation: {-1, +1}
+ * NRZDemapper dec(enc);  // Threshold at zero
  * @endcode
  *
  * @note The decoder ignores the imaginary part of received symbols, making it
  *       suitable for real-valued modulation schemes like NRZ and BPSK.
  *
- * @see @ref CECCO::NRZEncoder for the corresponding modulator
- * @see @ref CECCO::BPSKDecoder for optimized BPSK demodulation
+ * @see @ref CECCO::NRZMapper for the corresponding modulator
+ * @see @ref CECCO::BPSKDemapper for optimized BPSK demodulation
  * @see @ref CECCO::LLRCalculator for soft-decision demodulation
  */
-class NRZDecoder : public details::DecoderProcessor<NRZDecoder> {
+class NRZDemapper : public details::DecoderProcessor<NRZDemapper> {
    public:
     // Bring base class operator() overloads into scope
-    using details::DecoderProcessor<NRZDecoder>::operator();
+    using details::DecoderProcessor<NRZDemapper>::operator();
 
     /**
      * @brief Construct NRZ decoder from corresponding encoder
@@ -1078,15 +1078,15 @@ class NRZDecoder : public details::DecoderProcessor<NRZDecoder> {
      * Creates a hard-decision decoder with decision threshold set to the
      * DC offset parameter (a) of the NRZ encoder for optimal ML decoding.
      */
-    constexpr NRZDecoder(const NRZEncoder& nrz) noexcept : a(nrz.get_a()) {}
+    constexpr NRZDemapper(const NRZMapper& nrz) noexcept : a(nrz.get_a()) {}
 
     /**
      * @brief Construct NRZ decoder from BI-AWGN
      * @param bi_awgn The BI-AWGN channel for which NRZ decoding is performed
      *
-     * Creates an NRZDecoder configured for the specific BI-AWGN parameters of the communication system.
+     * Creates an NRZDemapper configured for the specific BI-AWGN parameters of the communication system.
      */
-    NRZDecoder(const BI_AWGN& bi_awgn) noexcept : a(bi_awgn.get_encoder().get_a()) {}
+    NRZDemapper(BI_AWGN& bi_awgn) noexcept : a(bi_awgn.get_encoder().get_a()) {}
 
     /**
      * @brief Decode complex symbol to binary (hard) output
@@ -1124,33 +1124,33 @@ class NRZDecoder : public details::DecoderProcessor<NRZDecoder> {
  * **Usage Examples**:
  * @code{.cpp}
  * // Standard BPSK demodulation
- * BPSKDecoder dec;
+ * BPSKDemapper demap;
  * Vector<std::complex<double>> y = {(-0.8, 0.3), (1.2, -0.1), (-0.1, 0.5)};
  * Vector<Fp<2>> r;
  * y >> dec >> r;  // Result: (0, 1, 0)
  *
  * // Complete BPSK communication chain
- * BPSKEncoder enc;
- * AWGN awgn(6.0, enc.get_a(), enc.get_b());
- * BPSKDecoder dec;
+ * BPSKMapper map;
+ * AWGN awgn(6.0, map.get_a(), map.get_b());
+ * BPSKDemapper demap;
  *
  * Vector<Fp<2>> c = {1, 0, 1, 1, 0};
  * Vector<Fp<2>> c_est;
- * c >> enc >> awgn >> dec >> c_est;
+ * c >> map >> awgn >> demap >> c_est;
  * @endcode
  *
- * @see @ref CECCO::BPSKEncoder for the corresponding BPSK modulator
- * @see @ref CECCO::NRZDecoder for general NRZ demodulation
+ * @see @ref CECCO::BPSKMapper for the corresponding BPSK modulator
+ * @see @ref CECCO::NRZDemapper for general NRZ demodulation
  */
-class BPSKDecoder : public NRZDecoder {
+class BPSKDemapper : public NRZDemapper {
    public:
     /**
-     * @brief Construct BPSK decoder with zero threshold
+     * @brief Construct BPSK demapper with zero threshold
      *
-     * Creates a BPSK decoder with optimal zero-threshold decision rule
+     * Creates a BPSK demapper with optimal zero-threshold decision rule
      * for antipodal constellation {-1, +1}.
      */
-    constexpr BPSKDecoder() noexcept : NRZDecoder(BPSKEncoder()) {}
+    constexpr BPSKDemapper() noexcept : NRZDemapper(BPSKMapper()) {}
 };
 
 /**
@@ -1174,7 +1174,7 @@ class BPSKDecoder : public NRZDecoder {
  * **Usage Examples**:
  * @code{.cpp}
  * // BPSK soft demodulation
- * BPSKEncoder enc;  // a = 0, b = 2
+ * BPSKMapper enc;  // a = 0, b = 2
  * AWGN awgn(4.0, enc.get_a(), enc.get_b());
  * LLRCalculator llr_calc(enc, awgn);
  *
@@ -1200,7 +1200,7 @@ class BPSKDecoder : public NRZDecoder {
  * @note LLR calculation assumes perfect knowledge of channel parameters (noise variance)
  *       and constellation parameters from the encoder (constructor takes both as parameters).
  *
- * @see @ref CECCO::NRZEncoder, @ref CECCO::BPSKEncoder for compatible modulation schemes
+ * @see @ref CECCO::NRZMapper, @ref CECCO::BPSKMapper for compatible modulation schemes
  * @see @ref CECCO::AWGN for noise variance estimation used in LLR computation
  */
 class LLRCalculator : public details::LLRProcessor<LLRCalculator> {
@@ -1216,7 +1216,7 @@ class LLRCalculator : public details::LLRProcessor<LLRCalculator> {
      * Creates an LLR calculator configured for the specific constellation
      * and noise parameters of the communication system.
      */
-    LLRCalculator(const NRZEncoder& nrz, const AWGN& transmission) noexcept
+    LLRCalculator(const NRZMapper& nrz, const AWGN& transmission) noexcept
         : a(nrz.get_a()), b(nrz.get_b()), sigmasq(pow(transmission.get_standard_deviation(), 2.0)) {}
 
     /**
@@ -1225,7 +1225,7 @@ class LLRCalculator : public details::LLRProcessor<LLRCalculator> {
      *
      * Creates an LLR calculator configured for the specific BI-AWGN parameters of the communication system.
      */
-    LLRCalculator(const BI_AWGN& bi_awgn) noexcept
+    LLRCalculator(BI_AWGN& bi_awgn) noexcept
         : a(bi_awgn.get_encoder().get_a()),
           b(bi_awgn.get_encoder().get_b()),
           sigmasq(pow(bi_awgn.get_transmission().get_standard_deviation(), 2.0)) {}
@@ -1471,16 +1471,16 @@ Vector<E> MUX<S, E>::operator()(const Matrix<S>& in) noexcept {
  * @code{.cpp}
  * // Communication chain with processing blocks
  * Vector<Fp<2>> c = {1, 0, 1, 0};
- * BPSKEncoder enc;
- * AWGN awgn(4.0, enc.get_a(), enc.get_b());
- * BPSKDecoder dec;
+ * BPSKMapper map;
+ * AWGN awgn(4.0, map.get_a(), map.get_b());
+ * BPSKDemapper demap;
  *
  * // Chain operations using operator>>
  * Vector<Fp<2>> r;
- * c >> enc >> awgn >> dec >> r;
+ * c >> map >> awgn >> demap >> r;
  *
  * // Equivalent to nested function calls:
- * // r = deco(awgn(enc(c)));
+ * // r = demap(awgn(map(c)));
  * @endcode
  *
  * @note This operator is disabled for iostream types to avoid conflicts with
@@ -1513,16 +1513,16 @@ decltype(auto) operator>>(LHS&& lhs, RHS&& rhs) {
  * Vector<std::complex<double>> y;
  * Vector<Fp<2>> r;
  *
- * BPSKEncoder enc;
- * AWGN awgn(4.0, enc.get_a(), enc.get_b());
- * BPSKDecoder dec;
+ * BPSKMapper map;
+ * AWGN awgn(4.0, map.get_a(), map.get_b());
+ * BPSKDemapper demap;
  *
  * // Chain with intermediate storage
- * c >> enc >> x >> awgn >> y >> dec >> r;
+ * c >> map >> x >> awgn >> y >> demap >> r;
  * // x and y variables now contain intermediate results
  *
  * // In case intermediate results are not needed:
- * c >> enc >> awgn >> dec >> r;
+ * c >> map >> awgn >> demap >> r;
  * @endcode
  *
  * @note This overload has lower priority than the callable overload, ensuring
