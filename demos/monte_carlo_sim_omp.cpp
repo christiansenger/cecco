@@ -15,14 +15,14 @@ int main(void) {
 #define NUM_THREADS 10  // choose appropriately
 
     /* line code */
-    BPSKEncoder bpsk;
-    BPSKDecoder demap;
+    BPSKMapper bpsk;
+    BPSKDemapper demap;
 
     /* error control code */
     auto C = extend(GolayCode<F2>());
     std::cout << showall << C << std::endl;
     Enc enc(C);
-    Dec_ML dec(C);
+    Dec dec(C, Method::ML);
     Encinv encinv(C);
 
     const int n = C.get_n();
@@ -48,13 +48,10 @@ int main(void) {
                 ++transmissions;
 
                 /* random message */
-                Vector<F2> u(k);
-                u.randomize();
+                auto u = Vector<F2>(k).randomize();
 
                 /* buffers */
-                Vector<F2> u_hat;
-                Vector<F2> c;
-                Vector<F2> c_hat;
+                Vector<F2> u_hat, c, c_hat;
 
                 /* simulation chain */
                 u >> enc >> c >> bpsk >> awgn >> demap >> dec >> c_hat >> encinv >> u_hat;
