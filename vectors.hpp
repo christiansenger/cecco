@@ -2,7 +2,7 @@
  * @file vectors.hpp
  * @brief Vector arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.5
+ * @version 2.1.7
  * @date 2026
  *
  * @copyright
@@ -96,6 +96,8 @@ struct FiniteFieldHasher;
 template <ComponentType T>
 T inner_product(const Vector<T>& lhs, const Vector<T>& rhs);
 template <ComponentType T>
+Vector<T> Schur_product(const Vector<T>& lhs, const Vector<T>& rhs);
+template <ComponentType T>
 Vector<T> unit_vector(size_t length, size_t i);
 template <ComponentType T>
 std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) noexcept;
@@ -154,6 +156,7 @@ class Vector {
     template <ReliablyComparableType U>
     friend constexpr bool operator==(const Vector<U>& lhs, const Vector<U>& rhs) noexcept;
     friend constexpr T inner_product<>(const Vector<T>& lhs, const Vector<T>& rhs);
+    friend constexpr Vector<T> Schur_product<>(const Vector<T>& lhs, const Vector<T>& rhs);
     friend Vector unit_vector<>(size_t length, size_t i);
     friend std::ostream& operator<< <>(std::ostream& os, const Vector& rhs) noexcept;
     friend double dE(const Vector<std::complex<double>>& lhs, const Vector<std::complex<double>>& rhs);
@@ -491,7 +494,7 @@ class Vector {
     }
 
     /**
-     * @brief Compute Hamming weight (number of non-zero components) for discrete types
+     * @brief Compute Hamming weight (number of non-zero and non-erased components) for discrete types
      *
      * @return Number of non-zero components
      *
@@ -1376,20 +1379,10 @@ template <ComponentType T>
 constexpr bool Vector<T>::is_pairwise_distinct() const
     requires ReliablyComparableType<T>
 {
-    if constexpr (FiniteFieldType<T>) {
-        std::unordered_set<T, details::FiniteFieldHasher<T>> unique_elems;
-        for (const auto& elem : data)
-            if (!unique_elems.insert(elem).second) return false;
-    } else if constexpr (std::is_same_v<T, InfInt>) {  // everything InfInt needs special treatment
-        for (size_t i = 0; i < data.size(); ++i) {
-            for (size_t j = i + 1; j < data.size(); ++j) {
-                if (data[i] == data[j]) return false;
-            }
+    for (size_t i = 0; i < data.size(); ++i) {
+        for (size_t j = i + 1; j < data.size(); ++j) {
+            if (data[i] == data[j]) return false;
         }
-    } else {  // must be signed integer
-        std::unordered_set<T> unique_elems;
-        for (const auto& elem : data)
-            if (!unique_elems.insert(elem).second) return false;
     }
 
     return true;
@@ -1399,7 +1392,13 @@ template <ComponentType T>
 constexpr size_t Vector<T>::calculate_weight() const noexcept
     requires ReliablyComparableType<T>
 {
-    return data.size() - std::count(data.cbegin(), data.cend(), T(0));
+    size_t res = data.size() - std::count(data.cbegin(), data.cend(), T(0));
+
+#ifdef CECCO_ERASURE_SUPPORT
+    if constexpr (FieldType<T>) res -= std::count_if(data.cbegin(), data.cend(), [](T x) { return x.is_erased(); });
+#endif
+
+    return res;
 }
 
 template <ComponentType T>
@@ -1944,6 +1943,29 @@ T inner_product(const Vector<T>& lhs, const Vector<T>& rhs) {
             "trying to calculate inner product of "
             "vectors of different lengths");
     return std::inner_product(lhs.data.cbegin(), lhs.data.cend(), rhs.data.begin(), T(0));
+}
+
+/**
+ * @brief Compute Schur product (pointwise product) of two vectors
+ *
+ * @tparam T Vector component type
+ * @param lhs First vector
+ * @param rhs Second vector
+ * @return Vector containing the Schur product (pointwise product)
+ *
+ * Computes the Schur product.
+ *
+ * @throws std::invalid_argument if vectors have different lengths
+ */
+template <ComponentType T>
+Vector<T> Schur_product(const Vector<T>& lhs, const Vector<T>& rhs) {
+    if (lhs.get_n() != rhs.get_n())
+        throw std::invalid_argument(
+            "trying to calculate Schur product of "
+            "vectors of different lengths");
+    auto res = lhs;
+    for (size_t i = 0; i < lhs.get_n(); ++i) lhs.set_component(i, lhs[i] * rhs[i]);
+    return res;
 }
 
 template <ReliablyComparableType T>

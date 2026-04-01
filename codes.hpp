@@ -992,13 +992,12 @@ class LinearCode : public Code<T> {
     size_t get_k() const noexcept { return k; }
     double get_R() const noexcept { return static_cast<double>(k) / this->n; }
 
-    InfInt get_size() const {
-        if constexpr (FiniteFieldType<T>) {
-            return sqm<InfInt>(T::get_size(), k);
-        } else {
-            throw std::logic_error("Cannot get size of code over infinite field!");
-        }
+    InfInt get_size() const
+        requires FiniteFieldType<T>
+    {
+        return sqm<InfInt>(T::get_size(), k);
     }
+
     const Matrix<T>& get_G() const noexcept { return G; }
     const Matrix<T>& get_HT() const noexcept { return HT; }
     Matrix<T> get_H() const { return transpose(HT); }
@@ -1010,10 +1009,12 @@ class LinearCode : public Code<T> {
 
             // if weight enumerator is calculated, use it...
             if (weight_enumerator.has_value()) {
-                for (size_t i = 1; i <= weight_enumerator.value().degree(); ++i) {
-                    if (weight_enumerator.value()[i] != 0) {
-                        dmin = i;
-                        return;
+                if constexpr (FiniteFieldType<T>) {
+                    for (size_t i = 1; i <= weight_enumerator.value().degree(); ++i) {
+                        if (weight_enumerator.value()[i] != 0) {
+                            dmin = i;
+                            return;
+                        }
                     }
                 }
                 // ... otherwise:
@@ -1058,30 +1059,32 @@ class LinearCode : public Code<T> {
     }
 
     virtual const Polynomial<InfInt>& get_weight_enumerator() const {
-        if constexpr (!FiniteFieldType<T>)
+        if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Cannot calculate weight enumerator of code over infinte field!");
+        } else {
+            std::call_once(weight_enumerator_flag, [this] {
+                constexpr size_t q = T::get_size();
+                if (weight_enumerator.has_value()) return;
+                if (k == 0) {
+                    weight_enumerator.emplace(Polynomial<InfInt>(1));
+                } else if (k <= this->n - k) {  // calculate directly
+                    std::clog << "--> Calculating weight enumerator, this requires iterating through "
+                              << sqm<InfInt>(q, k) << " codewords" << std::endl;
+                    weight_enumerator.emplace(ZeroPolynomial<InfInt>());
+                    for (auto it = cbegin(); it != cend(); ++it)
+                        weight_enumerator.value().add_to_coefficient(wH(*it), 1);
+                } else if (k == this->n) {
+                    UniverseCode<T> Cp(this->n);
+                    weight_enumerator.emplace(Cp.get_weight_enumerator());
+                } else {  // calculate based on dual code and MacWilliams identity
+                    std::clog << "--> Using MacWilliams' identity for: " << std::endl;
+                    LinearCode<T> Cp(this->n, this->n - k, transpose(HT));
+                    weight_enumerator.emplace(MacWilliamsIdentity<T>(Cp.get_weight_enumerator(), this->n, this->n - k));
+                }
+            });
 
-        std::call_once(weight_enumerator_flag, [this] {
-            constexpr size_t q = T::get_size();
-            if (weight_enumerator.has_value()) return;
-            if (k == 0) {
-                weight_enumerator.emplace(Polynomial<InfInt>(1));
-            } else if (k <= this->n - k) {  // calculate directly
-                std::clog << "--> Calculating weight enumerator, this requires iterating through " << sqm<InfInt>(q, k)
-                          << " codewords" << std::endl;
-                weight_enumerator.emplace(ZeroPolynomial<InfInt>());
-                for (auto it = cbegin(); it != cend(); ++it) weight_enumerator.value().add_to_coefficient(wH(*it), 1);
-            } else if (k == this->n) {
-                UniverseCode<T> Cp(this->n);
-                weight_enumerator.emplace(Cp.get_weight_enumerator());
-            } else {  // calculate based on dual code and MacWilliams identity
-                std::clog << "--> Using MacWilliams' identity for: " << std::endl;
-                LinearCode<T> Cp(this->n, this->n - k, transpose(HT));
-                weight_enumerator.emplace(MacWilliamsIdentity<T>(Cp.get_weight_enumerator(), this->n, this->n - k));
-            }
-        });
-
-        return weight_enumerator.value();
+            return weight_enumerator.value();
+        }
     }
 
     long double P_word(double pe) const {
@@ -1093,7 +1096,9 @@ class LinearCode : public Code<T> {
         return res;
     }
 
-    long double P_error(double pe) const {
+    long double P_error(double pe) const
+        requires FiniteFieldType<T>
+    {
         const auto& A = get_weight_enumerator();
         const size_t tmax = get_tmax();
         long double res = 0.0;
@@ -1108,7 +1113,9 @@ class LinearCode : public Code<T> {
         return res;
     }
 
-    long double P_failure(double pe) const {
+    long double P_failure(double pe) const
+        requires FiniteFieldType<T>
+    {
         long double res = P_word(pe) - P_error(pe);
         if (std::fabs(res) < 10 * std::numeric_limits<long double>::epsilon())
             return 0;
@@ -1117,7 +1124,7 @@ class LinearCode : public Code<T> {
     }
 
     long double Bhattacharyya_bound(long double gamma) const
-        requires(T::get_size() == 2)
+        requires(std::is_same_v<T, Fp<2>>)
     {
         const auto& A = get_weight_enumerator();
         const size_t dmin = get_dmin();
@@ -1260,7 +1267,7 @@ class LinearCode : public Code<T> {
         return tainted.value();
     }
 
-    CodewordIterator<T> cbegin() const noexcept
+    auto cbegin() const noexcept
         requires FiniteFieldType<T>
     {
         if (k == 0)
@@ -1269,7 +1276,7 @@ class LinearCode : public Code<T> {
             return CodewordIterator<T>(*this, 0);
     }
 
-    CodewordIterator<T> cend() const noexcept
+    auto cend() const noexcept
         requires FiniteFieldType<T>
     {
         return CodewordIterator<T>(*this, get_size());
@@ -1472,7 +1479,9 @@ class LinearCode : public Code<T> {
         }
     }
 
-    bool is_perfect() const {
+    bool is_perfect() const
+        requires FiniteFieldType<T>
+    {
         if (k == 0) return false;
         return std::fabs(HammingUpperBound<T>(this->n, get_dmin()) - k) <
                10 * std::numeric_limits<long double>::epsilon();
@@ -1483,7 +1492,9 @@ class LinearCode : public Code<T> {
         return SingletonUpperBound(this->n, get_dmin()) == k;
     }
 
-    bool is_equidistant() const {
+    bool is_equidistant() const
+        requires FiniteFieldType<T>
+    {
         if (k == 0) return true;
         return std::fabs(PlotkinUpperBound<T>(this->n, get_dmin()) - k) <
                10 * std::numeric_limits<long double>::epsilon();
@@ -1557,8 +1568,10 @@ class LinearCode : public Code<T> {
             }
             if (os.iword(details::index) > 1) {
                 os << std::endl;
-                const auto A = get_weight_enumerator();
-                os << "A(x) = " << A << std::setfill(' ') << std::endl;
+                if constexpr (FiniteFieldType<T>) {
+                    const auto A = get_weight_enumerator();
+                    os << "A(x) = " << A << std::setfill(' ') << std::endl;
+                }
                 try {
                     size_t dmin = get_dmin();
                     os << "dmin = " << dmin;
@@ -1577,9 +1590,11 @@ class LinearCode : public Code<T> {
                 if (is_cyclic()) os << "cyclic, ";
                 os << "gamma = " << get_gamma() << ")" << std::flush;
             }
-            if (is_perfect()) os << " perfect" << std::flush;
+            if constexpr (FiniteFieldType<T>)
+                if (is_perfect()) os << " perfect" << std::flush;
             if (is_MDS()) os << " MDS" << std::flush;
-            if (is_equidistant()) os << " equidistant" << std::flush;
+            if constexpr (FiniteFieldType<T>)
+                if (is_equidistant()) os << " equidistant" << std::flush;
         }
         if (os.iword(details::index) > 0) {
             if (!is_self_dual() && is_weakly_self_dual()) os << " weakly_self-dual" << std::flush;
@@ -1598,19 +1613,13 @@ class LinearCode : public Code<T> {
         return dual_code;
     }
 
-    Matrix<T> get_G_in_standard_form() const noexcept {
-        auto Gp = get_G();
-        Gp.rref();
-        for (size_t i = 0; i < k; ++i) {
-            const auto u = unit_vector<T>(k, i);
-            for (size_t j = 0; j < this->n; ++j) {
-                if (Gp.get_col(j) == u) {
-                    Gp.swap_columns(i, j);
-                    break;
-                }
-            }
-        }
-        return Gp;
+    LinearCode<T> get_equivalent_in_standard_form() const {
+        auto [Gp, P] = standard_form_impl();
+        LinearCode<T> result(this->n, k, Gp);
+        if (dmin.has_value()) result.set_dmin(*dmin);
+        if constexpr (FiniteFieldType<T>)
+            if (weight_enumerator.has_value()) result.set_weight_enumerator(*weight_enumerator);
+        return result;
     }
 
     Matrix<T> get_G_in_polynomial_form() const {
@@ -1690,7 +1699,9 @@ class LinearCode : public Code<T> {
         return Gp;
     }
 
-    Trellis<T> get_trivial_trellis() const {
+    Trellis<T> get_trivial_trellis() const
+        requires FiniteFieldType<T>
+    {
         const size_t n = this->n;
 
         Trellis<T> res;
@@ -1707,7 +1718,9 @@ class LinearCode : public Code<T> {
         return res;
     }
 
-    const Trellis<T>& get_minimal_trellis() const {
+    const Trellis<T>& get_minimal_trellis() const
+        requires FiniteFieldType<T>
+    {
         std::call_once(minimal_trellis_flag, [this] {
             const size_t q = T::get_size();
             const size_t n = this->n;
@@ -1770,293 +1783,335 @@ class LinearCode : public Code<T> {
     }
 
     virtual Vector<T> dec_BD(const Vector<T>& r) const override {
-        if constexpr (!FiniteFieldType<T>)
+        if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("BD decoding only available for codes over finite fields!");
-        validate_length(r);
+        } else {
+            validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
-        if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+            if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
 #endif
 
-        if (k == 0) return Vector<T>(this->n);
+            if (k == 0) return Vector<T>(this->n);
 
-        const auto c_est = LinearCode<T>::dec_ML(r);
-        if (dH(r, c_est) > this->get_tmax()) throw decoding_failure("Linear code BD decoder failed!");
-        return c_est;
+            const auto c_est = LinearCode<T>::dec_ML(r);
+            if (dH(r, c_est) > this->get_tmax()) throw decoding_failure("Linear code BD decoder failed!");
+            return c_est;
+        }
     }
 
     virtual Vector<T> dec_boosted_BD(const Vector<T>& r) const final override {
-        if constexpr (!FiniteFieldType<T>)
+        if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("BD decoding only available for codes over finite fields!");
-        validate_length(r);
+        } else {
+            validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
-        if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+            if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
 #endif
 
-        if (k == 0) return Vector<T>(this->n);
+            if (k == 0) return Vector<T>(this->n);
 
-        get_standard_array();
-        const auto s = r * HT;  // calculate syndrome...
-        if (s.is_zero()) return r;
-        const size_t i = s.as_integer();  // ... and interpret it as binary number
-        if (tainted.value()[i]) throw decoding_failure("Linear code boosted BD decoder failed!");
-        return r - standard_array.value()[i];
-    }
-
-    virtual Vector<T> dec_ML(const Vector<T>& r) const override {
-        if constexpr (!FiniteFieldType<T>)
-            throw std::logic_error("ML decoding only available for codes over finite fields!");
-        validate_length(r);
-#ifdef CECCO_ERASURE_SUPPORT
-        if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
-#endif
-
-        if (k == 0) return Vector<T>(this->n);
-
-        get_standard_array();
-        const auto s = r * HT;  // calculate syndrome...
-        if (s.is_zero()) return r;
-        const size_t i = s.as_integer();  // ... and interpret it as binary number
-        return r - standard_array.value()[i];
-    }
-
-    virtual Vector<T> dec_burst(const Vector<T>& r) const override {
-        if constexpr (!FiniteFieldType<T>)
-            throw std::logic_error("Burst decoding only available for codes over finite fields!");
-        validate_length(r);
-#ifdef CECCO_ERASURE_SUPPORT
-        if (LinearCode<T>::erasures_present(r))
-            throw std::invalid_argument("Trying to correct erasures with a burst decoder!");
-#endif
-        get_standard_array();
-        const auto s = r * HT;  // calculate syndrome...
-        if (s.is_zero()) return r;
-        const size_t i = s.as_integer();  // ... and interpret it as binary number
-        if (tainted_burst.value()[i]) {   // decoding failure
-            throw decoding_failure(
-                "Linear code burst error decoder failed, coset of syndrome empty or tainted (ambiguous leader)!");
-        } else {  // correct decoding or decoding error
+            get_standard_array();
+            const auto s = r * HT;  // calculate syndrome...
+            if (s.is_zero()) return r;
+            const size_t i = s.as_integer();  // ... and interpret it as binary number
+            if (tainted.value()[i]) throw decoding_failure("Linear code boosted BD decoder failed!");
             return r - standard_array.value()[i];
         }
     }
 
-    virtual Vector<T> dec_Viterbi(const Vector<T>& r, const std::string& filename = "") const final {
-        if constexpr (!FiniteFieldType<T>)
-            throw std::logic_error("Viterbi decoding only available for codes over finite fields!");
-        validate_length(r);
+    virtual Vector<T> dec_ML(const Vector<T>& r) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("ML decoding only available for codes over finite fields!");
+        } else {
+            validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
-        if (LinearCode<T>::erasures_present(r)) return dec_Viterbi_EE(r);
+            if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
 #endif
-        if (k == 0) return Vector<T>(this->n);
 
-        const auto& Tr = get_minimal_trellis();
-        thread_local typename Trellis<T>::Viterbi_Workspace ws(Tr);
-        if (ws.owner != &Tr) ws = typename Trellis<T>::Viterbi_Workspace(Tr);
-        ws.calculate_edge_costs(Tr, r);
-        auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
-        if (!filename.empty()) {
-            ws.v.emplace(r);
-            Tr.export_as_tikz(filename, &ws);
+            if (k == 0) return Vector<T>(this->n);
+
+            get_standard_array();
+            const auto s = r * HT;  // calculate syndrome...
+            if (s.is_zero()) return r;
+            const size_t i = s.as_integer();  // ... and interpret it as binary number
+            return r - standard_array.value()[i];
         }
-        return c_est;
+    }
+
+    virtual Vector<T> dec_burst(const Vector<T>& r) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Burst decoding only available for codes over finite fields!");
+        } else {
+            validate_length(r);
+#ifdef CECCO_ERASURE_SUPPORT
+            if (LinearCode<T>::erasures_present(r))
+                throw std::invalid_argument("Trying to correct erasures with a burst decoder!");
+#endif
+            get_standard_array();
+            const auto s = r * HT;  // calculate syndrome...
+            if (s.is_zero()) return r;
+            const size_t i = s.as_integer();  // ... and interpret it as binary number
+            if (tainted_burst.value()[i]) {   // decoding failure
+                throw decoding_failure(
+                    "Linear code burst error decoder failed, coset of syndrome empty or tainted (ambiguous leader)!");
+            } else {  // correct decoding or decoding error
+                return r - standard_array.value()[i];
+            }
+        }
+    }
+
+    virtual Vector<T> dec_Viterbi(const Vector<T>& r, const std::string& filename = "") const final {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Viterbi decoding only available for codes over finite fields!");
+        } else {
+            validate_length(r);
+#ifdef CECCO_ERASURE_SUPPORT
+            if (LinearCode<T>::erasures_present(r)) return dec_Viterbi_EE(r);
+#endif
+            if (k == 0) return Vector<T>(this->n);
+
+            const auto& Tr = get_minimal_trellis();
+            thread_local typename Trellis<T>::Viterbi_Workspace ws(Tr);
+            if (ws.owner != &Tr) ws = typename Trellis<T>::Viterbi_Workspace(Tr);
+            ws.calculate_edge_costs(Tr, r);
+            auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
+            if (!filename.empty()) {
+                ws.v.emplace(r);
+                Tr.export_as_tikz(filename, &ws);
+            }
+            return c_est;
+        }
     }
 
     virtual Vector<T> dec_Viterbi_soft(const Vector<double>& llrs, const std::string& filename = "") const override {
-        if constexpr (!std::is_same_v<T, Fp<2>>)
+        if constexpr (!std::is_same_v<T, Fp<2>>) {
             throw std::logic_error("Soft-input Viterbi decoding only available for codes over F_2!");
-        validate_length(llrs);
-        if (k == 0) return Vector<T>(this->n);
+        } else {
+            validate_length(llrs);
+            if (k == 0) return Vector<T>(this->n);
 
-        const auto& Tr = get_minimal_trellis();
-        thread_local typename Trellis<T>::Viterbi_Workspace ws(Tr);
-        if (ws.owner != &Tr) ws = typename Trellis<T>::Viterbi_Workspace(Tr);
-        ws.calculate_edge_costs(Tr, llrs);
-        auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
-        if (!filename.empty()) {
-            ws.v.emplace(llrs);
-            Tr.export_as_tikz(filename, &ws);
+            const auto& Tr = get_minimal_trellis();
+            thread_local typename Trellis<T>::Viterbi_Workspace ws(Tr);
+            if (ws.owner != &Tr) ws = typename Trellis<T>::Viterbi_Workspace(Tr);
+            ws.calculate_edge_costs(Tr, llrs);
+            auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
+            if (!filename.empty()) {
+                ws.v.emplace(llrs);
+                Tr.export_as_tikz(filename, &ws);
+            }
+            return c_est;
         }
-        return c_est;
     }
 
     virtual Vector<double> dec_BCJR(const Vector<double>& llrs, const std::string& filename = "") const override {
-        if constexpr (!std::is_same_v<T, Fp<2>>)
+        if constexpr (!std::is_same_v<T, Fp<2>>) {
             throw std::logic_error("BCJR decoding only available for codes over F_2!");
-        validate_length(llrs);
-        if (k == 0) return Vector<double>(this->n, 0.0);
+        } else {
+            validate_length(llrs);
+            if (k == 0) return Vector<double>(this->n, 0.0);
 
-        const auto& Tr = get_minimal_trellis();
-        thread_local typename Trellis<T>::BCJR_Workspace ws(Tr);
-        if (ws.owner != &Tr) ws = typename Trellis<T>::BCJR_Workspace(Tr);
-        ws.calculate_edge_costs(Tr, llrs);
-        auto result = bcjr_forward_backward(Tr, ws);
-        if (!filename.empty()) Tr.export_as_tikz(filename, &ws);
-        return result;
+            const auto& Tr = get_minimal_trellis();
+            thread_local typename Trellis<T>::BCJR_Workspace ws(Tr);
+            if (ws.owner != &Tr) ws = typename Trellis<T>::BCJR_Workspace(Tr);
+            ws.calculate_edge_costs(Tr, llrs);
+            auto result = bcjr_forward_backward(Tr, ws);
+            if (!filename.empty()) Tr.export_as_tikz(filename, &ws);
+            return result;
+        }
     }
 
     virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t cache_limit) const override {
-        if constexpr (!std::is_same_v<T, Fp<2>>)
+        if constexpr (!std::is_same_v<T, Fp<2>>) {
             throw std::logic_error("Soft-input ML decoding only available for codes over F_2!");
-        validate_length(llrs);
-
-        if (k == 0) return Vector<T>(this->n);
-
-        Vector<T> c_est;
-        double best = std::numeric_limits<double>::max();
-
-        if (this->get_size() <= cache_limit) {
-            std::call_once(codewords_flag, [this] { codewords.emplace(this->get_G().span()); });
-
-            for (auto it = codewords.value().cbegin(); it != codewords.value().cend(); ++it) {
-                double val = 0.0;
-                for (size_t i = 0; i < this->n; ++i) {
-                    if ((*it)[i] != T(0)) val += llrs[i];
-                }
-                if (val < best) {
-                    c_est = *it;
-                    best = val;
-                }
-            }
         } else {
-            for (auto it = cbegin(); it != cend(); ++it) {
-                double val = 0.0;
-                for (size_t i = 0; i < this->n; ++i) {
-                    if ((*it)[i] != T(0)) val += llrs[i];
+            validate_length(llrs);
+
+            if (k == 0) return Vector<T>(this->n);
+
+            Vector<T> c_est;
+            double best = std::numeric_limits<double>::max();
+
+            if (this->get_size() <= cache_limit) {
+                std::call_once(codewords_flag, [this] { codewords.emplace(this->get_G().span()); });
+
+                for (auto it = codewords.value().cbegin(); it != codewords.value().cend(); ++it) {
+                    double val = 0.0;
+                    for (size_t i = 0; i < this->n; ++i) {
+                        if ((*it)[i] != T(0)) val += llrs[i];
+                    }
+                    if (val < best) {
+                        c_est = *it;
+                        best = val;
+                    }
                 }
-                if (val < best) {
-                    c_est = *it;
-                    best = val;
+            } else {
+                for (auto it = cbegin(); it != cend(); ++it) {
+                    double val = 0.0;
+                    for (size_t i = 0; i < this->n; ++i) {
+                        if ((*it)[i] != T(0)) val += llrs[i];
+                    }
+                    if (val < best) {
+                        c_est = *it;
+                        best = val;
+                    }
                 }
             }
-        }
 
-        return c_est;
+            return c_est;
+        }
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
     virtual Vector<T> dec_BD_EE(const Vector<T>& r) const override {
-        if constexpr (!FiniteFieldType<T>)
+        if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("BD error/erasure decoding only available for codes over finite fields!");
-        validate_length(r);
+        } else {
+            validate_length(r);
 
-        if (k == 0) return Vector<T>(this->n);
+            if (k == 0) return Vector<T>(this->n);
 
-        size_t tau = 0;
-        for (size_t i = 0; i < this->n; ++i) {
-            if (r[i].is_erased()) ++tau;
+            size_t tau = 0;
+            for (size_t i = 0; i < this->n; ++i) {
+                if (r[i].is_erased()) ++tau;
+            }
+
+            if (tau == 0) return dec_BD(r);
+            if (tau > get_dmin() - 1) throw decoding_failure("Linear code BD error/erasure decoder failed!");
+
+            const auto c_est = dec_ML_EE(r);
+
+            size_t t = 0;
+            for (size_t i = 0; i < this->n; ++i) {
+                if (!r[i].is_erased() && r[i] != c_est[i]) ++t;
+            }
+
+            if (2 * t + tau > get_dmin() - 1)
+                throw decoding_failure("Linear code BD error/erasure decoder failed!");
+            else
+                return c_est;
         }
-
-        if (tau == 0) return dec_BD(r);
-        if (tau > get_dmin() - 1) throw decoding_failure("Linear code BD error/erasure decoder failed!");
-
-        const auto c_est = dec_ML_EE(r);
-
-        size_t t = 0;
-        for (size_t i = 0; i < this->n; ++i) {
-            if (!r[i].is_erased() && r[i] != c_est[i]) ++t;
-        }
-
-        if (2 * t + tau > get_dmin() - 1)
-            throw decoding_failure("Linear code BD error/erasure decoder failed!");
-        else
-            return c_est;
     }
 
     virtual Vector<T> dec_Viterbi_EE(const Vector<T>& r, const std::string& filename = "") const override {
-        if constexpr (!FiniteFieldType<T>)
+        if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Viterbi error/erasure decoding only available for codes over finite fields!");
-        validate_length(r);
-        if (k == 0) return Vector<T>(this->n);
+        } else {
+            validate_length(r);
+            if (k == 0) return Vector<T>(this->n);
 
-        const auto& Tr = get_minimal_trellis();
-        thread_local typename Trellis<T>::Viterbi_Workspace ws(Tr);
-        if (ws.owner != &Tr) ws = typename Trellis<T>::Viterbi_Workspace(Tr);
-        ws.calculate_edge_costs(Tr, r);
-        auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
-        if (!filename.empty()) {
-            ws.v.emplace(r);
-            Tr.export_as_tikz(filename, &ws);
+            const auto& Tr = get_minimal_trellis();
+            thread_local typename Trellis<T>::Viterbi_Workspace ws(Tr);
+            if (ws.owner != &Tr) ws = typename Trellis<T>::Viterbi_Workspace(Tr);
+            ws.calculate_edge_costs(Tr, r);
+            auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
+            if (!filename.empty()) {
+                ws.v.emplace(r);
+                Tr.export_as_tikz(filename, &ws);
+            }
+            return c_est;
         }
-        return c_est;
     }
 
     virtual Vector<T> dec_ML_EE(const Vector<T>& r) const override {
-        if constexpr (!FiniteFieldType<T>)
+        if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("ML error/erasure decoding only available for codes over finite fields!");
-        validate_length(r);
+        } else {
+            validate_length(r);
 
-        if (k == 0) return Vector<T>(this->n);
+            if (k == 0) return Vector<T>(this->n);
 
-        std::call_once(punctured_codes_flag, [this] {
-            if (punctured_codes.has_value()) return;
+            std::call_once(punctured_codes_flag, [this] {
+                if (punctured_codes.has_value()) return;
 
-            std::clog << "--> Preparing punctured codes for error/erasure decoding" << std::endl;
+                std::clog << "--> Preparing punctured codes for error/erasure decoding" << std::endl;
 
-            size_t count = 0;
-            for (size_t tau = 1; tau <= get_dmin() - 1; ++tau) count += bin<size_t>(this->n, tau);
-            punctured_codes.emplace(count);
+                size_t count = 0;
+                for (size_t tau = 1; tau <= get_dmin() - 1; ++tau) count += bin<size_t>(this->n, tau);
+                punctured_codes.emplace(count);
 
-            for (size_t tau = 1; tau <= get_dmin() - 1; ++tau) {
-                std::vector<bool> mask(this->n, false);
-                std::fill(mask.begin(), mask.begin() + tau, true);
+                for (size_t tau = 1; tau <= get_dmin() - 1; ++tau) {
+                    std::vector<bool> mask(this->n, false);
+                    std::fill(mask.begin(), mask.begin() + tau, true);
 
-                do {
-                    std::vector<size_t> X;
-                    X.reserve(tau);
-                    for (auto it = mask.cbegin(); it != mask.cend(); ++it) {
-                        if (*it) X.push_back(static_cast<size_t>(it - mask.cbegin()));
-                    }
+                    do {
+                        std::vector<size_t> X;
+                        X.reserve(tau);
+                        for (auto it = mask.cbegin(); it != mask.cend(); ++it) {
+                            if (*it) X.push_back(static_cast<size_t>(it - mask.cbegin()));
+                        }
 
-                    const size_t i = pos_to_index(X);
-                    punctured_codes.value()[i].emplace(puncture(*this, X));
+                        const size_t i = pos_to_index(X);
+                        punctured_codes.value()[i].emplace(puncture(*this, X));
 
-                } while (std::prev_permutation(mask.begin(), mask.end()));
+                    } while (std::prev_permutation(mask.begin(), mask.end()));
+                }
+            });
+
+            std::vector<size_t> X;
+            std::vector<size_t> E;
+            for (size_t i = 0; i < this->n; ++i) {
+                if (r[i].is_erased())
+                    X.push_back(i);
+                else
+                    E.push_back(i);
             }
-        });
+            const size_t tau = X.size();
 
-        std::vector<size_t> X;
-        std::vector<size_t> E;
-        for (size_t i = 0; i < this->n; ++i) {
-            if (r[i].is_erased())
-                X.push_back(i);
-            else
-                E.push_back(i);
-        }
-        const size_t tau = X.size();
+            if (tau == 0) return dec_ML(r);
+            if (tau > get_dmin() - 1) throw decoding_failure("Linear code ML error/erasure decoder failed!");
 
-        if (tau == 0) return dec_ML(r);
-        if (tau > get_dmin() - 1) throw decoding_failure("Linear code ML error/erasure decoder failed!");
+            const auto& PC = punctured_codes.value()[pos_to_index(X)].value();
 
-        const auto& PC = punctured_codes.value()[pos_to_index(X)].value();
+            const auto r_E = delete_components(r, X);
+            const auto c_E = PC.dec_ML(r_E);
+            const auto HT_E = delete_rows(this->HT, X);
+            const auto b = -c_E * HT_E;
+            const auto HT_X = delete_rows(this->HT, E);
+            const auto B = transpose(vertical_join(HT_X, Matrix(b))).basis_of_nullspace();
 
-        const auto r_E = delete_components(r, X);
-        const auto c_E = PC.dec_ML(r_E);
-        const auto HT_E = delete_rows(this->HT, X);
-        const auto b = -c_E * HT_E;
-        const auto HT_X = delete_rows(this->HT, E);
-        const auto B = transpose(vertical_join(HT_X, Matrix(b))).basis_of_nullspace();
-
-        Vector<T> sol(tau);
-        bool found = false;
-        for (size_t i = 0; i < B.get_m(); ++i) {
-            const T a = B(i, B.get_n() - 1);
-            if (!a.is_zero()) {
-                sol = B.get_row(i).delete_component(B.get_n() - 1);
-                sol /= -a;
-                found = true;
-                break;
+            Vector<T> sol(tau);
+            bool found = false;
+            for (size_t i = 0; i < B.get_m(); ++i) {
+                const T a = B(i, B.get_n() - 1);
+                if (!a.is_zero()) {
+                    sol = B.get_row(i).delete_component(B.get_n() - 1);
+                    sol /= -a;
+                    found = true;
+                    break;
+                }
             }
+            if (!found) throw decoding_failure("Linear code ML error/erasure decoder failed!");
+
+            Vector<T> c_est(this->n);
+            for (size_t i = 0; i < E.size(); ++i) c_est.set_component(E[i], c_E[i]);
+            for (size_t j = 0; j < tau; ++j) c_est.set_component(X[j], sol[j]);
+
+            return c_est;
         }
-        if (!found) throw decoding_failure("Linear code ML error/erasure decoder failed!");
-
-        Vector<T> c_est(this->n);
-        for (size_t i = 0; i < E.size(); ++i) c_est.set_component(E[i], c_E[i]);
-        for (size_t j = 0; j < tau; ++j) c_est.set_component(X[j], sol[j]);
-
-        return c_est;
     }
 #endif
 
    protected:
+    std::pair<Matrix<T>, Matrix<T>> standard_form_impl() const {
+        auto Gp = G;
+        Gp.rref();
+        std::vector<size_t> perm(this->n);
+        std::iota(perm.begin(), perm.end(), 0);
+        for (size_t i = 0; i < k; ++i) {
+            const auto u = unit_vector<T>(k, i);
+            for (size_t j = 0; j < this->n; ++j) {
+                if (Gp.get_col(j) == u) {
+                    if (j != i) {
+                        Gp.swap_columns(i, j);
+                        std::swap(perm[i], perm[j]);
+                    }
+                    break;
+                }
+            }
+        }
+        return {std::move(Gp), PermutationMatrix<T>(perm)};
+    }
+
 #ifdef CECCO_ERASURE_SUPPORT
     static bool erasures_present(const Vector<T>& r) {
         for (size_t i = 0; i < r.get_n(); ++i) {
@@ -2262,6 +2317,8 @@ class UniverseCode : public LinearCode<T> {
     UniverseCode& operator=(const UniverseCode&) = default;
     UniverseCode& operator=(UniverseCode&&) = default;
 
+    UniverseCode<T> get_equivalent_in_standard_form() const { return UniverseCode<T>(this->n); }
+
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
@@ -2334,6 +2391,8 @@ class ZeroCode : public LinearCode<T> {
     ZeroCode& operator=(const ZeroCode&) = default;
     ZeroCode& operator=(ZeroCode&&) = default;
 
+    ZeroCode<T> get_equivalent_in_standard_form() const { return ZeroCode<T>(this->n); }
+
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
             LinearCode<T>::get_info(os);
@@ -2360,11 +2419,34 @@ class HammingCode : public LinearCode<T> {
         for (size_t s_cand = 2; s_cand < std::numeric_limits<size_t>::max(); ++s_cand) {
             const size_t n = Hamming_n(s_cand);
             if (n > this->n) break;
-            if (n == this->n) {
-                if (Hamming_k(s_cand) == this->k && this->get_dmin() == 3) {
-                    this->s = s_cand;
-                    return;
+            if (n != this->n || Hamming_k(s_cand) != this->k) continue;
+
+            std::vector<size_t> seen;
+            seen.reserve(this->n);
+            bool valid = true;
+            for (size_t i = 0; i < this->n && valid; ++i) {
+                const auto h = this->HT.get_row(i);
+                T inv;
+                for (size_t j = 0; j < h.get_n(); ++j)
+                    if (!h[j].is_zero()) {
+                        inv = T(1) / h[j];
+                        break;
+                    }
+                if (inv.is_zero()) {
+                    valid = false;
+                    break;
                 }
+                const size_t key = (inv * h).as_integer();
+                if (std::ranges::find(seen, key) != seen.end()) {
+                    valid = false;
+                    break;
+                }
+                seen.push_back(key);
+            }
+            if (valid) {
+                this->s = s_cand;
+                this->set_dmin(3);
+                return;
             }
         }
         throw std::invalid_argument("Linear code cannot be converted into Hamming code!");
@@ -2374,6 +2456,10 @@ class HammingCode : public LinearCode<T> {
     HammingCode(HammingCode&&) = default;
     HammingCode& operator=(const HammingCode&) = default;
     HammingCode& operator=(HammingCode&&) = default;
+
+    HammingCode<T> get_equivalent_in_standard_form() const {
+        return HammingCode<T>(LinearCode<T>::get_equivalent_in_standard_form());
+    }
 
     size_t get_s() const noexcept { return s; }
 
@@ -2386,6 +2472,7 @@ class HammingCode : public LinearCode<T> {
     }
 
     SimplexCode<T> get_dual() const noexcept { return SimplexCode<T>(s); }
+
     Vector<T> dec_BD(const Vector<T>& r) const override {
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
@@ -2527,6 +2614,10 @@ class SimplexCode : public LinearCode<T> {
     SimplexCode(SimplexCode&&) = default;
     SimplexCode& operator=(const SimplexCode&) = default;
     SimplexCode& operator=(SimplexCode&&) = default;
+
+    SimplexCode<T> get_equivalent_in_standard_form() const {
+        return SimplexCode<T>(LinearCode<T>::get_equivalent_in_standard_form());
+    }
 
     size_t get_s() const noexcept { return s; }
 
@@ -2691,6 +2782,8 @@ class RepetitionCode : public LinearCode<T> {
     RepetitionCode(RepetitionCode&&) = default;
     RepetitionCode& operator=(const RepetitionCode&) = default;
     RepetitionCode& operator=(RepetitionCode&&) = default;
+
+    RepetitionCode<T> get_equivalent_in_standard_form() const { return RepetitionCode<T>(this->n); }
 
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
@@ -2977,6 +3070,170 @@ class GolayCode : public LinearCode<T> {
     }
 };
 
+template <FieldType T>
+class GRSCode : public LinearCode<T> {
+   public:
+    GRSCode(const Vector<T>& a, const Vector<T>& d, size_t k) try : LinearCode
+        <T>(a.get_n(), k, VandermondeMatrix<T>(a, k) * DiagonalMatrix<T>(d)), a(a), d(d) {
+            const size_t n = this->n;
+
+            if (n != d.get_n())
+                throw std::invalid_argument(
+                    "GRS codes require code locators a and column multipliers d of same length!");
+            for (size_t i = 0; i < n; ++i) {
+                for (size_t j = i + 1; j < n; ++j) {
+                    if (a[i] == a[j])
+                        throw std::invalid_argument("GRS codes must have pairwise distinct code locators!");
+                }
+            }
+            for (size_t i = 0; i < n; ++i) {
+                if (d[i] == T(0)) throw std::invalid_argument("GRS codes must have nonzero column multipliers!");
+            }
+
+            if constexpr (FiniteFieldType<T>) {
+                constexpr size_t q = T::get_size();
+
+                Polynomial<InfInt> weight_enumerator;
+                weight_enumerator.set_coefficient(0, 1);
+                for (size_t i = n - k + 1; i <= n; ++i) {
+                    InfInt sum = 0;
+                    for (size_t j = 0; j <= i - (n - k + 1); ++j) {
+                        InfInt s = j % 2 ? -1 : 1;
+                        sum += s * bin<InfInt>(i - 1, j) * sqm<InfInt>(q, i - j - (n - k + 1));
+                    }
+                    weight_enumerator.set_coefficient(i, bin<InfInt>(n, i) * (q - 1) * sum);
+                }
+
+                // remove in final
+                InfInt sum = 0;
+                for (size_t i = 0; i <= n; ++i) sum += weight_enumerator[i];
+                assert(sum == sqm<InfInt>(q, k));
+
+                this->set_weight_enumerator(std::move(weight_enumerator));
+            } else {
+                this->set_dmin(n - k + 1);
+            }
+        }
+    catch (const std::invalid_argument& e) {
+        throw std::invalid_argument(std::string("Cannot construct GRS code: ") + e.what());
+    }
+
+    GRSCode(const GRSCode&) = default;
+    GRSCode(GRSCode&&) = default;
+    GRSCode& operator=(const GRSCode&) = default;
+    GRSCode& operator=(GRSCode&&) = default;
+
+    bool is_singly_extended() const {
+        for (size_t i = 0; i < this->n; ++i) {
+            if (a[i] == T(0)) return true;
+        }
+        return false;
+    }
+
+    bool is_primitive() const {
+        if constexpr (!FiniteFieldType<T>) {
+            return false;
+        } else {
+            const size_t n = this->n;
+            if (n != T::get_size() - 1) return false;
+            for (size_t i = 0; i < n; ++i) {
+                if (a[i] == T(0)) return false;
+            }
+            return true;
+        }
+    }
+
+    bool is_narrow_sense() const { return a == d; }
+
+    bool is_normalized() const {
+        for (size_t i = 0; i < this->n; ++i) {
+            if (d[i] != T(1)) return false;
+        }
+        return true;
+    }
+
+    virtual void get_info(std::ostream& os) const override {
+        if (os.iword(details::index) < 3) {
+            LinearCode<T>::get_info(os);
+            if (os.iword(details::index) > 0) os << std::endl;
+        }
+        if (os.iword(details::index) > 0) {
+            os << "GRS code with properties: { a = " << a << ", d = " << d;
+            if (is_singly_extended()) {
+                os << " singly-extended";
+            }
+            if (is_primitive()) {
+                os << " primitive";
+            }
+            if (is_narrow_sense()) {
+                os << " narrow-sense";
+            }
+            if (is_normalized()) {
+                os << " normalized";
+            }
+            os << " }";
+        }
+    }
+
+    Vector<T> dec_BD(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
+        if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
+#endif
+        this->validate_length(r);
+
+        return dec_BD_EE(r);
+    }
+
+    Vector<T> dec_BD_EE(const Vector<T>& r) const override {
+        this->validate_length(r);
+
+        std::vector<size_t> X;
+        for (size_t i = 0; i < this->n; ++i) {
+            if (r[i].is_erased()) X.push_back(i);
+        }
+        const size_t tau = X.size();
+
+        if (tau > this->get_dmin() - 1) throw decoding_failure("GRS code code BD error/erasure decoder failed!");
+
+        const size_t n = this->n;
+        const size_t k = this->k;
+
+        // in case erasures are present: decode assuming $\GRS_{\vec{a}'}[\K; n', k]$
+        const auto ap = delete_components(a, X);
+        const size_t np = n - tau;
+        const size_t tmaxp = std::floor((np - k) / 2.0);
+        const auto rp = delete_components(r, X);
+
+        const auto M0 = transpose(VandermondeMatrix<T>(ap, np - tmaxp));
+        const auto M1 = DiagonalMatrix(rp) * transpose(VandermondeMatrix<T>(ap, np - tmaxp - k + 1));
+        const auto M = horizontal_join(M0, M1);
+
+        const auto B = M.basis_of_kernel();
+
+        size_t i = 0;
+        Polynomial<T> Q0;
+        for (size_t j = 0; j <= np - tmaxp - 1; ++j, ++i) Q0.set_coefficient(j, B(0, i));
+        Polynomial<T> Q1;
+        for (size_t j = 0; j <= np - tmaxp - k; ++j, ++i) Q1.set_coefficient(j, B(0, i));
+
+        const auto temp = poly_long_div(-Q0, Q1);
+        const auto quotient = temp.first;    // temp is a std::pair, first element quotient...
+        const auto remainder = temp.second;  // ... second element remainder
+        if (!remainder.is_zero() || quotient.degree() >= k)
+            throw decoding_failure("GRS code BD error/erasure  decoder failed (bad quotient)!");
+
+        const auto u_est = pad_back(Vector<T>(quotient), k);
+        const auto c_est = u_est * this->get_G();
+        if (dH(r, c_est) > tmaxp) throw decoding_failure("GRS code BD error/erasure  decoder failed (beyond BD radius)!");
+
+        return c_est;
+    }
+
+   private:
+    Vector<T> a;
+    Vector<T> d;
+};
+
 class CordaroWagnerCode : public LinearCode<Fp<2>> {
    public:
     CordaroWagnerCode(size_t r, int8_t m) : LinearCode<Fp<2>>(3 * r + m, 2, CordaroWagner_G(r, m)), r(r), m(m) {
@@ -3206,12 +3463,12 @@ class LDCCode : public LinearCode<typename BU::field> {
         // ... then U code
         const Vector<T> cl_hat_2 = dec_wrapper(U, rr - cr_hat);
 
-        const auto c_hat_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
-        const auto c_hat_2 = concatenate(cl_hat_2, cl_hat_2 + cr_hat);
-        if (dH(r, c_hat_1) < dH(r, c_hat_2))
-            return c_hat_1;
+        const auto c_est_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
+        const auto c_est_2 = concatenate(cl_hat_2, cl_hat_2 + cr_hat);
+        if (dH(r, c_est_1) < dH(r, c_est_2))
+            return c_est_1;
         else
-            return c_hat_2;
+            return c_est_2;
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
@@ -3237,22 +3494,22 @@ class LDCCode : public LinearCode<typename BU::field> {
         // ... then U code
         const Vector<T> cl_hat_2 = dec_wrapper_EE(U, rr - cr_hat);
 
-        const auto c_hat_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
-        const auto c_hat_2 = concatenate(cl_hat_2, cl_hat_2 + cr_hat);
+        const auto c_est_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
+        const auto c_est_2 = concatenate(cl_hat_2, cl_hat_2 + cr_hat);
 
         size_t t_1 = 0;
         size_t t_2 = 0;
         for (size_t i = 0; i < this->n; ++i) {
             if (!r[i].is_erased()) {
-                if (r[i] != c_hat_1[i]) ++t_1;
-                if (r[i] != c_hat_2[i]) ++t_2;
+                if (r[i] != c_est_1[i]) ++t_1;
+                if (r[i] != c_est_2[i]) ++t_2;
             }
         }
 
         if (t_1 < t_2)
-            return c_hat_1;
+            return c_est_1;
         else
-            return c_hat_2;
+            return c_est_2;
     }
 #endif
 
@@ -3364,7 +3621,6 @@ class RMCode : public LinearCode<Fp<2>> {
         auto vl = v.get_subvector(0, np);
         auto vr = v.get_subvector(np, np);
 
-
         // U code
         const Vector<T> cl_hat_1 = dec_wrapper(r, m - 1, vl);
 
@@ -3403,32 +3659,30 @@ class RMCode : public LinearCode<Fp<2>> {
         auto vl = v.get_subvector(0, np);
         auto vr = v.get_subvector(np, np);
 
-  
-
         // U code
         const Vector<T> cl_hat_1 = dec_wrapper_EE(r, m - 1, vl);
-  
+
         // V code...
         const Vector<T> cr_hat = dec_wrapper_EE(r - 1, m - 1, vr + vl);
         // ... then U code
         const Vector<T> cl_hat_2 = dec_wrapper_EE(r, m - 1, vr - cr_hat);
 
-        const auto c_hat_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
-        const auto c_hat_2 = concatenate(cl_hat_2, cl_hat_2 + cr_hat);
+        const auto c_est_1 = concatenate(cl_hat_1, cl_hat_1 + cr_hat);
+        const auto c_est_2 = concatenate(cl_hat_2, cl_hat_2 + cr_hat);
 
         size_t t_1 = 0;
         size_t t_2 = 0;
         for (size_t i = 0; i < n; ++i) {
             if (!v[i].is_erased()) {
-                if (v[i] != c_hat_1[i]) ++t_1;
-                if (v[i] != c_hat_2[i]) ++t_2;
+                if (v[i] != c_est_1[i]) ++t_1;
+                if (v[i] != c_est_2[i]) ++t_2;
             }
         }
 
         if (t_1 < t_2)
-            return c_hat_1;
+            return c_est_1;
         else
-            return c_hat_2;
+            return c_est_2;
     }
 #endif
 };

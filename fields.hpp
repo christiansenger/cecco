@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.5
+ * @version 2.3.6
  * @date 2026
  *
  * @copyright
@@ -2236,8 +2236,7 @@ struct IsomorphismPair {
             }
 
             // Compute reverse mapping B -> A (inverse of forward mapping)
-            for (size_t i = 0; i < size; ++i)
-                reverse_iso[forward_iso[i]] = i;
+            for (size_t i = 0; i < size; ++i) reverse_iso[forward_iso[i]] = i;
         });
     }
 };
@@ -2424,8 +2423,7 @@ template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
 constexpr Isomorphism<B, A> Isomorphism<A, B>::inverse() const {
     std::vector<size_t> iso_inv(A::get_size());
-    for (size_t i = 0; i < A::get_size(); ++i)
-        iso_inv[iso[i]] = i;
+    for (size_t i = 0; i < A::get_size(); ++i) iso_inv[iso[i]] = i;
     return Isomorphism<B, A>(std::move(iso_inv));
 }
 
@@ -4146,7 +4144,10 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
 
         bool erased = false;
         for (size_t i = 0; i < v.get_n(); ++i)
-            if (v[i].is_erased()) { erased = true; break; }
+            if (v[i].is_erased()) {
+                erased = true;
+                break;
+            }
 
         if (erased)
             this->erase();
@@ -4163,7 +4164,10 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
 
         bool erased = false;
         for (size_t i = 0; i < v.get_n(); ++i)
-            if (v[i].is_erased()) { erased = true; break; }
+            if (v[i].is_erased()) {
+                erased = true;
+                break;
+            }
 
         if (erased) {
             this->erase();
@@ -5194,7 +5198,8 @@ constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator=(int other) {
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 template <typename OTHER>
 Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator=(const OTHER& other)
-    requires BelongsTo<OTHER, OTHERS...>{
+    requires BelongsTo<OTHER, OTHERS...>
+{
     Iso temp(other);
     std::swap(*this, temp);
     return *this;
@@ -5222,7 +5227,8 @@ template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 template <FiniteFieldType OTHER_MAIN, FiniteFieldType... OTHER_OTHERS>
 Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator=(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other)
     requires(OTHER_MAIN::get_characteristic() == MAIN::get_characteristic()) &&
-            (!std::is_same_v<Iso<OTHER_MAIN, OTHER_OTHERS...>, Iso<MAIN, OTHERS...>>){
+            (!std::is_same_v<Iso<OTHER_MAIN, OTHER_OTHERS...>, Iso<MAIN, OTHERS...>>)
+{
     Iso temp(other);
     std::swap(*this, temp);
     return *this;
@@ -5501,7 +5507,8 @@ constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator+=(const Iso& othe
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 template <typename OTHER>
 constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator+=(const OTHER& other)
-    requires BelongsTo<OTHER, OTHERS...>{
+    requires BelongsTo<OTHER, OTHERS...>
+{
     main_ += Iso(other).main_;
     return *this;
 }
@@ -5515,7 +5522,8 @@ constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator-=(const Iso& othe
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 template <typename OTHER>
 constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator-=(const OTHER& other)
-    requires BelongsTo<OTHER, OTHERS...>{
+    requires BelongsTo<OTHER, OTHERS...>
+{
     main_ -= Iso(other).main_;
     return *this;
 }
@@ -5529,7 +5537,8 @@ constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator*=(const Iso& othe
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 template <typename OTHER>
 constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator*=(const OTHER& other)
-    requires BelongsTo<OTHER, OTHERS...>{
+    requires BelongsTo<OTHER, OTHERS...>
+{
     main_ *= Iso(other).main_;
     return *this;
 }
@@ -5549,7 +5558,8 @@ Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator/=(const Iso& other) {
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 template <typename OTHER>
 Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator/=(const OTHER& other)
-    requires BelongsTo<OTHER, OTHERS...>{
+    requires BelongsTo<OTHER, OTHERS...>
+{
     main_ /= Iso(other).main_;
     return *this;
 }
@@ -5557,7 +5567,8 @@ Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator/=(const OTHER& other)
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 template <typename TO>
 constexpr TO Iso<MAIN, OTHERS...>::as() const
-    requires BelongsTo<TO, OTHERS...>{
+    requires BelongsTo<TO, OTHERS...>
+{
     auto phi = Isomorphism<MAIN, TO>();
     return phi(main_);
 }
@@ -5573,7 +5584,8 @@ const std::string Iso<MAIN, OTHERS...>::get_info() noexcept {
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 template <FiniteFieldType T>
 Vector<T> Iso<MAIN, OTHERS...>::as_vector() const noexcept
-    requires((SubfieldOf<MAIN, T> || ((SubfieldOf<OTHERS, T>) || ...))) && (!std::is_same_v<Iso<MAIN, OTHERS...>, T>){
+    requires((SubfieldOf<MAIN, T> || ((SubfieldOf<OTHERS, T>) || ...))) && (!std::is_same_v<Iso<MAIN, OTHERS...>, T>)
+{
     if constexpr (std::is_same_v<T, MAIN>) {
         // T is MAIN - direct conversion
         return main_.template as_vector<T>();
@@ -5612,14 +5624,6 @@ constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::unerase() noexcept {
     main_.unerase();
     return *this;
 }
-
-namespace details {
-template <FiniteFieldType T>
-struct FiniteFieldHasher {
-    size_t operator()(const T& e) const noexcept { return std::hash<typename T::label_t>{}(e.get_label()); }
-};
-
-}  // namespace details
 
 }  // namespace CECCO
 
