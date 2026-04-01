@@ -1614,12 +1614,12 @@ class LinearCode : public Code<T> {
     }
 
     LinearCode<T> get_equivalent_in_standard_form() const {
-        auto [Gp, P] = standard_form_impl();
-        LinearCode<T> result(this->n, k, Gp);
-        if (dmin.has_value()) result.set_dmin(*dmin);
+        auto Gp = standard_form_impl().first;
+        LinearCode<T> res(this->n, k, Gp);
+        if (dmin.has_value()) res.set_dmin(*dmin);
         if constexpr (FiniteFieldType<T>)
-            if (weight_enumerator.has_value()) result.set_weight_enumerator(*weight_enumerator);
-        return result;
+            if (weight_enumerator.has_value()) res.set_weight_enumerator(*weight_enumerator);
+        return res;
     }
 
     Matrix<T> get_G_in_polynomial_form() const {
@@ -2109,7 +2109,9 @@ class LinearCode : public Code<T> {
                 }
             }
         }
-        return {std::move(Gp), PermutationMatrix<T>(perm)};
+        auto P = PermutationMatrix<T>(perm);
+        P.transpose();
+        return {std::move(Gp), std::move(P)};
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
@@ -2901,14 +2903,22 @@ class SingleParityCheckCode : public LinearCode<T> {
     }
 
     SingleParityCheckCode(const LinearCode<T>& C) : LinearCode<T>(C) {
-        if (this->k != this->n - 1 || this->get_dmin() != 2)
+        if (this->k != this->n - 1)
             throw std::invalid_argument("Linear code cannot be converted into single parity check code!");
+        const auto& HTp = this->get_HT();
+        for (size_t i = 0; i < this->n; ++i)
+            if (HTp(i, 0).is_zero())
+                throw std::invalid_argument("Linear code cannot be converted into single parity check code!");
     }
 
     SingleParityCheckCode(const SingleParityCheckCode&) = default;
     SingleParityCheckCode(SingleParityCheckCode&&) = default;
     SingleParityCheckCode& operator=(const SingleParityCheckCode&) = default;
     SingleParityCheckCode& operator=(SingleParityCheckCode&&) = default;
+
+    SingleParityCheckCode<T> get_equivalent_in_standard_form() const {
+        return SingleParityCheckCode<T>(LinearCode<T>::get_equivalent_in_standard_form());
+    }
 
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
@@ -2925,10 +2935,7 @@ class SingleParityCheckCode : public LinearCode<T> {
 #endif
         this->validate_length(r);
 
-        T s = T(0);
-        for (size_t i = 0; i < this->n; ++i) s += r[i];
-
-        if (!s.is_zero()) throw decoding_failure("Single parity check code BD decoder failed!");
+        if (!(r * this->HT)[0].is_zero()) throw decoding_failure("Single parity check code BD decoder failed!");
 
         return r;
     }
@@ -2939,12 +2946,11 @@ class SingleParityCheckCode : public LinearCode<T> {
 #endif
         this->validate_length(r);
 
-        T s = T(0);
-        for (size_t i = 0; i < this->n; ++i) s += r[i];
+        const T s = (r * this->HT)[0];
         if (s.is_zero()) return r;
 
         Vector<T> c_est = r;
-        c_est.set_component(0, r[0] - s);
+        c_est.set_component(0, r[0] - s / (this->HT)(0, 0));
         return c_est;
     }
 
@@ -2962,12 +2968,11 @@ class SingleParityCheckCode : public LinearCode<T> {
         if (tau > 1) throw decoding_failure("Single parity check code BD error/erasure decoder failed!");
 
         T s = T(0);
-        for (size_t i = 0; i < this->n; ++i) {
-            if (!r[i].is_erased()) s += r[i];
-        }
+        for (size_t i = 0; i < this->n; ++i)
+            if (!r[i].is_erased()) s += (this->HT)(i, 0) * r[i];
 
         Vector<T> c_est = r;
-        c_est.set_component(X[0], -s);
+        c_est.set_component(X[0], -s / (this->HT)(X[0], 0));
         return c_est;
     }
 
@@ -2984,12 +2989,11 @@ class SingleParityCheckCode : public LinearCode<T> {
         if (tau == this->n) return Vector<T>(this->n, T(0));
 
         T s = T(0);
-        for (size_t i = 0; i < this->n; ++i) {
-            if (!r[i].is_erased()) s += r[i];
-        }
+        for (size_t i = 0; i < this->n; ++i)
+            if (!r[i].is_erased()) s += (this->HT)(i, 0) * r[i];
 
         Vector<T> c_est = r;
-        c_est.set_component(X[0], -s);
+        c_est.set_component(X[0], -s / (this->HT)(X[0], 0));
         for (size_t i = 1; i < tau; ++i) c_est.set_component(X[i], T(0));
         return c_est;
     }
@@ -3026,6 +3030,10 @@ class GolayCode : public LinearCode<T> {
     GolayCode(GolayCode&&) = default;
     GolayCode& operator=(const GolayCode&) = default;
     GolayCode& operator=(GolayCode&&) = default;
+
+    GolayCode<T> get_equivalent_in_standard_form() const {
+        return GolayCode<T>(LinearCode<T>::get_equivalent_in_standard_form());
+    }
 
     virtual void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
@@ -3113,6 +3121,7 @@ class GRSCode : public LinearCode<T> {
             } else {
                 this->set_dmin(n - k + 1);
             }
+            G_canonical = this->get_G();
         }
     catch (const std::invalid_argument& e) {
         throw std::invalid_argument(std::string("Cannot construct GRS code: ") + e.what());
@@ -3122,6 +3131,15 @@ class GRSCode : public LinearCode<T> {
     GRSCode(GRSCode&&) = default;
     GRSCode& operator=(const GRSCode&) = default;
     GRSCode& operator=(GRSCode&&) = default;
+
+    GRSCode<T> get_equivalent_in_standard_form() const {
+        auto [Gp, P] = this->standard_form_impl();
+        GRSCode res(a * P, d * P, this->k, std::move(Gp));
+        if (this->dmin.has_value()) res.set_dmin(*(this->dmin));
+        if constexpr (FiniteFieldType<T>)
+            if (this->weight_enumerator.has_value()) res.set_weight_enumerator(*(this->weight_enumerator));
+        return res;
+    }
 
     bool is_singly_extended() const {
         for (size_t i = 0; i < this->n; ++i) {
@@ -3223,8 +3241,9 @@ class GRSCode : public LinearCode<T> {
             throw decoding_failure("GRS code BD error/erasure  decoder failed (bad quotient)!");
 
         const auto u_est = pad_back(Vector<T>(quotient), k);
-        const auto c_est = u_est * this->get_G();
-        if (dH(r, c_est) > tmaxp) throw decoding_failure("GRS code BD error/erasure  decoder failed (beyond BD radius)!");
+        const auto c_est = u_est * G_canonical;
+        if (dH(r, c_est) > tmaxp)
+            throw decoding_failure("GRS code BD error/erasure  decoder failed (beyond BD radius)!");
 
         return c_est;
     }
@@ -3232,6 +3251,11 @@ class GRSCode : public LinearCode<T> {
    private:
     Vector<T> a;
     Vector<T> d;
+    Matrix<T> G_canonical;
+
+    GRSCode(const Vector<T>& a, const Vector<T>& d, size_t k, Matrix<T> G)
+        : LinearCode<T>(a.get_n(), k, std::move(G)), a(a), d(d),
+          G_canonical(VandermondeMatrix<T>(a, k) * DiagonalMatrix<T>(d)) {}
 };
 
 class CordaroWagnerCode : public LinearCode<Fp<2>> {
@@ -3254,7 +3278,13 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
         r = std::floor(this->n / 3.0 + 1.0 / 2.0);
         m = this->n - 3 * r;
 
-        if (this->get_dmin() != std::min(2 * r, 2 * r + m))
+        const auto c1 = this->G.get_row(0);
+        const auto c2 = this->G.get_row(1);
+        std::array<size_t, 3> actual = {c1.wH(), c2.wH(), (c1 + c2).wH()};
+        std::array<size_t, 3> expected = {2 * r, this->n - r, this->n - r};  // n - r = 2r + m
+        std::ranges::sort(actual);
+        std::ranges::sort(expected);
+        if (actual != expected)
             throw std::invalid_argument("Linear code cannot be converted into Cordaro-Wagner code!");
     }
 
@@ -3262,6 +3292,10 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
     CordaroWagnerCode(CordaroWagnerCode&&) = default;
     CordaroWagnerCode& operator=(const CordaroWagnerCode&) = default;
     CordaroWagnerCode& operator=(CordaroWagnerCode&&) = default;
+
+    CordaroWagnerCode get_equivalent_in_standard_form() const {
+        return CordaroWagnerCode(LinearCode<Fp<2>>::get_equivalent_in_standard_form());
+    }
 
     size_t get_r() const noexcept { return r; }
     int8_t get_m() const noexcept { return m; }
