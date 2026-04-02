@@ -331,7 +331,7 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
      * @note Only available for binary channels (q = 2)
      */
     long double get_Bhattacharyya_param() const
-        requires(T::get_size() == 2)
+        requires(std::is_same_v<T, Fp<2>>)
     {
         if (get_px() != 0.0)
             throw std::logic_error("Bhattacharyya parameter is not defined for channels with erasures");
