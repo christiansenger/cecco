@@ -24,6 +24,11 @@ jobs:
       - name: Build Doxygen
         run: doxygen Doxyfile
 
+      - name: Merge static repo content into Pages output
+        run: |
+          mkdir -p doc/html/www
+          cp -R demos/. doc/html/www/
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
