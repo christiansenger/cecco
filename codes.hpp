@@ -678,6 +678,9 @@ class Code {
     virtual Vector<T> dec_recursive(const Vector<T>& r) const {
         throw std::logic_error("Recursive decoding not supported for this code!");
     }
+    virtual Vector<T> dec_BD_Meggitt(const Vector<T>& r) const {
+        throw std::logic_error("Meggitt decoding not supported for this code!");
+    }
 #ifdef CECCO_ERASURE_SUPPORT
     virtual Vector<T> dec_BD_EE(const Vector<T>& r) const {
         throw std::logic_error("BD error/erasure decoding not supported for this code!");
@@ -803,7 +806,8 @@ class LinearCode : public Code<T> {
     LinearCode(size_t n, size_t k, const Matrix<T>& X) : Code<T>(n), k(k), MI(k, k) {
         if (X.get_n() != this->n) throw std::invalid_argument("G must have " + std::to_string(this->n) + " columns");
         if (k == 0) {
-            if (!X.is_zero() && !X.is_invertible()) throw std::invalid_argument("G must be a zero matrix");
+            if (!X.is_zero() && !X.is_invertible())
+                throw std::invalid_argument("Cannot construct linear code: G must be a zero matrix");
             G = ZeroMatrix<T>(1, n);
             HT = IdentityMatrix<T>(n);
             return;
@@ -811,7 +815,8 @@ class LinearCode : public Code<T> {
 
         if (X.get_m() == k) {
             // X supposed to be generator matrix G
-            if (X.rank() != k) throw std::invalid_argument("G must have full rank " + std::to_string(k));
+            if (X.rank() != k)
+                throw std::invalid_argument("Cannot construct linear code: G must have full rank " + std::to_string(k));
             G = X;
             HT = G.basis_of_nullspace().rref().transpose();
             const auto Gp = rref(G);
@@ -824,7 +829,8 @@ class LinearCode : public Code<T> {
         } else if (X.get_m() == this->n - k) {
             // X supposed to be parity check matrix H
             if (X.rank() != this->n - k)
-                throw std::invalid_argument("H must have full rank " + std::to_string(this->n - k));
+                throw std::invalid_argument("Cannot construct linear code: H must have full rank " +
+                                            std::to_string(this->n - k));
             G = X.basis_of_nullspace();
             HT = transpose(X);
             G.rref();
@@ -843,6 +849,16 @@ class LinearCode : public Code<T> {
         MI.invert();
     }
 
+    LinearCode(size_t k, Polynomial<T> gamma) try
+        : LinearCode(
+              k + gamma.degree(), k,
+              ToeplitzMatrix(pad_back(pad_front(Vector<T>(gamma), k + gamma.degree()), 2 * k + gamma.degree() - 1), k,
+                             k + gamma.degree())) {
+        set_gamma(std::move(gamma));
+    } catch (const std::invalid_argument& e) {
+        throw std::invalid_argument(std::string("Cannot construct linear code from polynomial: ") + e.what());
+    }
+
     LinearCode(const LinearCode& other)
         : Code<T>(other),
           k(other.k),
@@ -850,8 +866,8 @@ class LinearCode : public Code<T> {
           HT(other.HT),
           MI(other.MI),
           infoset(other.infoset),
-          dmin(other.dmin),  // copy computed value
-          dmin_flag(),       // fresh flag
+          dmin(other.dmin),
+          dmin_flag(),
           weight_enumerator(other.weight_enumerator),
           weight_enumerator_flag(),
           standard_array(other.standard_array),
@@ -860,6 +876,8 @@ class LinearCode : public Code<T> {
           tainted_flag(),
           tainted_burst(other.tainted_burst),
           tainted_burst_flag(),
+          Meggitt_table(other.Meggitt_table),
+          Meggitt_table_flag(),
 #ifdef CECCO_ERASURE_SUPPORT
           punctured_codes(other.punctured_codes),
           punctured_codes_flag(),
@@ -889,6 +907,8 @@ class LinearCode : public Code<T> {
           tainted_flag(),
           tainted_burst(std::move(other.tainted_burst)),
           tainted_burst_flag(),
+          Meggitt_table(std::move(other.Meggitt_table)),
+          Meggitt_table_flag(),
 #ifdef CECCO_ERASURE_SUPPORT
           punctured_codes(std::move(other.punctured_codes)),
           punctured_codes_flag(),
@@ -927,6 +947,9 @@ class LinearCode : public Code<T> {
             tainted_burst = other.tainted_burst;
             tainted_burst_flag.~once_flag();
             new (&tainted_burst_flag) std::once_flag();
+            Meggitt_table = other.Meggitt_table;
+            Meggitt_table_flag.~once_flag();
+            new (&Meggitt_table_flag) std::once_flag();
 #ifdef CECCO_ERASURE_SUPPORT
             punctured_codes = other.punctured_codes;
             punctured_codes_flag.~once_flag();
@@ -971,6 +994,9 @@ class LinearCode : public Code<T> {
             tainted_burst = std::move(other.tainted_burst);
             tainted_burst_flag.~once_flag();
             new (&tainted_burst_flag) std::once_flag();
+            Meggitt_table = std::move(other.Meggitt_table);
+            Meggitt_table_flag.~once_flag();
+            new (&Meggitt_table_flag) std::once_flag();
 #ifdef CECCO_ERASURE_SUPPORT
             punctured_codes = std::move(other.punctured_codes);
             punctured_codes_flag.~once_flag();
@@ -1180,9 +1206,9 @@ class LinearCode : public Code<T> {
             bool done = false;
 
             try {
-                standard_array.emplace(std::vector<Vector<T>>(sqm<size_t>(q, this->n - k)));
-                tainted.emplace(std::vector<bool>(standard_array.value().size(), false));
-                tainted_burst.emplace(std::vector<bool>(standard_array.value().size(), false));
+                standard_array.emplace(std::vector<Vector<T>>(nof_cosets));
+                tainted.emplace(std::vector<bool>(nof_cosets, false));
+                tainted_burst.emplace(std::vector<bool>(nof_cosets, false));
             } catch (const std::bad_alloc& e) {
                 std::cerr << "Memory allocation failed, standard array would be too large!" << std::endl;
                 throw e;
@@ -1265,6 +1291,70 @@ class LinearCode : public Code<T> {
         requires FiniteFieldType<T>
     {
         return tainted.value();
+    }
+
+    const std::unordered_map<size_t, Vector<T>>& get_Meggitt_table() const
+        requires FiniteFieldType<T>
+    {
+        std::call_once(Meggitt_table_flag, [this] {
+            if (Meggitt_table.has_value()) return;
+
+            if (!is_cyclic()) throw std::logic_error("Meggitt table only makes sense for cyclic code!");
+
+            std::clog << "--> Calculating Meggitt table" << std::endl;
+
+            constexpr size_t q = T::get_size();
+            const size_t n = this->n;
+            const size_t nk = n - k;
+            const size_t t = get_tmax();
+            const auto& gamma = get_gamma();
+
+            try {
+                Meggitt_table.emplace();
+                auto& table = Meggitt_table.value();
+
+                for (size_t wt = 1; wt <= t; ++wt) {
+                    std::vector<bool> mask(n, false);
+                    std::fill(mask.begin(), mask.begin() + wt, true);
+
+                    do {
+                        std::vector<size_t> pos;
+                        pos.reserve(wt);
+                        for (size_t j = 0; j < n; ++j)
+                            if (mask[j]) pos.push_back(j);
+
+                        Vector<T> v(n, T(0));
+                        for (size_t j = 0; j < wt; ++j) v.set_component(pos[j], T(1));
+
+                        std::vector<size_t> digits(wt, 1);
+
+                        for (;;) {
+                            table.emplace(pad_back(Vector<T>(Polynomial<T>(v) % gamma), nk).as_integer(), v);
+
+                            size_t j = 0;
+                            while (j < wt) {
+                                if (digits[j] < q - 1) {
+                                    ++digits[j];
+                                    v.set_component(pos[j], T(digits[j]));
+                                    break;
+                                }
+                                digits[j] = 1;
+                                v.set_component(pos[j], T(1));
+                                ++j;
+                            }
+                            if (j == wt) break;
+                        }
+
+                    } while (std::prev_permutation(mask.begin() + 1, mask.end()));
+                }
+            } catch (const std::bad_alloc& e) {
+                Meggitt_table.reset();
+                std::cerr << "Memory allocation failed, Meggitt table too large!" << std::endl;
+                throw;
+            }
+        });
+
+        return Meggitt_table.value();
     }
 
     auto cbegin() const noexcept
@@ -1569,7 +1659,7 @@ class LinearCode : public Code<T> {
             if (os.iword(details::index) > 1) {
                 os << std::endl;
                 if constexpr (FiniteFieldType<T>) {
-                    const auto A = get_weight_enumerator();
+                    const auto& A = get_weight_enumerator();
                     os << "A(x) = " << A << std::setfill(' ') << std::endl;
                 }
                 try {
@@ -1647,7 +1737,7 @@ class LinearCode : public Code<T> {
     Matrix<T> get_G_in_polynomial_form() const {
         if (!is_polynomial()) throw std::invalid_argument("Code is not polynomial, cannot bring G in polynomial form!");
 
-        auto g = get_gamma();
+        const auto& g = get_gamma();
         auto Gp = ToeplitzMatrix(pad_back(pad_front(Vector<T>(g), this->n), this->n + k - 1), k, this->n);
         return Gp;
     }
@@ -1809,10 +1899,10 @@ class LinearCode : public Code<T> {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("BD decoding only available for codes over finite fields!");
         } else {
-            validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
             if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
 #endif
+            validate_length(r);
 
             if (k == 0) return Vector<T>(this->n);
 
@@ -1826,10 +1916,10 @@ class LinearCode : public Code<T> {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("BD decoding only available for codes over finite fields!");
         } else {
-            validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
             if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
 #endif
+            validate_length(r);
 
             if (k == 0) return Vector<T>(this->n);
 
@@ -1846,10 +1936,10 @@ class LinearCode : public Code<T> {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("ML decoding only available for codes over finite fields!");
         } else {
-            validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
             if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
 #endif
+            validate_length(r);
 
             if (k == 0) return Vector<T>(this->n);
 
@@ -1883,14 +1973,54 @@ class LinearCode : public Code<T> {
         }
     }
 
+    virtual Vector<T> dec_BD_Meggitt(const Vector<T>& r) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Meggitt BD decoding only available for codes over finite fields!");
+        } else {
+            validate_length(r);
+            if (!is_cyclic()) throw std::logic_error("Meggitt BD decoding requires a cyclic code!");
+#ifdef CECCO_ERASURE_SUPPORT
+            if (LinearCode<T>::erasures_present(r))
+                throw std::invalid_argument("Trying to correct erasures with a Meggitt BD decoder!");
+#endif
+            if (k == 0) return Vector<T>(this->n);
+
+            const size_t n = this->n;
+            const size_t redundancy = n - k;
+            const auto& gamma = get_gamma();
+            const T lead_inv = T(1) / gamma[redundancy];
+            const auto& table = get_Meggitt_table();
+
+            // Initial polynomial syndrome: s = r(x) mod gamma(x)
+            // x * r(x) mod (x^n - 1) = rotate_right(r, 1), so each LFSR step
+            // advances the syndrome to match the next right-cyclic shift of r.
+            Vector<T> s = pad_back(Vector<T>(Polynomial<T>(r) % gamma), redundancy);
+
+            if (s.is_zero()) return r;
+
+            for (size_t i = 0; i < n; ++i) {
+                const auto it = table.find(s.as_integer());
+                if (it != table.end())
+                    return r - rotate_left(it->second, i);
+                // LFSR: s <- x * s mod gamma
+                const T feedback = s[redundancy - 1] * lead_inv;
+                for (size_t j = redundancy - 1; j > 0; --j)
+                    s.set_component(j, s[j - 1] - feedback * gamma[j]);
+                s.set_component(0, -feedback * gamma[0]);
+            }
+
+            throw decoding_failure("Meggitt BD decoder failed!");
+        }
+    }
+
     virtual Vector<T> dec_Viterbi(const Vector<T>& r, const std::string& filename = "") const final {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Viterbi decoding only available for codes over finite fields!");
         } else {
-            validate_length(r);
 #ifdef CECCO_ERASURE_SUPPORT
             if (LinearCode<T>::erasures_present(r)) return dec_Viterbi_EE(r);
 #endif
+            validate_length(r);
             if (k == 0) return Vector<T>(this->n);
 
             const auto& Tr = get_minimal_trellis();
@@ -2150,6 +2280,8 @@ class LinearCode : public Code<T> {
     mutable std::once_flag tainted_flag;
     mutable std::optional<std::vector<bool>> tainted_burst;
     mutable std::once_flag tainted_burst_flag;
+    mutable std::optional<std::unordered_map<size_t, Vector<T>>> Meggitt_table;
+    mutable std::once_flag Meggitt_table_flag;
 #ifdef CECCO_ERASURE_SUPPORT
     mutable std::optional<std::vector<std::optional<LinearCode<T>>>> punctured_codes;
     mutable std::once_flag punctured_codes_flag;
@@ -2640,7 +2772,6 @@ class SimplexCode : public LinearCode<T> {
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
 #endif
         if constexpr (T::get_size() != 2) return LinearCode<T>::dec_BD(r);
-        this->validate_length(r);
 
         const auto c_est = dec_ML(r);
         if (dH(r, c_est) > this->get_tmax())
@@ -3215,8 +3346,6 @@ class GRSCode : public LinearCode<T> {
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
 #endif
-        this->validate_length(r);
-
         return dec_BD_EE(r);
     }
 
@@ -4426,6 +4555,7 @@ enum class Method {
     Viterbi_soft,
     BCJR,
     recursive,
+    BD_Meggitt,
 #ifdef CECCO_ERASURE_SUPPORT
     BD_EE,
     ML_EE,
@@ -4454,6 +4584,9 @@ class Dec {
                 break;
             case Method::recursive:
                 dec = [this](const Vector<T>& r) { return this->C.dec_recursive(r); };
+                break;
+            case Method::BD_Meggitt:
+                dec = [this](const Vector<T>& r) { return this->C.dec_BD_Meggitt(r); };
                 break;
             case Method::ML_soft:
             case Method::Viterbi_soft:

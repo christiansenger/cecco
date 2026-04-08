@@ -482,6 +482,7 @@ class Field : public details::Base {
      */
     bool is_zero() const noexcept = delete;
 
+#ifdef CECCO_ERASURE_SUPPORT
     /**
      * @brief Erases this element, i.e., sets it to an "outside of field" marker
      * @return Reference to this element after erasing
@@ -520,6 +521,7 @@ class Field : public details::Base {
      * @note Implementation required: Must be provided by derived field types
      */
     bool is_erased() const noexcept = delete;
+#endif
     /** @} */
 };
 
@@ -828,7 +830,9 @@ constexpr T operator^(T&& base, int exponent) noexcept {
 
 /** @} */
 
+#ifdef CECCO_ERASURE_SUPPORT
 const std::string ERASURE_MARKER = "X";
+#endif
 
 /**
  * @class Rationals
@@ -1049,6 +1053,7 @@ class Rationals : public details::Field<Rationals<T>> {
      */
     constexpr bool is_zero() const noexcept { return numerator == 0; }
 
+#ifdef CECCO_ERASURE_SUPPORT
     /**
      * @brief Erases this element, i.e., sets it to an "outside of field" marker
      * @return Reference to this element after erasing
@@ -1069,13 +1074,8 @@ class Rationals : public details::Field<Rationals<T>> {
      * @brief Checks whether this element is erased
      * @return true if this element is erased, false otherwise (meaning it actually is a field element)
      */
-    constexpr bool is_erased() const noexcept {
-#ifdef CECCO_ERASURE_SUPPORT
-        return denominator == 0;
-#else
-        return false;
+    constexpr bool is_erased() const noexcept { return denominator == 0; }
 #endif
-    }
 
     /**
      * @brief Get the numerator of this rational
@@ -1122,7 +1122,9 @@ constexpr Rationals<T>& Rationals<T>::operator=(int l) noexcept {
 
 template <SignedIntType T>
 constexpr Rationals<T> Rationals<T>::operator-() const& noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return Rationals().erase();
+#endif
     Rationals res(*this);
     res.numerator = -res.numerator;
     return res;
@@ -1130,14 +1132,18 @@ constexpr Rationals<T> Rationals<T>::operator-() const& noexcept {
 
 template <SignedIntType T>
 constexpr Rationals<T>& Rationals<T>::operator-() && noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return this->erase();
+#endif
     numerator = -numerator;
     return *this;
 }
 
 template <SignedIntType T>
 constexpr Rationals<T>& Rationals<T>::operator+=(const Rationals& rhs) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
+#endif
     auto tn = numerator * rhs.get_denominator() + denominator * rhs.get_numerator();
     auto td = denominator * rhs.get_denominator();
     numerator = tn;
@@ -1148,7 +1154,9 @@ constexpr Rationals<T>& Rationals<T>::operator+=(const Rationals& rhs) noexcept 
 
 template <SignedIntType T>
 constexpr Rationals<T>& Rationals<T>::operator-=(const Rationals& rhs) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
+#endif
     auto tn = numerator * rhs.get_denominator() - denominator * rhs.get_numerator();
     auto td = denominator * rhs.get_denominator();
     numerator = tn;
@@ -1159,7 +1167,9 @@ constexpr Rationals<T>& Rationals<T>::operator-=(const Rationals& rhs) noexcept 
 
 template <SignedIntType T>
 constexpr Rationals<T>& Rationals<T>::operator*=(const Rationals& rhs) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
+#endif
     auto tn = numerator * rhs.get_numerator();
     auto td = denominator * rhs.get_denominator();
     numerator = tn;
@@ -1170,7 +1180,9 @@ constexpr Rationals<T>& Rationals<T>::operator*=(const Rationals& rhs) noexcept 
 
 template <SignedIntType T>
 Rationals<T>& Rationals<T>::operator/=(const Rationals& rhs) {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
+#endif
     if (rhs.numerator == 0) throw std::invalid_argument("division by zero");
     auto tn = numerator * rhs.get_denominator();
     auto td = denominator * rhs.get_numerator();
@@ -1182,7 +1194,9 @@ Rationals<T>& Rationals<T>::operator/=(const Rationals& rhs) {
 
 template <SignedIntType T>
 Rationals<T>& Rationals<T>::randomize() noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
+#endif
     static std::uniform_int_distribution<int> dist(-100, 100);
     numerator = dist(gen());
     do {
@@ -1194,7 +1208,9 @@ Rationals<T>& Rationals<T>::randomize() noexcept {
 
 template <SignedIntType T>
 Rationals<T>& Rationals<T>::randomize_force_change() noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
+#endif
     static std::uniform_int_distribution<int> dist(-100, 100);
     T n;
     T d;
@@ -1231,6 +1247,7 @@ size_t Rationals<T>::get_additive_order() const noexcept {
     return 0;
 }
 
+#ifdef CECCO_ERASURE_SUPPORT
 template <SignedIntType T>
 constexpr Rationals<T>& Rationals<T>::erase() noexcept {
     denominator = 0;
@@ -1242,6 +1259,7 @@ constexpr Rationals<T>& Rationals<T>::unerase() noexcept {
     if (is_erased()) (*this) = 0;
     return *this;
 }
+#endif
 
 template <SignedIntType T>
 constexpr void Rationals<T>::simplify() noexcept {
@@ -1271,13 +1289,17 @@ constexpr void Rationals<T>::simplify() noexcept {
  */
 template <SignedIntType T>
 std::ostream& operator<<(std::ostream& os, const Rationals<T>& e) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (e.is_erased()) {
         os << ERASURE_MARKER;
     } else {
+#endif
         std::string temp = std::to_string(e.get_numerator());
         if (e.get_denominator() != 1) temp += "/" + std::to_string(e.get_denominator());
         os << temp;
+#ifdef CECCO_ERASURE_SUPPORT
     }
+#endif
     return os;
 }
 
@@ -2812,6 +2834,7 @@ class Fp : public details::Field<Fp<p>> {
      */
     constexpr bool is_zero() const noexcept { return label == 0; }
 
+#ifdef CECCO_ERASURE_SUPPORT
     /**
      * @brief Erases this element, i.e., sets it to an "outside of field" marker
      * @return Reference to this element after erasing
@@ -2832,13 +2855,8 @@ class Fp : public details::Field<Fp<p>> {
      * @brief Checks whether this element is erased
      * @return true if this element is erased, false otherwise (meaning it actually is a field element)
      */
-    constexpr bool is_erased() const noexcept {
-#ifdef CECCO_ERASURE_SUPPORT
-        return label == std::numeric_limits<label_t>::max();
-#else
-        return false;
+    constexpr bool is_erased() const noexcept { return label == std::numeric_limits<label_t>::max(); }
 #endif
-    }
 
     /**
      * @brief Compile-time synchronization point for staged template instantiation
@@ -3039,7 +3057,9 @@ Fp<p>& Fp<p>::operator=(const Iso<MAIN, OTHERS...>& rhs) {
 
 template <uint16_t p>
 constexpr Fp<p> Fp<p>::operator-() const& noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return Fp().erase();
+#endif
     Fp res(*this);
     if (res.label != 0) {
 #ifndef CECCO_USE_LUTS_FOR_FP
@@ -3054,7 +3074,9 @@ constexpr Fp<p> Fp<p>::operator-() const& noexcept {
 
 template <uint16_t p>
 constexpr Fp<p>& Fp<p>::operator-() && noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return this->erase();
+#endif
     if (label != 0) {
 #ifndef CECCO_USE_LUTS_FOR_FP
         label = -(int)label + (int)p;
@@ -3067,7 +3089,9 @@ constexpr Fp<p>& Fp<p>::operator-() && noexcept {
 
 template <uint16_t p>
 constexpr Fp<p>& Fp<p>::operator+=(const Fp& rhs) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
+#endif
 #ifndef CECCO_USE_LUTS_FOR_FP
     int temp = label + rhs.get_label();
     if (temp < p)
@@ -3082,7 +3106,9 @@ constexpr Fp<p>& Fp<p>::operator+=(const Fp& rhs) noexcept {
 
 template <uint16_t p>
 constexpr Fp<p>& Fp<p>::operator-=(const Fp& rhs) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
+#endif
 #ifndef CECCO_USE_LUTS_FOR_FP
     int temp = (int)label - (int)rhs.get_label();
     if (temp >= 0)
@@ -3097,7 +3123,9 @@ constexpr Fp<p>& Fp<p>::operator-=(const Fp& rhs) noexcept {
 
 template <uint16_t p>
 constexpr Fp<p>& Fp<p>::operator*=(const Fp& rhs) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
+#endif
 #ifndef CECCO_USE_LUTS_FOR_FP
     int temp = label * rhs.get_label();
     if (temp < p)
@@ -3112,7 +3140,9 @@ constexpr Fp<p>& Fp<p>::operator*=(const Fp& rhs) noexcept {
 
 template <uint16_t p>
 constexpr Fp<p>& Fp<p>::operator*=(int s) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return *this;
+#endif
     s %= p;
     Fp res = daa<Fp>(*this, s);
     *this = std::move(res);
@@ -3121,7 +3151,9 @@ constexpr Fp<p>& Fp<p>::operator*=(int s) noexcept {
 
 template <uint16_t p>
 Fp<p>& Fp<p>::operator/=(const Fp& rhs) {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
+#endif
     if (rhs.label == 0) throw std::invalid_argument("trying to divide by zero");
 #ifndef CECCO_USE_LUTS_FOR_FP
     *this *= Fp(modinv<p, int>(rhs.get_label()));
@@ -3133,7 +3165,9 @@ Fp<p>& Fp<p>::operator/=(const Fp& rhs) {
 
 template <uint16_t p>
 Fp<p>& Fp<p>::randomize() noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
+#endif
     static std::uniform_int_distribution<int> dist(0, p - 1);
 #ifndef CECCO_USE_LUTS_FOR_FP
     int temp = label + dist(gen());
@@ -3149,7 +3183,9 @@ Fp<p>& Fp<p>::randomize() noexcept {
 
 template <uint16_t p>
 Fp<p>& Fp<p>::randomize_force_change() noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
+#endif
     static std::uniform_int_distribution<int> dist(1, p - 1);
 #ifndef CECCO_USE_LUTS_FOR_FP
     int temp = label + dist(gen());
@@ -3165,7 +3201,9 @@ Fp<p>& Fp<p>::randomize_force_change() noexcept {
 
 template <uint16_t p>
 size_t Fp<p>::get_multiplicative_order() const {
+#ifdef CECCO_ERASURE_SUPPORT
     if (is_erased()) throw std::invalid_argument("trying to calculate multiplicative order of erased element");
+#endif
     if (label == 0) throw std::invalid_argument("trying to calculate multiplicative order of additive neutral element");
 #ifndef CECCO_USE_LUTS_FOR_FP
     return details::calculate_multiplicative_order(*this);
@@ -3176,7 +3214,9 @@ size_t Fp<p>::get_multiplicative_order() const {
 
 template <uint16_t p>
 size_t Fp<p>::get_additive_order() const {
+#ifdef CECCO_ERASURE_SUPPORT
     if (is_erased()) throw std::invalid_argument("trying to calculate additive order of erased element");
+#endif
     if (label == 0) return 1;
     return p;
 }
@@ -3208,6 +3248,7 @@ void Fp<p>::show_tables() noexcept {
 #endif
 }
 
+#ifdef CECCO_ERASURE_SUPPORT
 template <uint16_t p>
 constexpr Fp<p>& Fp<p>::erase() {
     label = std::numeric_limits<label_t>::max();
@@ -3219,6 +3260,7 @@ constexpr Fp<p>& Fp<p>::unerase() {
     if (is_erased()) (*this) = 0;
     return *this;
 }
+#endif
 
 /**
  * @brief Output stream operator for prime field elements
@@ -3231,10 +3273,13 @@ constexpr Fp<p>& Fp<p>::unerase() {
  */
 template <uint16_t p>
 std::ostream& operator<<(std::ostream& os, const Fp<p>& e) noexcept {
-    if (e.is_erased())
+#ifdef CECCO_ERASURE_SUPPORT
+    if (e.is_erased()) {
         os << ERASURE_MARKER;
-    else
-        os << (int)e.get_label();
+        return os;
+    }
+#endif
+    os << (int)e.get_label();
     return os;
 }
 
@@ -3790,6 +3835,7 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      */
     constexpr bool is_zero() const noexcept { return label == 0; }
 
+#ifdef CECCO_ERASURE_SUPPORT
     /**
      * @brief Erases this element, i.e., sets it to an "outside of field" marker
      * @return Reference to this element after erasing
@@ -3810,13 +3856,8 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      * @brief Checks whether this element is erased
      * @return true if this element is erased, false otherwise (meaning it actually is a field element)
      */
-    constexpr bool is_erased() const noexcept {
-#ifdef CECCO_ERASURE_SUPPORT
-        return label == std::numeric_limits<label_t>::max();
-#else
-        return false;
+    constexpr bool is_erased() const noexcept { return label == std::numeric_limits<label_t>::max(); }
 #endif
-    }
 
     /**
      * @brief Converts extension field element to vector representation over proper subfield
@@ -4083,6 +4124,7 @@ Isomorphism<Ext<B, modulus, mode>, T> Ext<B, modulus, mode>::isomorphism_to() {
     return Isomorphism<Ext<B, modulus, mode>, T>();
 }
 
+#ifdef CECCO_ERASURE_SUPPORT
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::erase() noexcept {
     label = std::numeric_limits<label_t>::max();
@@ -4094,6 +4136,7 @@ constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::unerase() noexcept {
     if (is_erased()) (*this) = 0;
     return *this;
 }
+#endif
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 template <FiniteFieldType S, MOD ext_modulus, LutMode ext_mode>
@@ -4142,17 +4185,16 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
             throw std::invalid_argument(
                 "trying to construct extension field element using base field vector of wrong length");
 
+#ifdef CECCO_ERASURE_SUPPORT
         bool erased = false;
         for (size_t i = 0; i < v.get_n(); ++i)
             if (v[i].is_erased()) {
                 erased = true;
                 break;
             }
-
-        if (erased)
-            this->erase();
-        else
-            label = v.as_integer();
+        if (erased) { this->erase(); return; }
+#endif
+        label = v.as_integer();
 
     } else {
         static_assert(SubfieldOf<Ext<B, modulus, mode>, T>,
@@ -4162,16 +4204,16 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
             throw std::invalid_argument(
                 "trying to construct extension field element using subfield vector of wrong length");
 
+#ifdef CECCO_ERASURE_SUPPORT
         bool erased = false;
         for (size_t i = 0; i < v.get_n(); ++i)
             if (v[i].is_erased()) {
                 erased = true;
                 break;
             }
-
-        if (erased) {
-            this->erase();
-        } else {
+        if (erased) { this->erase(); return; }
+#endif
+        {
             Vector<B> intermediate(get_m());
             for (uint8_t i = 0; i < get_m(); ++i) {
                 Vector<T> sub(B::get_m());
@@ -4333,7 +4375,9 @@ Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator=(const Iso<MAIN, OTHERS..
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 constexpr Ext<B, modulus, mode> Ext<B, modulus, mode>::operator-() const& noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return Ext().erase();
+#endif
     Ext res(*this);
     if (res.label != 0) res.label = lut_neg()(res.label);
     return res;
@@ -4341,35 +4385,45 @@ constexpr Ext<B, modulus, mode> Ext<B, modulus, mode>::operator-() const& noexce
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator-() && noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return this->erase();
+#endif
     if (label != 0) label = lut_neg()(label);
     return *this;
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator+=(const Ext& rhs) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
+#endif
     label = lut_add()(label, rhs.get_label());
     return *this;
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator-=(const Ext& rhs) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
+#endif
     label = lut_add()(label, lut_neg()(rhs.get_label()));
     return *this;
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator*=(const Ext& rhs) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
+#endif
     label = lut_mul()(label, rhs.get_label());
     return *this;
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator*=(int s) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return *this;
+#endif
     if constexpr (get_characteristic() != 0) s %= static_cast<int>(get_characteristic());
     Ext res = daa<Ext>(*this, s);
     *this = std::move(res);
@@ -4378,7 +4432,9 @@ constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator*=(int s) noexce
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator/=(const Ext& rhs) {
+#ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
+#endif
     if (rhs.label == 0) throw std::invalid_argument("trying to divide by zero");
     label = lut_mul()(label, lut_inv()(rhs.get_label()));
     return *this;
@@ -4386,7 +4442,9 @@ Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator/=(const Ext& rhs) {
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize() noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
+#endif
     static std::uniform_int_distribution<label_t> dist(0, Q - 1);
     label = dist(gen());
     return *this;
@@ -4394,7 +4452,9 @@ Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize() noexcept {
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize_force_change() noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
+#endif
     static std::uniform_int_distribution<label_t> dist(1, Q - 1);
     label = lut_add()(label, dist(gen()));
     return *this;
@@ -4402,14 +4462,18 @@ Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize_force_change() noexcept 
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 size_t Ext<B, modulus, mode>::get_multiplicative_order() const {
+#ifdef CECCO_ERASURE_SUPPORT
     if (is_erased()) throw std::invalid_argument("trying to calculate multiplicative order of erased element");
+#endif
     if (label == 0) throw std::invalid_argument("calculation of multiplicative order of additive neutral element");
     return lut_mul_ord()(label);
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 size_t Ext<B, modulus, mode>::get_additive_order() const {
+#ifdef CECCO_ERASURE_SUPPORT
     if (is_erased()) throw std::invalid_argument("trying to calculate additive order of erased element");
+#endif
     if (label == 0) return 1;
     return get_characteristic();
 }
@@ -4419,9 +4483,10 @@ template <FiniteFieldType S>
 Polynomial<S> Ext<B, modulus, mode>::get_minimal_polynomial() const
     requires SubfieldOf<Ext<B, modulus, mode>, S>
 {
-    if (is_erased()) {
+#ifdef CECCO_ERASURE_SUPPORT
+    if (is_erased())
         throw std::invalid_argument("trying to compute minimal polynomial of erased element");
-    }
+#endif
 
     Polynomial<Ext> res = {1};
     size_t i = 0;
@@ -4511,14 +4576,16 @@ template <FiniteFieldType T>
 Vector<T> Ext<B, modulus, mode>::as_vector() const noexcept {
     if constexpr (std::is_same_v<B, T>) {
         Vector<T> res(m);
+#ifdef CECCO_ERASURE_SUPPORT
         if (is_erased()) {
             std::vector<size_t> indices(m);
             std::iota(indices.begin(), indices.end(), 0);
             res.erase_components(indices);
-        } else {
-            const auto coeffs = lut_coeff().values[label];
-            for (uint8_t i = 0; i < m; ++i) res.set_component(i, coeffs[i]);
+            return res;
         }
+#endif
+        const auto coeffs = lut_coeff().values[label];
+        for (uint8_t i = 0; i < m; ++i) res.set_component(i, coeffs[i]);
         return res;
     } else {
         static_assert(SubfieldOf<Ext<B, modulus, mode>, T>,
@@ -4589,10 +4656,13 @@ void Ext<B, modulus, mode>::show_tables() noexcept {
  */
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 std::ostream& operator<<(std::ostream& os, const Ext<B, modulus, mode>& e) noexcept {
-    if (e.is_erased())
+#ifdef CECCO_ERASURE_SUPPORT
+    if (e.is_erased()) {
         os << ERASURE_MARKER;
-    else
-        os << (int)e.get_label();
+        return os;
+    }
+#endif
+    os << (int)e.get_label();
     /*
     os << " [";
     for (size_t i = 0; i < Fq<p, modulus>::get_m(); ++i) {
@@ -4988,6 +5058,7 @@ class Iso : public details::Base {
 
     constexpr auto get_label() const noexcept { return main_.get_label(); }
 
+#ifdef CECCO_ERASURE_SUPPORT
     /**
      * @brief Erases this element, i.e., sets it to an "outside of field" marker
      * @return Reference to this element after erasing
@@ -5009,6 +5080,7 @@ class Iso : public details::Base {
      * @return true if this element is erased, false otherwise (meaning it actually is a field element)
      */
     constexpr bool is_erased() const noexcept { return main_.is_erased(); }
+#endif
 
     // Assignment operators
     constexpr Iso& operator=(const Iso& other);
@@ -5613,6 +5685,7 @@ Vector<T> Iso<MAIN, OTHERS...>::as_vector() const noexcept
     }
 }
 
+#ifdef CECCO_ERASURE_SUPPORT
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::erase() noexcept {
     main_.erase();
@@ -5624,6 +5697,7 @@ constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::unerase() noexcept {
     main_.unerase();
     return *this;
 }
+#endif
 
 }  // namespace CECCO
 
