@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CECCO: Basic Usage</title>
+
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  >
+  <link href="../site.css" rel="stylesheet">
+</head>
+<body>
+  <main class="container py-5">
+    <div class="row justify-content-center">
+      <div class="col-lg-10 col-xl-8">
+        <div class="page-logo-wrap">
+  <img src="../cecco.png" alt="Cecco logo" class="page-logo">
+</div>
+<h1 class="display-5 fw-semibold mb-3">CECCO: Basic Usage</h1>
+
+        <p class="mt-4">
+        CECCO is a header-only library; no installation or compilation is required. Simply include the <code>cecco.hpp</code> header, make sure the compiler can find it using the <code>-I</code> flag, and set the C++ standard with <code>-std=c++20</code>. For <code>clang++</code> the compile command could be as easy as <code>clang++ -Icecco/ -std=c++20 code.cpp</code> assuming that you did <code>git clone https://github.com/christiansenger/cecco.git</code>.
+        </p>
+
+
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 4&ndash;4</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cecco.hpp&quot;</span>
+</pre></div>
+
+</div>
+
+        <p class="mt-4">
+        It often makes sense to bring the CECCO namespace into an appropriate scope. File scope is usually the most convenient:
+        </p>
+
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 5&ndash;5</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">CECCO</span><span class="p">;</span>
+</pre></div>
+
+</div>
+        
+        <p class="mt-4">
+        CECCO has a couple of global flags that are set through macros (before <code>#include "cecco.hpp"</code>). Erasure support is enabled with
+        </p>
+
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 3&ndash;3</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="cp">#define CECCO_ERASURE_SUPPORT</span>
+</pre></div>
+
+</div>
+        
+        <p class="mt-4">
+        Erasure support allows each field element to be set to an out-of-field value represented by an <code>X</code>. Erasure support has a negative effect on performance, so it should only be enabled when necessary.
+        </p>
+        
+        <p class="lead text-secondary mb-4">
+        The following global flags can typically be left unchanged (i.e., undefined).
+        </p>
+
+        <p class="mt-4">
+        Prime fields operations, such as those of the binary field, are computed efficiently on the fly using modular arithmetic. In rare cases, it may make sense to use lookup tables instead, which can be achieved with
+        </p>
+        
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 2&ndash;2</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="cp">#define CECCO_USE_LUTS_FOR_FP</span>
+</pre></div>
+
+</div>
+        
+        <p class="mt-4">
+        It can also make sense to compress larger lookup tables (for extension fields or, if the <code>CECCO_USE_LUTS_FOR_FP</code> macro is defined, also for prime fields). The threshold for when compression is performed is set with
+        </p>
+        
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 1&ndash;1</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="cp">#define CECCO_COMPRESS_LUTS_FROM_Q 128</span>
+</pre></div>
+
+</div>
+
+        <p class="mt-4">
+        The default is 65, meaning that fields with 64 or fewer elements use uncompressed lookup tables, while larger fields use compressed ones.
+        </p>
+
+        <p class="lead text-secondary mb-4">
+        A complete and compilable demo is shown below:
+        </p>
+        
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    
+  </div>
+  <div class="highlight"><pre><span></span><span class="cp">#define CECCO_COMPRESS_LUTS_FROM_Q 128</span>
+<span class="cp">#define CECCO_USE_LUTS_FOR_FP</span>
+<span class="cp">#define CECCO_ERASURE_SUPPORT</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cecco.hpp&quot;</span>
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">CECCO</span><span class="p">;</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span>
+<span class="w">    </span><span class="c1">// use CECCO</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+
+</div>
+      </div>
+    </div>
+  <footer class="page-footer text-end mt-5">
+  <small>Copyright &copy; 2026, Christian Senger &lt;<a href="mailto:senger@inue.uni-stuttgart.de">senger@inue.uni-stuttgart.de</a>&gt;</small>
+</footer>
+</main>
+</body>
+</html>
