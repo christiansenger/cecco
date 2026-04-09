@@ -7,7 +7,7 @@ A growing collecting of demos and examples is available on the <a href="https://
 
 Detailed Doxygen documentation is available <a href="https://christiansenger.github.io/cecco/">here</a>.
 
-In case you want to use CECCO for your research: Please cite the following DOI.
+In case you want to use CECCO for your research or teaching: Please cite the following DOI (a BibTeX exporter is behind the DOI link, on the lower right).
 
 <a href="https://doi.org/10.5281/zenodo.15685869"><img src="https://zenodo.org/badge/1003774077.svg" alt="DOI"></a>
 
