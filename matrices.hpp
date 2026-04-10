@@ -1796,13 +1796,12 @@ Matrix<T>::Matrix(std::initializer_list<std::initializer_list<T>> l) : m(l.size(
     if (n == 0) return;
     data.resize(m * n);
 
-    size_t i = 0;                    
-      for (const auto& row : l) {
-          size_t j = 0;
-          for (const auto& val : row)
-              set_component(i, j++, val);
-          ++i;
-      }
+    size_t i = 0;
+    for (const auto& row : l) {
+        size_t j = 0;
+        for (const auto& val : row) set_component(i, j++, val);
+        ++i;
+    }
 }
 
 template <ComponentType T>
@@ -1827,8 +1826,7 @@ constexpr Matrix<T>::Matrix(const Matrix<S>& other)
                        [](const S& elem) { return T(elem); });  // Uses enhanced cross-field constructors
     } else {
         for (size_t i = 0; i < m; ++i)
-            for (size_t j = 0; j < n; ++j)
-                data[i * n + j] = T(other(i, j));  // Uses enhanced cross-field constructors
+            for (size_t j = 0; j < n; ++j) data[i * n + j] = T(other(i, j));  // Uses enhanced cross-field constructors
     }
     cache.invalidate();
 }
@@ -1866,8 +1864,8 @@ Matrix<T>::Matrix(const std::string& filename)
         std::unordered_map<uint32_t, uint8_t> m;
         m.reserve(64);
         for (uint8_t a = 0; a < 64; ++a) {
-            const uint32_t key =
-                (uint32_t(details::colormap[a][0]) << 16) | (uint32_t(details::colormap[a][1]) << 8) | uint32_t(details::colormap[a][2]);
+            const uint32_t key = (uint32_t(details::colormap[a][0]) << 16) | (uint32_t(details::colormap[a][1]) << 8) |
+                                 uint32_t(details::colormap[a][2]);
             m.emplace(key, a);
         }
         return m;
@@ -1950,8 +1948,7 @@ constexpr Matrix<T> Matrix<T>::operator-() const& noexcept {
     } else if (type == details::Zero) {
         /* no-op */
     } else if (type == details::Diagonal || type == details::Identity) {
-        for (size_t mu = 0; mu < m; ++mu)
-            res.data[mu * n + mu] = -res.data[mu * n + mu];
+        for (size_t mu = 0; mu < m; ++mu) res.data[mu * n + mu] = -res.data[mu * n + mu];
         if constexpr (FiniteFieldType<T>) {
             if (T::get_characteristic() != 2 && type == details::Identity) res.type = details::Diagonal;
         } else {
@@ -1973,8 +1970,7 @@ constexpr Matrix<T> Matrix<T>::operator-() && noexcept {
     } else if (type == details::Zero) {
         /* no-op */
     } else if (type == details::Diagonal || type == details::Identity) {
-        for (size_t mu = 0; mu < m; ++mu)
-            data[mu * n + mu] = -data[mu * n + mu];
+        for (size_t mu = 0; mu < m; ++mu) data[mu * n + mu] = -data[mu * n + mu];
         if constexpr (FiniteFieldType<T>) {
             if (T::get_characteristic() != 2 && type == details::Identity) type = details::Diagonal;
         } else {
@@ -1999,8 +1995,7 @@ Matrix<T>& Matrix<T>::operator+=(const Matrix& rhs) {
                (type == details::Identity && rhs.type == details::Identity) ||
                (type == details::Diagonal && rhs.type == details::Identity) ||
                (type == details::Identity && rhs.type == details::Diagonal)) {
-        for (size_t mu = 0; mu < m; ++mu)
-            data[mu * n + mu] += rhs.data[mu * n + mu];
+        for (size_t mu = 0; mu < m; ++mu) data[mu * n + mu] += rhs.data[mu * n + mu];
         if (type == details::Identity) type = details::Diagonal;
     } else {
         if (!transposed && !rhs.transposed) {
@@ -2009,8 +2004,7 @@ Matrix<T>& Matrix<T>::operator+=(const Matrix& rhs) {
                 type = details::Generic;
         } else {
             for (size_t mu = 0; mu < m; ++mu)
-                for (size_t nu = 0; nu < n; ++nu)
-                    set_component(mu, nu, (*this)(mu, nu) + rhs(mu, nu));
+                for (size_t nu = 0; nu < n; ++nu) set_component(mu, nu, (*this)(mu, nu) + rhs(mu, nu));
         }
     }
     if (std::all_of(data.cbegin(), data.cend(), [](const T& x) { return x == T(0); })) {
@@ -2044,21 +2038,18 @@ Matrix<T>& Matrix<T>::operator*=(const Matrix& rhs) {
     } else if (rhs.type == details::Identity) {
         /* no-op */
     } else if (type == details::Diagonal && rhs.type == details::Diagonal) {
-        for (size_t mu = 0; mu < m; ++mu)
-            data[mu * n + mu] *= rhs.data[mu * n + mu];
+        for (size_t mu = 0; mu < m; ++mu) data[mu * n + mu] *= rhs.data[mu * n + mu];
     } else if (type == details::Diagonal) {
         auto res = rhs;
         for (size_t mu = 0; mu < m; ++mu) {
             auto s = (*this)(mu, mu);
-            for (size_t nu = 0; nu < rhs.n; ++nu)
-                res.set_component(mu, nu, res(mu, nu) * s);
+            for (size_t nu = 0; nu < rhs.n; ++nu) res.set_component(mu, nu, res(mu, nu) * s);
         }
         *this = std::move(res);
     } else if (rhs.type == details::Diagonal) {
         for (size_t nu = 0; nu < n; ++nu) {
             const auto& s = rhs(nu, nu);
-            for (size_t mu = 0; mu < m; ++mu)
-                set_component(mu, nu, (*this)(mu, nu) * s);
+            for (size_t mu = 0; mu < m; ++mu) set_component(mu, nu, (*this)(mu, nu) * s);
         }
     } else {
         const size_t M = get_m();
@@ -2103,8 +2094,7 @@ constexpr Matrix<T>& Matrix<T>::operator*=(const T& s) {
         std::ranges::for_each(data, [&s](T& x) { x *= s; });
         if (type == details::Vandermonde) type = details::Generic;
     } else if (type == details::Diagonal || type == details::Identity) {
-        for (size_t mu = 0; mu < m; ++mu)
-            data[mu * n + mu] *= s;
+        for (size_t mu = 0; mu < m; ++mu) data[mu * n + mu] *= s;
         if (type == details::Identity) type = details::Diagonal;
     }
     return *this;
@@ -2168,8 +2158,7 @@ template <ComponentType T>
 Vector<T> Matrix<T>::diagonal() const {
     if (m != n) throw std::invalid_argument("trying to extract diagonal of non-square matrix");
     Vector<T> res(n);
-    for (size_t i = 0; i < n; ++i)
-        res.data[i] = (*this)(i, i);
+    for (size_t i = 0; i < n; ++i) res.data[i] = (*this)(i, i);
     return res;
 }
 
@@ -2227,8 +2216,7 @@ Polynomial<T> Matrix<T>::characteristic_polynomial() const
 
         // extract polynomial from solution/column vector
         Polynomial<T> res;
-        for (size_t i = 0; i <= m; ++i)
-            res.set_coefficient(m - i, P(i, 0));
+        for (size_t i = 0; i <= m; ++i) res.set_coefficient(m - i, P(i, 0));
 
         // for odd n: negate characteristic polynomial *ToDo: verify*
         if (m % 2) res *= T(-1);
@@ -2239,8 +2227,7 @@ Polynomial<T> Matrix<T>::characteristic_polynomial() const
         return res ^ m;
     } else if (type == details::Diagonal) {
         Polynomial<T> res({1});
-        for (size_t mu = 0; mu < m; ++mu)
-            res *= Polynomial<T>({(*this)(mu, mu), -1});
+        for (size_t mu = 0; mu < m; ++mu) res *= Polynomial<T>({(*this)(mu, mu), -1});
         return res;
     } else if (type == details::Identity) {
         Polynomial<T> res({-1, 1});
@@ -2303,8 +2290,7 @@ T Matrix<T>::determinant() const
     } else if (type == details::Vandermonde) {
         T acc(1);
         for (size_t mu = 1; mu < m; ++mu)
-            for (size_t i = 0; i < mu; ++i)
-                acc *= (*this)(1, mu) - (*this)(1, i);
+            for (size_t i = 0; i < mu; ++i) acc *= (*this)(1, mu) - (*this)(1, i);
         return acc;
     } else if (type == details::Zero) {
         return T(0);
@@ -2330,8 +2316,7 @@ std::vector<T> Matrix<T>::eigenvalues() const
     std::vector<T> res;
     for (size_t j = 0; j < T::get_size(); ++j) {
         T element = T(j);
-        if (p(element) == T(0))
-            res.push_back(element);
+        if (p(element) == T(0)) res.push_back(element);
     }
     return res;
 }
@@ -2431,8 +2416,7 @@ Vector<T> Matrix<T>::get_row(size_t i) const {
     if (!transposed) {
         std::copy(data.begin() + i * n, data.begin() + (i + 1) * n, res.data.begin());
     } else {
-        for (size_t j = 0; j < n; ++j)
-            res.data[j] = (*this)(i, j);
+        for (size_t j = 0; j < n; ++j) res.data[j] = (*this)(i, j);
     }
     return res;
 }
@@ -2444,8 +2428,7 @@ Vector<T> Matrix<T>::get_col(size_t j) const {
     if (transposed) {
         std::copy(data.begin() + j * m, data.begin() + (j + 1) * m, res.data.begin());
     } else {
-        for (size_t i = 0; i < m; ++i)
-            res.data[i] = (*this)(i, j);
+        for (size_t i = 0; i < m; ++i) res.data[i] = (*this)(i, j);
     }
     return res;
 }
@@ -2465,8 +2448,7 @@ Matrix<T> Matrix<T>::get_submatrix(size_t i, size_t j, size_t h, size_t w) const
             res.type = details::Generic;
         } else {
             for (size_t mu = 0; mu < h; ++mu)
-                for (size_t nu = 0; nu < w; ++nu)
-                    res.set_component(mu, nu, (*this)(i + mu, j + nu));
+                for (size_t nu = 0; nu < w; ++nu) res.set_component(mu, nu, (*this)(i + mu, j + nu));
         }
         if (type == details::Vandermonde && i == 0) {
             res.type = details::Vandermonde;
@@ -2478,8 +2460,7 @@ Matrix<T> Matrix<T>::get_submatrix(size_t i, size_t j, size_t h, size_t w) const
     } else if (type == details::Diagonal || type == details::Identity) {
         for (size_t mu = 0; mu < h; ++mu)
             for (size_t nu = 0; nu < w; ++nu)
-                if (i + mu == j + nu)
-                    res.set_component(mu, nu, (*this)(i + mu, j + nu));
+                if (i + mu == j + nu) res.set_component(mu, nu, (*this)(i + mu, j + nu));
         if (i == j) {
             if (type == details::Diagonal) {
                 res.type = details::Diagonal;
@@ -2503,8 +2484,7 @@ Matrix<T>& Matrix<T>::set_submatrix(size_t i, size_t j, const Matrix& N) {
             std::copy(N.data.begin() + mu * N.n, N.data.begin() + (mu + 1) * N.n, data.begin() + (i + mu) * n + j);
     } else {
         for (size_t mu = 0; mu < N.m; ++mu)
-            for (size_t nu = 0; nu < N.n; ++nu)
-                set_component(i + mu, j + nu, N(mu, nu));
+            for (size_t nu = 0; nu < N.n; ++nu) set_component(i + mu, j + nu, N(mu, nu));
     }
     type = details::Generic;
     cache.invalidate();
@@ -2575,8 +2555,7 @@ Matrix<T>& Matrix<T>::Kronecker_product(const Matrix& other) {
             auto d1 = diagonal();
             auto d2 = other.diagonal();
             Vector<T> d(m * other.m);
-            for (size_t idx = 0; idx < m * other.m; ++idx)
-                d.set_component(idx, d1[idx / other.m] * d2[idx % other.m]);
+            for (size_t idx = 0; idx < m * other.m; ++idx) d.set_component(idx, d1[idx / other.m] * d2[idx % other.m]);
             *this = DiagonalMatrix<T>(std::move(d));
         } else {
             Matrix temp(m * other.m, n * other.n);
@@ -2591,8 +2570,7 @@ Matrix<T>& Matrix<T>::Kronecker_product(const Matrix& other) {
     } else {
         Matrix temp(m * other.m, n * other.n);
         for (size_t mu = 0; mu < m; ++mu)
-            for (size_t nu = 0; nu < n; ++nu)
-                temp.set_submatrix(mu * other.m, nu * other.n, (*this)(mu, nu) * other);
+            for (size_t nu = 0; nu < n; ++nu) temp.set_submatrix(mu * other.m, nu * other.n, (*this)(mu, nu) * other);
         *this = std::move(temp);
     }
 
@@ -2638,8 +2616,7 @@ Matrix<T>& Matrix<T>::scale_row(const T& s, size_t i) {
             if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
 
         } else {
-            for (size_t nu = 0; nu < n; ++nu)
-                data[i + nu * m] *= s;
+            for (size_t nu = 0; nu < n; ++nu) data[i + nu * m] *= s;
             if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
         }
     } else if (type == details::Zero) {
@@ -2671,8 +2648,7 @@ Matrix<T>& Matrix<T>::add_scaled_row(const T& s, size_t i, size_t j) {
                            [&s](const T& target, const T& source) { return target + s * source; });
             if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
         } else {
-            for (size_t nu = 0; nu < n; ++nu)
-                data[j + nu * m] += s * data[i + nu * m];
+            for (size_t nu = 0; nu < n; ++nu) data[j + nu * m] += s * data[i + nu * m];
             if (type == details::Vandermonde || type == details::Toeplitz) type = details::Generic;
         }
     } else if (type == details::Zero) {
@@ -2884,8 +2860,7 @@ Matrix<T>& Matrix<T>::reverse_columns() {
     if (type != details::Zero) {
         if (!transposed) {
             // For non-transposed matrices, reverse elements within each row
-            for (size_t mu = 0; mu < m; ++mu)
-                std::reverse(data.begin() + mu * n, data.begin() + (mu + 1) * n);
+            for (size_t mu = 0; mu < m; ++mu) std::reverse(data.begin() + mu * n, data.begin() + (mu + 1) * n);
         } else {
             auto rank_backup = cache.template get<Rank>();
             for (size_t mu = 0; mu < m; ++mu)
@@ -3090,8 +3065,7 @@ Matrix<T>& Matrix<T>::invert()
                 Lagrange_polynomials[i] *= Polynomial<T>({-(*this)(1, k), 1}) / ((*this)(1, i) - (*this)(1, k));
             }
         for (size_t i = 0; i < m; ++i)
-            for (size_t j = 0; j < m; ++j)
-                set_component(i, j, Lagrange_polynomials[i][j]);
+            for (size_t j = 0; j < m; ++j) set_component(i, j, Lagrange_polynomials[i][j]);
     } else if (type == details::Zero) {
         throw std::invalid_argument("trying to invert a non-invertible matrix/a zero matrix");
     } else if (type == details::Diagonal) {
@@ -4054,8 +4028,7 @@ constexpr Matrix<T> ZeroMatrix(size_t m, size_t n) {
 template <ComponentType T>
 constexpr Matrix<T> IdentityMatrix(size_t m) {
     auto res = Matrix<T>(m, m);
-    for (size_t i = 0; i < m; ++i)
-        res.set_component(i, i, T(1));
+    for (size_t i = 0; i < m; ++i) res.set_component(i, i, T(1));
     res.type = details::Identity;
     return res;
 }
@@ -4072,8 +4045,7 @@ constexpr Matrix<T> PermutationMatrix(const std::vector<size_t>& perm) {
         seen[perm[i]] = true;
     }
 
-    for (size_t i = 0; i < m; ++i)
-        res.set_component(i, perm[i], T(1));
+    for (size_t i = 0; i < m; ++i) res.set_component(i, perm[i], T(1));
 
     return res;
 }
@@ -4124,8 +4096,7 @@ template <ComponentType T>
 constexpr Matrix<T> DiagonalMatrix(const Vector<T>& v) {
     const size_t m = v.get_n();
     Matrix<T> res(m, m);
-    for (size_t i = 0; i < m; ++i)
-        res.set_component(i, i, v[i]);
+    for (size_t i = 0; i < m; ++i) res.set_component(i, i, v[i]);
     res.type = details::Diagonal;
     return res;
 }
@@ -4160,17 +4131,14 @@ constexpr Matrix<T> ToeplitzMatrix(const Vector<T>& v, size_t m, size_t n) {
     Matrix<T> res(m, n);
 
     // Fill first column: v[0] to v[m-1] in reverse order
-    for (size_t i = 0; i < m; ++i)
-        res.set_component(m - 1 - i, 0, v[i]);
+    for (size_t i = 0; i < m; ++i) res.set_component(m - 1 - i, 0, v[i]);
 
     // Fill first row: v[m-1] to v[m+n-2]
-    for (size_t j = 1; j < n; ++j)
-        res.set_component(0, j, v[m - 1 + j]);
+    for (size_t j = 1; j < n; ++j) res.set_component(0, j, v[m - 1 + j]);
 
     // Fill remaining elements using diagonal copy pattern
     for (size_t i = 1; i < m; ++i)
-        for (size_t j = 1; j < n; ++j)
-            res.set_component(i, j, res(i - 1, j - 1));
+        for (size_t j = 1; j < n; ++j) res.set_component(i, j, res(i - 1, j - 1));
     res.type = details::Toeplitz;
     return res;
 }
@@ -4238,18 +4206,15 @@ constexpr Matrix<T> VandermondeMatrix(const Vector<T>& v, size_t m) {
 
     // First row: all ones
 
-        for (size_t i = 0; i < n; ++i)
-            res.set_component(0, i, T(1));
+    for (size_t i = 0; i < n; ++i) res.set_component(0, i, T(1));
 
     if (m > 1) {
         // Second row: copy from vector v
-            for (size_t i = 0; i < n; ++i)
-                res.set_component(1, i, v[i]);
+        for (size_t i = 0; i < n; ++i) res.set_component(1, i, v[i]);
 
         // Remaining rows: compute powers
         for (size_t j = 2; j < m; ++j)
-            for (size_t i = 0; i < n; ++i)
-                res.set_component(j, i, res(j - 1, i) * v[i]);
+            for (size_t i = 0; i < n; ++i) res.set_component(j, i, res(j - 1, i) * v[i]);
     }
     res.type = details::Vandermonde;
     return res;
@@ -4275,8 +4240,7 @@ constexpr Matrix<T> VandermondeMatrix(const Vector<T>& v, size_t m) {
 template <ComponentType T>
 constexpr Matrix<T> UpperShiftMatrix(size_t m) {
     Matrix<T> res(m, m);
-    for (size_t i = 0; i + 1 < m; ++i)
-        res.set_component(i, i + 1, T(1));
+    for (size_t i = 0; i + 1 < m; ++i) res.set_component(i, i + 1, T(1));
     return res;
 }
 
@@ -4328,8 +4292,7 @@ constexpr Matrix<T> CompanionMatrix(const Polynomial<T>& poly) {
     Matrix<T> res(transpose(UpperShiftMatrix<T>(poly.get_degree())));
 
     // Fill last column with negated polynomial coefficients
-    for (size_t i = 0; i < poly.get_degree(); ++i)
-        res.set_component(i, poly.get_degree() - 1, -poly[i]);
+    for (size_t i = 0; i < poly.get_degree(); ++i) res.set_component(i, poly.get_degree() - 1, -poly[i]);
 
     return res;
 }

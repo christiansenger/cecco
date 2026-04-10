@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.4
+ * @version 2.2.5
  * @date 2026
  *
  * @copyright
@@ -175,7 +175,7 @@ class Polynomial {
      *
      * Creates an empty polynomial representing the zero polynomial.
      */
-    constexpr Polynomial() noexcept : data(0) {}
+    constexpr Polynomial() noexcept {}
 
     /**
      * @brief Constructs a constant polynomial from an integer
@@ -574,6 +574,13 @@ class Polynomial {
         requires ReliablyComparableType<T>;
 
     /**
+     * @brief Get the coefficients as a vector
+     *
+     * @return Vector<T> of length equal to the number of stored coefficients (0 for empty polynomial)
+     */
+    Vector<T> get_coefficients() const;
+
+    /**
      * @brief Get the trailing degree (lowest power with non-zero coefficient)
      *
      * @return Trailing degree of the polynomial
@@ -821,15 +828,14 @@ template <ComponentType T>
 template <FiniteFieldType S>
     requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
 Polynomial<T>::Polynomial(const Polynomial<S>& other) {
+    if (other.is_empty()) return;
     const size_t deg = other.degree();
-    for (size_t i = 0; i <= deg; ++i)
-        set_coefficient(i, T(other[i]));  // Uses enhanced cross-field constructors
+    for (size_t i = 0; i <= deg; ++i) set_coefficient(i, T(other[i]));  // Uses enhanced cross-field constructors
 }
 
 template <ComponentType T>
 Polynomial<T>::Polynomial(const Vector<T>& v) : data(v.get_n()) {
-    for (size_t i = 0; i < data.size(); ++i)
-        data[i] = v[i];
+    for (size_t i = 0; i < data.size(); ++i) data[i] = v[i];
     prune();
 }
 
@@ -847,6 +853,11 @@ constexpr Polynomial<T>& Polynomial<T>::operator=(const T& rhs) {
 template <ComponentType T>
 constexpr Polynomial<T>& Polynomial<T>::operator=(const Polynomial<T>& rhs) {
     if (this == &rhs) return *this;
+    if (rhs.data.empty()) {
+        data.clear();
+        cache.invalidate();
+        return *this;
+    }
     data = rhs.data;
     cache = rhs.cache;
     return *this;
@@ -855,6 +866,11 @@ constexpr Polynomial<T>& Polynomial<T>::operator=(const Polynomial<T>& rhs) {
 template <ComponentType T>
 constexpr Polynomial<T>& Polynomial<T>::operator=(Polynomial<T>&& rhs) noexcept {
     if (this == &rhs) return *this;
+    if (rhs.data.empty()) {
+        data.clear();
+        cache.invalidate();
+        return *this;
+    }
     data = std::move(rhs.data);
     cache = std::move(rhs.cache);
     return *this;
@@ -864,6 +880,11 @@ template <ComponentType T>
 template <FiniteFieldType S>
     requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
 Polynomial<T>& Polynomial<T>::operator=(const Polynomial<S>& rhs) {
+    if (rhs.data.empty()) {
+        data.clear();
+        cache.invalidate();
+        return *this;
+    }
     data.resize(0);
     for (size_t i = 0; i <= rhs.degree(); ++i)
         this->set_coefficient(i, T(rhs[i]));  // Uses enhanced cross-field constructors
@@ -898,7 +919,7 @@ T Polynomial<T>::operator()(const T& s) const {
 template <ComponentType T>
 constexpr Polynomial<T>& Polynomial<T>::operator+=(const Polynomial<T>& rhs) noexcept {
     if (data.size() < rhs.data.size()) data.resize(rhs.data.size());
-    std::transform(rhs.data.begin(), rhs.data.end(), data.begin(), data.begin(), std::plus<T>{});
+    std::transform(data.begin(), data.begin() + rhs.data.size(), rhs.data.begin(), data.begin(), std::plus<T>{});
     cache.invalidate();
     prune();
     return *this;
@@ -907,7 +928,7 @@ constexpr Polynomial<T>& Polynomial<T>::operator+=(const Polynomial<T>& rhs) noe
 template <ComponentType T>
 constexpr Polynomial<T>& Polynomial<T>::operator-=(const Polynomial<T>& rhs) noexcept {
     if (data.size() < rhs.data.size()) data.resize(rhs.data.size());
-    std::transform(rhs.data.begin(), rhs.data.end(), data.begin(), data.begin(), std::minus<T>{});
+    std::transform(data.begin(), data.begin() + rhs.data.size(), rhs.data.begin(), data.begin(), std::minus<T>{});
     cache.invalidate();
     prune();
     return *this;
@@ -1068,8 +1089,20 @@ Polynomial<T>& Polynomial<T>::differentiate(size_t s)
         data[0] = T(0);
         return *this;
     }
-    for (size_t i = 0; i <= d - s; ++i)
-        data[i] = fac<size_t>(i + s) / fac<size_t>(i) * data[i + s];
+    if constexpr (requires { typename T::BASE_FIELD; }) {
+        using B = typename T::BASE_FIELD;
+        for (size_t i = 0; i <= d - s; ++i) {
+            B coeff(1);
+            for (size_t k = 1; k <= s; ++k) coeff *= B(i + k);
+            data[i] = T(coeff) * data[i + s];
+        }
+    } else {
+        for (size_t i = 0; i <= d - s; ++i) {
+            T coeff(1);
+            for (size_t k = 1; k <= s; ++k) coeff *= T(i + k);
+            data[i] = coeff * data[i + s];
+        }
+    }
     data.resize(data.size() - s);
     prune();
     cache.invalidate();
@@ -1089,8 +1122,7 @@ Polynomial<T>& Polynomial<T>::Hasse_differentiate(size_t s)
         data[0] = T(0);
         return *this;
     }
-    for (size_t i = 0; i <= d - s; ++i)
-        data[i] = bin<size_t>(i + s, s) * data[i + s];
+    for (size_t i = 0; i <= d - s; ++i) data[i] = bin<size_t>(i + s, s) * data[i + s];
     data.resize(data.size() - s);
     prune();
     cache.invalidate();
@@ -1103,6 +1135,13 @@ size_t Polynomial<T>::degree() const
 {
     if (is_empty()) throw std::invalid_argument("calculating degree of empty polynomial");
     return (data.size() - 1);
+}
+
+template <ComponentType T>
+Vector<T> Polynomial<T>::get_coefficients() const {
+    Vector<T> res(data.size());
+    for (size_t i = 0; i < data.size(); ++i) res.set_component(i, data[i]);
+    return res;
 }
 
 template <ComponentType T>

@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.6
+ * @version 2.3.7
  * @date 2026
  *
  * @copyright
@@ -915,6 +915,7 @@ class Rationals : public details::Field<Rationals<T>> {
 
     /* comparison */
     constexpr bool operator==(const Rationals<T>& rhs) const noexcept {
+        if (is_erased() != rhs.is_erased()) return false;
         return numerator * rhs.get_denominator() == rhs.get_numerator() * denominator;
     }
 
@@ -1256,7 +1257,10 @@ constexpr Rationals<T>& Rationals<T>::erase() noexcept {
 
 template <SignedIntType T>
 constexpr Rationals<T>& Rationals<T>::unerase() noexcept {
-    if (is_erased()) (*this) = 0;
+    if (is_erased()) {
+        numerator = 0;
+        denominator = 1;
+    }
     return *this;
 }
 #endif
@@ -3373,6 +3377,7 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
 
    public:
     using label_t = ::CECCO::label_t<Q>;
+    using BASE_FIELD = B;
 
     /* constructors */
 
@@ -4192,7 +4197,10 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
                 erased = true;
                 break;
             }
-        if (erased) { this->erase(); return; }
+        if (erased) {
+            this->erase();
+            return;
+        }
 #endif
         label = v.as_integer();
 
@@ -4211,7 +4219,10 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
                 erased = true;
                 break;
             }
-        if (erased) { this->erase(); return; }
+        if (erased) {
+            this->erase();
+            return;
+        }
 #endif
         {
             Vector<B> intermediate(get_m());
@@ -4484,8 +4495,7 @@ Polynomial<S> Ext<B, modulus, mode>::get_minimal_polynomial() const
     requires SubfieldOf<Ext<B, modulus, mode>, S>
 {
 #ifdef CECCO_ERASURE_SUPPORT
-    if (is_erased())
-        throw std::invalid_argument("trying to compute minimal polynomial of erased element");
+    if (is_erased()) throw std::invalid_argument("trying to compute minimal polynomial of erased element");
 #endif
 
     Polynomial<Ext> res = {1};

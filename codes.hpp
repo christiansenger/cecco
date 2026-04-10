@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.15
+ * @version 2.0.16
  * @date 2026
  *
  * @copyright
@@ -681,6 +681,12 @@ class Code {
     virtual Vector<T> dec_BD_Meggitt(const Vector<T>& r) const {
         throw std::logic_error("Meggitt decoding not supported for this code!");
     }
+    virtual Vector<T> dec_WBA(const Vector<T>& r) const {
+        throw std::logic_error("Welch-Berlekamp decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_BMA(const Vector<T>& r) const {
+        throw std::logic_error("Berlekamp-Massey decoding not supported for this code!");
+    }
 #ifdef CECCO_ERASURE_SUPPORT
     virtual Vector<T> dec_BD_EE(const Vector<T>& r) const {
         throw std::logic_error("BD error/erasure decoding not supported for this code!");
@@ -694,10 +700,25 @@ class Code {
     virtual Vector<T> dec_recursive_EE(const Vector<T>& r) const {
         throw std::logic_error("Recursive error/erasure decoding not supported for this code!");
     }
+    virtual Vector<T> dec_WBA_EE(const Vector<T>& r) const {
+        throw std::logic_error("Welch-Berlekamp error/erasure decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_BMA_EE(const Vector<T>& r) const {
+        throw std::logic_error("Berlekamp-Massey error/erasure decoding not supported for this code!");
+    }
 #endif
 
    protected:
     size_t n;
+#ifdef CECCO_ERASURE_SUPPORT
+    std::vector<size_t> erasure_positions(const Vector<T>& r) const {
+        std::vector<size_t> X;
+        for (size_t i = 0; i < n; ++i) {
+            if (r[i].is_erased()) X.push_back(i);
+        }
+        return X;
+    }
+#endif
 };
 
 template <ComponentType T>
@@ -1912,7 +1933,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_boosted_BD(const Vector<T>& r) const final override {
+    virtual Vector<T> dec_boosted_BD(const Vector<T>& r) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("BD decoding only available for codes over finite fields!");
         } else {
@@ -2000,12 +2021,10 @@ class LinearCode : public Code<T> {
 
             for (size_t i = 0; i < n; ++i) {
                 const auto it = table.find(s.as_integer());
-                if (it != table.end())
-                    return r - rotate_left(it->second, i);
+                if (it != table.end()) return r - rotate_left(it->second, i);
                 // LFSR: s <- x * s mod gamma
                 const T feedback = s[redundancy - 1] * lead_inv;
-                for (size_t j = redundancy - 1; j > 0; --j)
-                    s.set_component(j, s[j - 1] - feedback * gamma[j]);
+                for (size_t j = redundancy - 1; j > 0; --j) s.set_component(j, s[j - 1] - feedback * gamma[j]);
                 s.set_component(0, -feedback * gamma[0]);
             }
 
@@ -2013,7 +2032,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_Viterbi(const Vector<T>& r, const std::string& filename = "") const final {
+    virtual Vector<T> dec_Viterbi(const Vector<T>& r, const std::string& filename = "") const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Viterbi decoding only available for codes over finite fields!");
         } else {
@@ -2029,8 +2048,12 @@ class LinearCode : public Code<T> {
             ws.calculate_edge_costs(Tr, r);
             auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
             if (!filename.empty()) {
-                ws.v.emplace(r);
-                Tr.export_as_tikz(filename, &ws);
+                if constexpr (T::get_size() <= 64) {
+                    ws.v.emplace(r);
+                    Tr.export_as_tikz(filename, &ws);
+                } else {
+                    throw std::invalid_argument("Viterbi trellis export not supported for fields with size > 64!");
+                }
             }
             return c_est;
         }
@@ -2161,8 +2184,12 @@ class LinearCode : public Code<T> {
             ws.calculate_edge_costs(Tr, r);
             auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
             if (!filename.empty()) {
-                ws.v.emplace(r);
-                Tr.export_as_tikz(filename, &ws);
+                if constexpr (T::get_size() <= 64) {
+                    ws.v.emplace(r);
+                    Tr.export_as_tikz(filename, &ws);
+                } else {
+                    throw std::invalid_argument("Viterbi trellis export not supported for fields with size > 64!");
+                }
             }
             return c_est;
         }
@@ -2635,20 +2662,17 @@ class HammingCode : public LinearCode<T> {
 
     Vector<T> dec_ML(const Vector<T>& r) const override {
 #ifdef CECCO_ERASURE_SUPPORT
-        if (LinearCode<T>::erasures_present(r)) return LinearCode<T>::dec_ML_EE(r);
+        if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
 #endif
 
         return dec_BD(r);
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
-    virtual Vector<T> dec_BD_EE(const Vector<T>& r) const override {
+    Vector<T> dec_BD_EE(const Vector<T>& r) const override {
         this->validate_length(r);
 
-        std::vector<size_t> X;
-        for (size_t i = 0; i < this->n; ++i) {
-            if (r[i].is_erased()) X.push_back(i);
-        }
+        const auto X = this->erasure_positions(r);
         const size_t tau = X.size();
 
         if (tau == 0) return dec_BD(r);
@@ -2686,6 +2710,8 @@ class HammingCode : public LinearCode<T> {
 
         return c_est;
     }
+
+    Vector<T> dec_ML_EE(const Vector<T>& r) const override { return dec_BD_EE(r); }
 #endif
 
    private:
@@ -2938,7 +2964,7 @@ class RepetitionCode : public LinearCode<T> {
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
 #ifdef CECCO_ERASURE_SUPPORT
-        if (LinearCode<T>::erasures_present(r)) return LinearCode<T>::dec_BD_EE(r);
+        if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
 #endif
 
         const auto c_est = dec_ML(r);
@@ -3100,10 +3126,7 @@ class SingleParityCheckCode : public LinearCode<T> {
     Vector<T> dec_BD_EE(const Vector<T>& r) const override {
         this->validate_length(r);
 
-        std::vector<size_t> X;
-        for (size_t i = 0; i < this->n; ++i) {
-            if (r[i].is_erased()) X.push_back(i);
-        }
+        const auto X = this->erasure_positions(r);
         const size_t tau = X.size();
 
         if (tau == 0) return dec_BD(r);
@@ -3121,10 +3144,7 @@ class SingleParityCheckCode : public LinearCode<T> {
     Vector<T> dec_ML_EE(const Vector<T>& r) const override {
         this->validate_length(r);
 
-        std::vector<size_t> X;
-        for (size_t i = 0; i < this->n; ++i) {
-            if (r[i].is_erased()) X.push_back(i);
-        }
+        const auto X = this->erasure_positions(r);
         const size_t tau = X.size();
 
         if (tau == 0) return dec_ML(r);
@@ -3266,16 +3286,58 @@ class GRSCode : public LinearCode<T> {
             } else {
                 this->set_dmin(n - k + 1);
             }
-            G_canonical = this->get_G();
         }
     catch (const std::invalid_argument& e) {
         throw std::invalid_argument(std::string("Cannot construct GRS code: ") + e.what());
     }
 
-    GRSCode(const GRSCode&) = default;
-    GRSCode(GRSCode&&) = default;
-    GRSCode& operator=(const GRSCode&) = default;
-    GRSCode& operator=(GRSCode&&) = default;
+    GRSCode(const GRSCode& other)
+        : LinearCode<T>(other),
+          a(other.a),
+          d(other.d),
+          G_canonical(other.G_canonical),
+          G_canonical_flag(),
+          HT_canonical(other.HT_canonical),
+          HT_canonical_flag() {}
+
+    GRSCode(GRSCode&& other)
+        : LinearCode<T>(std::move(other)),
+          a(std::move(other.a)),
+          d(std::move(other.d)),
+          G_canonical(std::move(other.G_canonical)),
+          G_canonical_flag(),
+          HT_canonical(std::move(other.HT_canonical)),
+          HT_canonical_flag() {}
+
+    GRSCode& operator=(const GRSCode& other) {
+        if (this != &other) {
+            LinearCode<T>::operator=(other);
+            a = other.a;
+            d = other.d;
+            G_canonical = other.G_canonical;
+            G_canonical_flag.~once_flag();
+            new (&G_canonical_flag) std::once_flag();
+            HT_canonical = other.HT_canonical;
+            HT_canonical_flag.~once_flag();
+            new (&HT_canonical_flag) std::once_flag();
+        }
+        return *this;
+    }
+
+    GRSCode& operator=(GRSCode&& other) {
+        if (this != &other) {
+            LinearCode<T>::operator=(std::move(other));
+            a = std::move(other.a);
+            d = std::move(other.d);
+            G_canonical = std::move(other.G_canonical);
+            G_canonical_flag.~once_flag();
+            new (&G_canonical_flag) std::once_flag();
+            HT_canonical = std::move(other.HT_canonical);
+            HT_canonical_flag.~once_flag();
+            new (&HT_canonical_flag) std::once_flag();
+        }
+        return *this;
+    }
 
     const Vector<T>& get_a() const noexcept { return a; }
     const Vector<T>& get_d() const noexcept { return d; }
@@ -3342,35 +3404,38 @@ class GRSCode : public LinearCode<T> {
         }
     }
 
-    Vector<T> dec_BD(const Vector<T>& r) const override {
-#ifdef CECCO_ERASURE_SUPPORT
-        if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
-#endif
-        return dec_BD_EE(r);
-    }
+    Vector<T> dec_BD(const Vector<T>& r) const override { return dec_WBA(r); }
+    Vector<T> dec_WBA(const Vector<T>& r) const override { return dec_WBA_impl(r, {}); }
+    Vector<T> dec_BMA(const Vector<T>& r) const override { return dec_BMA_impl(r, {}); }
 
-    Vector<T> dec_BD_EE(const Vector<T>& r) const override {
+#ifdef CECCO_ERASURE_SUPPORT
+    Vector<T> dec_BD_EE(const Vector<T>& r) const override { return dec_WBA_EE(r); }
+
+    Vector<T> dec_WBA_EE(const Vector<T>& r) const override { return dec_WBA_impl(r, this->erasure_positions(r)); }
+
+    Vector<T> dec_BMA_EE(const Vector<T>& r) const override { return dec_BMA_impl(r, this->erasure_positions(r)); }
+#endif
+
+   protected:
+    GRSCode(const Vector<T>& a, const Vector<T>& d, size_t k, Matrix<T> G)
+        : LinearCode<T>(a.get_n(), k, std::move(G)), a(a), d(d) {}
+
+   private:
+    Vector<T> dec_WBA_impl(const Vector<T>& r, const std::vector<size_t>& X) const {
         this->validate_length(r);
 
-        std::vector<size_t> X;
-        for (size_t i = 0; i < this->n; ++i) {
-            if (r[i].is_erased()) X.push_back(i);
-        }
         const size_t tau = X.size();
-
-        if (tau > this->get_dmin() - 1) throw decoding_failure("GRS code code BD error/erasure decoder failed!");
+        if (tau > this->get_dmin() - 1) throw decoding_failure("GRS code WBA error/erasure decoder failed (too many erasures)!");
 
         const size_t n = this->n;
         const size_t k = this->k;
 
-        // in case erasures are present: decode assuming $\GRS_{\vec{a}'}[\K; n', k]$
         const auto ap = delete_components(a, X);
         const auto dp = delete_components(d, X);
         const size_t np = n - tau;
         const size_t tmaxp = std::floor((np - k) / 2.0);
         const auto rp = delete_components(r, X);
 
-        // normalize received vector by column multipliers so W-B recovers u(x) not u(x)*d_i
         Vector<T> rp_norm(np);
         for (size_t i = 0; i < np; ++i) rp_norm.set_component(i, rp[i] / dp[i]);
 
@@ -3387,30 +3452,119 @@ class GRSCode : public LinearCode<T> {
         for (size_t j = 0; j <= np - tmaxp - k; ++j, ++i) Q1.set_coefficient(j, B(0, i));
 
         const auto temp = poly_long_div(-Q0, Q1);
-        const auto quotient = temp.first;    // temp is a std::pair, first element quotient...
-        const auto remainder = temp.second;  // ... second element remainder
+        const auto quotient = temp.first;
+        const auto remainder = temp.second;
         if (!remainder.is_zero() || quotient.degree() >= k)
-            throw decoding_failure("GRS code BD error/erasure decoder failed (bad quotient)!");
+            throw decoding_failure("GRS code WBA error/erasure decoder failed (true error beyond BD radius)!");
 
         const auto u_est = pad_back(Vector<T>(quotient), k);
-        const auto c_est = u_est * G_canonical;
+        std::call_once(G_canonical_flag, [this] {
+            if (G_canonical.has_value()) return;
+            G_canonical.emplace(VandermondeMatrix<T>(a, this->k) * DiagonalMatrix<T>(d));
+        });
+        const auto c_est = u_est * G_canonical.value();
         if (dH(r, c_est) > tmaxp)
-            throw decoding_failure("GRS code BD error/erasure  decoder failed (beyond BD radius)!");
+            throw decoding_failure("GRS code WBA error/erasure decoder failed (identified error beyond BD radius)!");
 
         return c_est;
     }
 
-   protected:
-    GRSCode(const Vector<T>& a, const Vector<T>& d, size_t k, Matrix<T> G)
-        : LinearCode<T>(a.get_n(), k, std::move(G)),
-          a(a),
-          d(d),
-          G_canonical(VandermondeMatrix<T>(a, k) * DiagonalMatrix<T>(d)) {}
+    Vector<T> dec_BMA_impl(const Vector<T>& r, const std::vector<size_t>& X) const {
+        this->validate_length(r);
 
-   private:
+        const size_t n = this->n;
+        const size_t redundancy = n - this->k;
+        const size_t tau = X.size();
+        if (tau > redundancy) throw decoding_failure("GRS code BMA error/erasure decoder failed (too many erasures)!");
+
+        Vector<T> rp = r;
+        for (size_t i = 0; i < tau; ++i) {
+            rp.set_component(X[i], T(1));
+        }
+
+        std::call_once(HT_canonical_flag, [this, n, redundancy] {
+            if (HT_canonical.has_value()) return;
+
+            auto dells = VandermondeMatrix<T>(a, n).invert().get_col(n - 1);
+            for (size_t i = 0; i < n; ++i) dells.set_component(i, dells[i] / d[i]);
+            const auto D = DiagonalMatrix<T>(dells);
+            const auto V = VandermondeMatrix<T>(a, redundancy);
+            HT_canonical.emplace(transpose(V * D));
+        });
+        const auto& HT = HT_canonical.value();
+
+        // syndrome
+        const auto s = rp * HT;
+        if (s.is_zero() && tau == 0) return r;
+        const auto sx = Polynomial<T>(s);
+
+        // (reciprocal) erasure locator
+        auto Psi = Monomial<T>(0, T(1));
+        for (size_t i = 0; i < X.size(); ++i) Psi *= Polynomial<T>({T(1), -a[X[i]]});
+
+        // updated syndrome
+        const auto sxp = (sx * Psi) / Monomial<T>(tau, T(1));
+
+        // (reciprocal) error locator (Berlemap-Massey)
+        auto Lambda_e = Monomial<T>(0, T(1));
+        size_t t = 0;
+        auto B_ref = Monomial<T>(0, T(1));
+        T discrepancy_ref(1);
+        size_t last_update = 0;
+
+        for (size_t i = 0; i < redundancy - tau; ++i) {
+            T discrepancy = sxp[i];
+            for (size_t j = 1; j <= t; ++j) discrepancy += Lambda_e[j] * sxp[i - j];
+
+            if (!discrepancy.is_zero()) {
+                const auto B = Lambda_e;
+                Lambda_e -= (discrepancy / discrepancy_ref) * Monomial<T>(i - last_update + 1, T(1)) * B_ref;
+
+                if (2 * t <= i) {
+                    t = i + 1 - t;
+                    B_ref = B;
+                    discrepancy_ref = discrepancy;
+                    last_update = i + 1;
+                }
+            }
+        }
+
+        if (2 * t + tau > redundancy)
+            throw decoding_failure("GRS code BMA error/erasure decoder failed (identified error beyond BD radius)!");
+
+        // error/erasure locator and Omega, convert from reciprocal to direct form for Chien and Forney
+        auto Lambda = Psi * Lambda_e;
+        auto Omega = (sx * Lambda) % Monomial<T>(redundancy, T(1));
+        Lambda.reciprocal();
+        Omega.reciprocal();
+
+        // Chien search
+        std::vector<size_t> E;
+        E.reserve(tau + t);
+        for (size_t i = 0; i < n; ++i)
+            if (Lambda(a[i]).is_zero()) E.push_back(i);
+
+        if (E.size() != tau + t)
+            throw decoding_failure("GRS code BMA error/erasure decoder failed (true error beyond BD radius)!");
+
+        // Forney
+        Lambda.differentiate(1);
+
+        Vector<T> c_est = rp;
+        for (size_t i = 0; i < E.size(); ++i) {
+            const T locator = a[E[i]];
+            c_est.set_component(E[i], c_est[E[i]] - Omega(locator) / (HT(E[i], 0) * Lambda(locator)));
+        }
+
+        return c_est;
+    }
+
     Vector<T> a;
     Vector<T> d;
-    Matrix<T> G_canonical;
+    mutable std::optional<Matrix<T>> G_canonical;
+    mutable std::once_flag G_canonical_flag;
+    mutable std::optional<Matrix<T>> HT_canonical;
+    mutable std::once_flag HT_canonical_flag;
 };
 
 template <FiniteFieldType T>
@@ -3450,7 +3604,7 @@ class RSCode : public GRSCode<T> {
 
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
+            GRSCode<T>::get_info(os);
             if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0) {
@@ -4556,7 +4710,11 @@ enum class Method {
     BCJR,
     recursive,
     BD_Meggitt,
+    WBA,
+    BMA,
 #ifdef CECCO_ERASURE_SUPPORT
+    WBA_EE,
+    BMA_EE,
     BD_EE,
     ML_EE,
     Viterbi_EE,
@@ -4588,11 +4746,23 @@ class Dec {
             case Method::BD_Meggitt:
                 dec = [this](const Vector<T>& r) { return this->C.dec_BD_Meggitt(r); };
                 break;
+            case Method::WBA:
+                dec = [this](const Vector<T>& r) { return this->C.dec_WBA(r); };
+                break;
+            case Method::BMA:
+                dec = [this](const Vector<T>& r) { return this->C.dec_BMA(r); };
+                break;
             case Method::ML_soft:
             case Method::Viterbi_soft:
             case Method::BCJR:
                 break;
 #ifdef CECCO_ERASURE_SUPPORT
+            case Method::WBA_EE:
+                dec = [this](const Vector<T>& r) { return this->C.dec_WBA_EE(r); };
+                break;
+            case Method::BMA_EE:
+                dec = [this](const Vector<T>& r) { return this->C.dec_BMA_EE(r); };
+                break;
             case Method::BD_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_BD_EE(r); };
                 break;

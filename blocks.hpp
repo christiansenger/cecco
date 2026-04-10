@@ -2,7 +2,7 @@
  * @file blocks.hpp
  * @brief Communication system blocks library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.3
+ * @version 2.2.4
  * @date 2026
  *
  * @copyright
@@ -226,7 +226,7 @@ using LLRProcessor = BlockProcessor<T, std::complex<double>, double>;
  * @see @ref CECCO::BSC for binary symmetric channel
  * @see @ref CECCO::BEC for binary erasure channel
  */
-template <FiniteFieldType T>
+template <FieldType T>
 class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
    public:
     // Bring base class operator() overloads into scope
@@ -320,7 +320,8 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
      *
      * @note Returned value is in bits (log base 2).
      */
-    double get_capacity() const noexcept;
+    double get_capacity() const noexcept
+        requires(FiniteFieldType<T>);
 
     /**
      * @brief Get Bhattacharyya parameter of the channel
@@ -348,7 +349,7 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
     unsigned int erasure_failures_before_hit;
 };
 
-template <FiniteFieldType T>
+template <FieldType T>
 SDMEC<T>::SDMEC(double pe, double px) : error_dist(pe / (1 - px)), erasure_dist(px) {
 #ifndef CECCO_ERASURE_SUPPORT
     if (px != 0) throw std::invalid_argument("px!=0 requires CECCO_ERASURE_SUPPORT");
@@ -365,7 +366,7 @@ SDMEC<T>::SDMEC(double pe, double px) : error_dist(pe / (1 - px)), erasure_dist(
     erasure_failures_before_hit = erasure_dist(gen());
 }
 
-template <FiniteFieldType T>
+template <FieldType T>
 T SDMEC<T>::operator()(const T& in) noexcept {
     if (error_dist.p() == 0.0 && erasure_dist.p() == 0.0) return in;
     T res(in);
@@ -389,8 +390,10 @@ T SDMEC<T>::operator()(const T& in) noexcept {
     return res;
 }
 
-template <FiniteFieldType T>
-double SDMEC<T>::get_capacity() const noexcept {
+template <FieldType T>
+double SDMEC<T>::get_capacity() const noexcept
+    requires(FiniteFieldType<T>)
+{
     const double pe = error_dist.p();
     const double q = static_cast<double>(T::get_size());
 
@@ -425,7 +428,7 @@ double SDMEC<T>::get_capacity() const noexcept {
  * @see @ref CECCO::SDMEC for the full errors-and-erasures implementation
  * @see @ref CECCO::BSC for binary symmetric channel
  */
-template <FiniteFieldType T>
+template <FieldType T>
 class SDMC : public SDMEC<T> {
    public:
     /**
