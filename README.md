@@ -1,5 +1,5 @@
 # C(++)ECCO
-C++ Error Control COding (CECCO) is a header-only library for ECC simulations and experiments, modeling complete coding systems for the rationals and arbitrary finite fields, dealig with complex inter-field relationships. CECCO provides an intuitive, object-oriented interface for fields, vectors, polynomials, matrices, and many linear error-correcting codes. Its low-level functionality can be used to implement arbitrary linear codes and their decoders, while its high-level functionality is convenient for creating complete simulation chains.
+C++ Error Control COding (CECCO) is a header-only library for ECC simulations and experiments, modeling complete coding systems for the rationals and arbitrary finite fields, dealing with complex inter-field relationships. CECCO provides an intuitive, object-oriented interface for fields, vectors, polynomials, matrices, and many linear error-correcting codes. Its low-level functionality can be used to implement arbitrary linear codes and their decoders, while its high-level functionality is convenient for creating complete simulation chains.
 
 Source code is available on Github <a href="https://github.com/christiansenger/cecco">here</a>.
 
