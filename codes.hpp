@@ -3425,7 +3425,8 @@ class GRSCode : public LinearCode<T> {
         this->validate_length(r);
 
         const size_t tau = X.size();
-        if (tau > this->get_dmin() - 1) throw decoding_failure("GRS code WBA error/erasure decoder failed (too many erasures)!");
+        if (tau > this->get_dmin() - 1)
+            throw decoding_failure("GRS code WBA error/erasure decoder failed (too many erasures)!");
 
         const size_t n = this->n;
         const size_t k = this->k;
@@ -3478,9 +3479,7 @@ class GRSCode : public LinearCode<T> {
         if (tau > redundancy) throw decoding_failure("GRS code BMA error/erasure decoder failed (too many erasures)!");
 
         Vector<T> rp = r;
-        for (size_t i = 0; i < tau; ++i) {
-            rp.set_component(X[i], T(1));
-        }
+        for (size_t i = 0; i < tau; ++i) rp.set_component(X[i], T(0));
 
         std::call_once(HT_canonical_flag, [this, n, redundancy] {
             if (HT_canonical.has_value()) return;
@@ -3498,31 +3497,44 @@ class GRSCode : public LinearCode<T> {
         if (s.is_zero() && tau == 0) return r;
         const auto sx = Polynomial<T>(s);
 
-        // (reciprocal) erasure locator
+        // erasure locator
         auto Psi = Monomial<T>(0, T(1));
-        for (size_t i = 0; i < X.size(); ++i) Psi *= Polynomial<T>({T(1), -a[X[i]]});
+        for (size_t i = 0; i < tau; ++i) Psi *= Polynomial<T>({-a[X[i]], T(1)});
 
         // updated syndrome
-        const auto sxp = (sx * Psi) / Monomial<T>(tau, T(1));
+        auto sxp = Polynomial<T>(T(0));
+        for (size_t i = 0; i < redundancy - tau; ++i) {
+            T coeff(0);
+            for (size_t j = 0; j <= tau; ++j) coeff += Psi[j] * s[i + j];
+            sxp.set_coefficient(i, coeff);
+        }
 
-        // (reciprocal) error locator (Berlemap-Massey)
+        // error locator (Berlekamp-Massey)
         auto Lambda_e = Monomial<T>(0, T(1));
         size_t t = 0;
         auto B_ref = Monomial<T>(0, T(1));
+        size_t t_ref = 0;
         T discrepancy_ref(1);
         size_t last_update = 0;
 
         for (size_t i = 0; i < redundancy - tau; ++i) {
-            T discrepancy = sxp[i];
-            for (size_t j = 1; j <= t; ++j) discrepancy += Lambda_e[j] * sxp[i - j];
+            T discrepancy(0);
+            const size_t j0 = (t > i ? t - i : 0);
+            for (size_t j = j0; j <= t; ++j) discrepancy += Lambda_e[j] * sxp[i + j - t];
+            const auto ratio = discrepancy / discrepancy_ref;
 
             if (!discrepancy.is_zero()) {
                 const auto B = Lambda_e;
-                Lambda_e -= (discrepancy / discrepancy_ref) * Monomial<T>(i - last_update + 1, T(1)) * B_ref;
+                const size_t shift = i - last_update + 1;
 
-                if (2 * t <= i) {
-                    t = i + 1 - t;
+                if (shift + t_ref <= t) {
+                    Lambda_e -= ratio * Monomial<T>(t - shift - t_ref, T(1)) * B_ref;
+                } else {
+                    const auto temp = t;
+                    Lambda_e = Monomial<T>(shift + t_ref - t, T(1)) * Lambda_e - ratio * B_ref;
+                    t = shift + t_ref;
                     B_ref = B;
+                    t_ref = temp;
                     discrepancy_ref = discrepancy;
                     last_update = i + 1;
                 }
@@ -3532,11 +3544,8 @@ class GRSCode : public LinearCode<T> {
         if (2 * t + tau > redundancy)
             throw decoding_failure("GRS code BMA error/erasure decoder failed (identified error beyond BD radius)!");
 
-        // error/erasure locator and Omega, convert from reciprocal to direct form for Chien and Forney
+        // error/erasure locator
         auto Lambda = Psi * Lambda_e;
-        auto Omega = (sx * Lambda) % Monomial<T>(redundancy, T(1));
-        Lambda.reciprocal();
-        Omega.reciprocal();
 
         // Chien search
         std::vector<size_t> E;
@@ -3548,11 +3557,18 @@ class GRSCode : public LinearCode<T> {
             throw decoding_failure("GRS code BMA error/erasure decoder failed (true error beyond BD radius)!");
 
         // Forney
+        auto Omega = Polynomial<T>(T(0));
+        for (size_t j = 0; j < tau + t; ++j) {
+            T coeff(0);
+            for (size_t m = j + 1; m <= tau + t; ++m) coeff += Lambda[m] * sx[m - j - 1];
+            Omega.set_coefficient(j, coeff);
+        }
+
         Lambda.differentiate(1);
 
         Vector<T> c_est = rp;
         for (size_t i = 0; i < E.size(); ++i) {
-            const T locator = a[E[i]];
+            const auto locator = a[E[i]];
             c_est.set_component(E[i], c_est[E[i]] - Omega(locator) / (HT(E[i], 0) * Lambda(locator)));
         }
 
@@ -4700,7 +4716,7 @@ class Enc {
     const Code<T>& C;
 };
 
-enum class Method {
+enum class method {
     BD,
     boosted_BD,
     ML,
@@ -4725,54 +4741,54 @@ enum class Method {
 template <FieldType T>
 class Dec {
    public:
-    explicit Dec(const Code<T>& C, Method method = Method::ML, size_t cache_limit = 10000)
+    explicit Dec(const Code<T>& C, method method = method::ML, size_t cache_limit = 10000)
         : C(C), method(method), cache_limit(cache_limit) {
         switch (method) {
-            case Method::BD:
+            case method::BD:
                 dec = [this](const Vector<T>& r) { return this->C.dec_BD(r); };
                 break;
-            case Method::boosted_BD:
+            case method::boosted_BD:
                 dec = [this](const Vector<T>& r) { return this->C.dec_boosted_BD(r); };
                 break;
-            case Method::ML:
+            case method::ML:
                 dec = [this](const Vector<T>& r) { return this->C.dec_ML(r); };
                 break;
-            case Method::Viterbi:
+            case method::Viterbi:
                 dec = [this](const Vector<T>& r) { return this->C.dec_Viterbi(r); };
                 break;
-            case Method::recursive:
+            case method::recursive:
                 dec = [this](const Vector<T>& r) { return this->C.dec_recursive(r); };
                 break;
-            case Method::BD_Meggitt:
+            case method::BD_Meggitt:
                 dec = [this](const Vector<T>& r) { return this->C.dec_BD_Meggitt(r); };
                 break;
-            case Method::WBA:
+            case method::WBA:
                 dec = [this](const Vector<T>& r) { return this->C.dec_WBA(r); };
                 break;
-            case Method::BMA:
+            case method::BMA:
                 dec = [this](const Vector<T>& r) { return this->C.dec_BMA(r); };
                 break;
-            case Method::ML_soft:
-            case Method::Viterbi_soft:
-            case Method::BCJR:
+            case method::ML_soft:
+            case method::Viterbi_soft:
+            case method::BCJR:
                 break;
 #ifdef CECCO_ERASURE_SUPPORT
-            case Method::WBA_EE:
+            case method::WBA_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_WBA_EE(r); };
                 break;
-            case Method::BMA_EE:
+            case method::BMA_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_BMA_EE(r); };
                 break;
-            case Method::BD_EE:
+            case method::BD_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_BD_EE(r); };
                 break;
-            case Method::ML_EE:
+            case method::ML_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_ML_EE(r); };
                 break;
-            case Method::Viterbi_EE:
+            case method::Viterbi_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_Viterbi_EE(r); };
                 break;
-            case Method::recursive_EE:
+            case method::recursive_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_recursive_EE(r); };
                 break;
 #endif
@@ -4787,8 +4803,8 @@ class Dec {
     }
 
     Vector<T> operator()(const Vector<double>& in) const {
-        if (method == Method::Viterbi || method == Method::Viterbi_soft) return C.dec_Viterbi_soft(in);
-        if (method == Method::BCJR) {
+        if (method == method::Viterbi || method == method::Viterbi_soft) return C.dec_Viterbi_soft(in);
+        if (method == method::BCJR) {
             const auto llrs = C.dec_BCJR(in);
             Vector<T> c_est(llrs.get_n());
             for (size_t i = 0; i < llrs.get_n(); ++i)
@@ -4801,7 +4817,7 @@ class Dec {
    private:
     const Code<T>& C;
     std::function<Vector<T>(const Vector<T>&)> dec;
-    Method method;
+    method method;
     size_t cache_limit;
 };
 
