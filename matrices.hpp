@@ -2,7 +2,7 @@
  * @file matrices.hpp
  * @brief Matrix arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.5
+ * @version 2.2.6
  * @date 2026
  *
  * @copyright
@@ -2369,10 +2369,10 @@ Matrix<T>& Matrix<T>::set_component(size_t i, size_t j, U&& c)
             break;
 
         case details::Zero:
-            if (i != j)
-                type = details::Generic;
-            else
+            if (i == j && m == n)
                 type = details::Diagonal;
+            else
+            type = details::Generic;
             break;
 
         case details::Identity:
@@ -2462,7 +2462,7 @@ Matrix<T> Matrix<T>::get_submatrix(size_t i, size_t j, size_t h, size_t w) const
             for (size_t nu = 0; nu < w; ++nu)
                 if (i + mu == j + nu) res.set_component(mu, nu, (*this)(i + mu, j + nu));
         if (i == j) {
-            if (type == details::Diagonal) {
+            if (type == details::Diagonal && h == w) {
                 res.type = details::Diagonal;
             } else if (type == details::Identity) {
                 res.type = details::Identity;
@@ -4289,10 +4289,10 @@ constexpr Matrix<T> LowerShiftMatrix(size_t m) {
 template <ComponentType T>
 constexpr Matrix<T> CompanionMatrix(const Polynomial<T>& poly) {
     if (!poly.is_monic()) throw std::invalid_argument("companion matrices only defined for monic polynomials");
-    Matrix<T> res(transpose(UpperShiftMatrix<T>(poly.get_degree())));
+    Matrix<T> res(transpose(UpperShiftMatrix<T>(poly.degree())));
 
     // Fill last column with negated polynomial coefficients
-    for (size_t i = 0; i < poly.get_degree(); ++i) res.set_component(i, poly.get_degree() - 1, -poly[i]);
+    for (size_t i = 0; i < poly.degree(); ++i) res.set_component(i, poly.degree() - 1, -poly[i]);
 
     return res;
 }

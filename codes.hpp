@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.16
+ * @version 2.0.17
  * @date 2026
  *
  * @copyright
@@ -811,7 +811,7 @@ class CodewordIterator {
 
 class decoding_failure : public std::exception {
    public:
-    decoding_failure(const char* message) : message(message) {}
+    decoding_failure(const std::string& message) : message(message) {}
     const char* what() const noexcept override { return message.c_str(); }
 
    private:
@@ -822,7 +822,7 @@ template <FieldType T>
 class LinearCode : public Code<T> {
    public:
     // expose base field (used by the extend() factories)
-    using field = T;
+    using FIELD = T;
 
     LinearCode(size_t n, size_t k, const Matrix<T>& X) : Code<T>(n), k(k), MI(k, k) {
         if (X.get_n() != this->n) throw std::invalid_argument("G must have " + std::to_string(this->n) + " columns");
@@ -2271,6 +2271,51 @@ class LinearCode : public Code<T> {
 
             return c_est;
         }
+    }
+
+    Vector<T> dec_GMD(const Vector<T>& r, const std::vector<double>& reliability) const
+        requires FiniteFieldType<T>
+    {
+        const size_t n = this->n;
+
+        if (reliability.size() != n)
+            throw std::invalid_argument("GMD decoder: length of reliability vector must match code length");
+
+        std::vector<size_t> order(n);
+        std::iota(order.begin(), order.end(), 0);
+        std::shuffle(order.begin(), order.end(), gen());
+        std::stable_sort(order.begin(), order.end(),
+                         [&](size_t a, size_t b) { return reliability[a] < reliability[b]; });
+
+        std::optional<Vector<T>> best;
+        double best_score = std::numeric_limits<double>::infinity();
+
+        const size_t d = get_dmin();
+
+        auto rp = r;
+        const auto trial = [&]() {
+            try {
+                const auto c_est = dec_BD_EE(rp);
+                double score = 0.0;
+                for (size_t i = 0; i < n; ++i)
+                    if (c_est[i] != r[i]) score += reliability[i];
+                if (score < best_score) {
+                    best_score = score;
+                    best = c_est;
+                }
+            } catch (const decoding_failure&) {
+            }
+        };
+
+        trial();
+        for (size_t tau = 2; tau < d; tau += 2) {
+            rp.erase_components({order[tau - 2], order[tau - 1]});
+            trial();
+            if (best_score == 0.0) break;
+        }
+
+        if (!best.has_value()) throw decoding_failure("GMD decoder failed (all trials failed)!");
+        return std::move(*best);
     }
 #endif
 
@@ -3854,12 +3899,12 @@ Matrix<T> LDC_G(const Matrix<T>& G_U, const Matrix<T>& G_V) {
 }  // namespace details
 
 template <class BU, class BV>
-    requires(std::derived_from<BU, LinearCode<typename BU::field>> &&
-             std::derived_from<BV, LinearCode<typename BV::field>> &&
-             std::same_as<typename BU::field, typename BV::field>)
-class LDCCode : public LinearCode<typename BU::field> {
+    requires(std::derived_from<BU, LinearCode<typename BU::FIELD>> &&
+             std::derived_from<BV, LinearCode<typename BV::FIELD>> &&
+             std::same_as<typename BU::FIELD, typename BV::FIELD>)
+class LDCCode : public LinearCode<typename BU::FIELD> {
    public:
-    using T = typename BU::field;
+    using T = typename BU::FIELD;
 
     LDCCode(const BU& U, const BV& V) try : LinearCode
         <T>(2 * U.get_n(), U.get_k() + V.get_k(), details::LDC_G(U.get_G(), V.get_G())), U(U), V(V) {}
@@ -4137,6 +4182,128 @@ class RMCode : public LinearCode<Fp<2>> {
     }
 #endif
 };
+
+template <class B>
+    requires std::derived_from<B, LinearCode<typename B::FIELD>>
+class SubfieldSubcode : public LinearCode<typename B::FIELD::BASE_FIELD> {
+    using SUPER = typename B::FIELD;
+    using SUB = typename SUPER::BASE_FIELD;
+
+   public:
+    SubfieldSubcode(const B& SuperCode) try
+        : SubfieldSubcode(SuperCode, SSC_parameters(SuperCode)) {
+    } catch (const std::invalid_argument& e) {
+        throw std::invalid_argument(
+            std::string("Trying to construct a subfield subcode from a super code that is not over a superfield: ") +
+            e.what());
+    }
+
+    SubfieldSubcode(const SubfieldSubcode&) = default;
+    SubfieldSubcode(SubfieldSubcode&&) = default;
+    SubfieldSubcode& operator=(const SubfieldSubcode&) = default;
+    SubfieldSubcode& operator=(SubfieldSubcode&&) = default;
+
+    const B& get_SuperCode() const noexcept { return SuperCode; }
+
+    Vector<SUB> dec_supercode_BD(const Vector<SUB>& r) const {
+#ifdef CECCO_ERASURE_SUPPORT
+        if (LinearCode<SUB>::erasures_present(r)) return dec_supercode_BD_EE(r);
+#endif
+        return project(SuperCode.dec_BD(Vector<SUPER>(r)));
+    }
+
+    Vector<SUB> dec_supercode_ML(const Vector<SUB>& r) const {
+#ifdef CECCO_ERASURE_SUPPORT
+        if (LinearCode<SUB>::erasures_present(r)) return dec_supercode_ML_EE(r);
+#endif
+        return project(SuperCode.dec_ML(Vector<SUPER>(r)));
+    }
+
+#ifdef CECCO_ERASURE_SUPPORT
+    Vector<SUB> dec_supercode_BD_EE(const Vector<SUB>& r) const {
+        return project(SuperCode.dec_BD_EE(Vector<SUPER>(r)));
+    }
+
+    Vector<SUB> dec_supercode_ML_EE(const Vector<SUB>& r) const {
+        return project(SuperCode.dec_ML_EE(Vector<SUPER>(r)));
+    }
+#endif
+
+    virtual void get_info(std::ostream& os) const override {
+        if (os.iword(details::index) < 3) {
+            LinearCode<SUB>::get_info(os);
+            if (os.iword(details::index) > 0) os << std::endl;
+        }
+        if (os.iword(details::index) > 0) {
+            const auto old = os.iword(details::index);
+            os << "Subfield subcode with properties: {" << std::endl;
+            os << "Gamma = " << std::endl << Gamma << ", " <<  std::endl;
+            os << "SuperCode = " << showbasic;
+            SuperCode.get_info(os);
+            os << " " << showspecial << SuperCode;
+            os << " }";
+            os.iword(details::index) = old;
+        }
+    }
+
+   private:
+    static Vector<SUB> project(const Vector<SUPER>& c) {
+        try {
+            return Vector<SUB>(c);
+        } catch (const std::invalid_argument& e) {
+            throw decoding_failure(std::string("Subfield subcode supercode decoder failed: ") + e.what());
+        }
+    }
+
+    SubfieldSubcode(const B& SuperCode, std::pair<size_t, Matrix<SUPER>> parameters)
+        : LinearCode<SUB>(SuperCode.get_n(), parameters.first, parameters.second * SuperCode.get_G()),
+          SuperCode(SuperCode), Gamma(parameters.second) {}
+
+    static std::pair<size_t, Matrix<SUPER>> SSC_parameters(const B& SuperCode) {
+        const size_t n = SuperCode.get_n();
+        const size_t kp = SuperCode.get_k();
+        const size_t m = SUPER(0).template as_vector<SUB>().get_n();
+        const auto Gp = SuperCode.get_G();
+
+        auto T = [m](const SUPER& Gij) -> Matrix<SUB> {
+            const auto v = pad_back(pad_front(Gij.template as_vector<SUB>().reverse(), 2 * m - 1), 3 * m - 2);
+            return ToeplitzMatrix<SUB>(v, m, 2 * m - 1);
+        };
+
+        auto R = IdentityMatrix<SUB>(2 * m - 1);
+        for (size_t j = 2 * m - 2; j >= m; --j) {
+            const auto I = IdentityMatrix<SUB>(j - m);
+            const auto E = Matrix<SUB>(unit_vector<SUB>(m, 0));
+            const auto C = CompanionMatrix<SUB>(Vector(SUPER::get_modulus())).transpose();
+            const auto Rj = diagonal_join(I, vertical_join(E, C));
+            R *= Rj;
+        }
+
+        Matrix<SUB> Gt(kp * m, n * (m - 1));
+        for (size_t i = 0; i < kp; ++i) {
+            for (size_t j = 0; j < n; ++j) Gt.set_submatrix(i * m, j * (m - 1), (T(Gp(i, j)) * R).delete_column(0));
+        }
+        const auto Gammat = Gt.transpose().basis_of_kernel();
+        const size_t k = std::max<size_t>(Gammat.rank(), 1);
+
+        Matrix<SUPER> Gamma(k, kp);
+        for (size_t i = 0; i < k; ++i) {
+            for (size_t j = 0; j < kp; ++j)
+                Gamma.set_component(i, j, SUPER(Gammat.get_submatrix(i, j * m, 1, m).to_vector().reverse()));
+        }
+
+        return std::make_pair(k, Gamma);
+    }
+
+    B SuperCode;
+    Matrix<SUPER> Gamma;
+};
+
+template <class B>
+SubfieldSubcode(const B&) -> SubfieldSubcode<B>;
+
+template <class B>
+SubfieldSubcode(B&&) -> SubfieldSubcode<B>;
 
 template <FieldType T, class B>
     requires std::derived_from<B, LinearCode<T>>
@@ -4540,7 +4707,7 @@ template <class B>
 using base_t = std::remove_cvref_t<B>;
 
 template <class C>
-using field_t = typename base_t<C>::field;
+using field_t = typename base_t<C>::FIELD;
 
 template <class B>
 auto extend(B&& base, size_t i, const Vector<field_t<B>>& v) {

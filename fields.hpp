@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.7
+ * @version 2.3.8
  * @date 2026
  *
  * @copyright
@@ -915,7 +915,9 @@ class Rationals : public details::Field<Rationals<T>> {
 
     /* comparison */
     constexpr bool operator==(const Rationals<T>& rhs) const noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
         if (is_erased() != rhs.is_erased()) return false;
+#endif
         return numerator * rhs.get_denominator() == rhs.get_numerator() * denominator;
     }
 
@@ -2160,7 +2162,7 @@ std::vector<size_t> Embedding<SUBFIELD, SUPERFIELD>::compute_embedding() {
     const auto super_gen = SUPERFIELD::get_generator();
     constexpr size_t power_factor = (super_size - 1) / (sub_size - 1);
 
-    // Compute super_gen^power_factor once
+    // Compute super_gen^power_factor
     auto super_gen_to_power_factor = SUPERFIELD(1);
     for (size_t i = 0; i < power_factor; ++i) {
         super_gen_to_power_factor *= super_gen;
@@ -2999,6 +3001,10 @@ Fp<p>::Fp(const Ext<S, ext_modulus, mode>& other) {
     // Ensure same characteristic
     static_assert(Fp<p>::get_characteristic() == Ext<S, ext_modulus, mode>::get_characteristic(),
                   "trying to convert between fields with different characteristic");
+
+#ifdef CECCO_ERASURE_SUPPORT
+    if (other.is_erased()) { this->erase(); return; }
+#endif
 
     // Extract Fp<p> element from extension field (downcast via largest common subfield)
     // Since Fp<p> is minimal, details::largest_common_subfield_t<Fp<p>, Ext<S, ...>> is always Fp<p>
@@ -4117,6 +4123,9 @@ Ext<B, modulus, mode>::Ext(int l) {
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 Ext<B, modulus, mode>::Ext(const B& other) noexcept {
+#ifdef CECCO_ERASURE_SUPPORT
+    if (other.is_erased()) { this->erase(); return; }
+#endif
     // Use cached subfield embedding for mathematically correct embedding
     auto embedding = Embedding<B, Ext>();
     Ext result = embedding(other);
@@ -4150,6 +4159,10 @@ Ext<B, modulus, mode>::Ext(const Ext<S, ext_modulus, ext_mode>& other) {
     // Ensure same characteristic
     static_assert(Ext<B, modulus, mode>::get_characteristic() == Ext<S, ext_modulus, ext_mode>::get_characteristic(),
                   "trying to convert between fields with different characteristic");
+
+#ifdef CECCO_ERASURE_SUPPORT
+    if (other.is_erased()) { this->erase(); return; }
+#endif
 
     using IN = Ext<S, ext_modulus, ext_mode>;
     using OUT = Ext;
@@ -4343,6 +4356,10 @@ constexpr Ext<B, modulus, mode>::Ext(const Fp<p>& other)
 {
     static_assert(Ext<B, modulus, mode>::get_characteristic() == p,
                   "Prime field characteristic must match extension field characteristic");
+
+#ifdef CECCO_ERASURE_SUPPORT
+    if (other.is_erased()) { this->erase(); return; }
+#endif
 
     // Use the cached embedding for mathematically correct embedding
     auto embedding = Embedding<Fp<p>, Ext<B, modulus, mode>>();
@@ -4755,6 +4772,7 @@ class Iso : public details::Base {
 
    public:
     using label_t = typename MAIN::label_t;
+    using BASE_FIELD = MAIN::BASE_FIELD;
 
    private:
     MAIN main_;
@@ -5204,6 +5222,8 @@ class Iso : public details::Base {
     static constexpr size_t get_m() noexcept { return MAIN::get_m(); }
 
     static constexpr size_t get_size() noexcept { return MAIN::get_size(); }
+
+    static constexpr Polynomial<BASE_FIELD> get_modulus() { return MAIN::get_modulus(); }
 
     static constexpr Iso get_generator() noexcept { return Iso{MAIN::get_generator()}; }
 

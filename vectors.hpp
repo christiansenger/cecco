@@ -1526,7 +1526,7 @@ Matrix<S> Vector<T>::as_matrix() const
 #ifdef CECCO_ERASURE_SUPPORT
         if (data[i].is_erased()) {
             for (size_t j = 0; j < m; ++j) {
-                res(j, i).erase();
+                res.erase_component(j, i);
             }
         } else {
             Matrix<S> temp(data[i].template as_vector<S>());
