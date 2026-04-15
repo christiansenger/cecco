@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.5
+ * @version 2.2.6
  * @date 2026
  *
  * @copyright
@@ -704,23 +704,24 @@ class Polynomial {
         if (d == 0) return false;
         if (d == 1) return true;
 
-        // find "smaller half" of factorization (if factor of deg > d/2 there must be a factor of deg < d/2 and we would
-        // already have found it once i > d/2)
+        const size_t q = T::get_size();
+
         for (size_t i = 1; i <= d / 2; ++i) {
-            if (i == 1) {
-                for (size_t j = 0; j < T::get_size(); ++j) {
-                    auto p = Polynomial({T(j), 1});
-                    if ((*this) % p == ZeroPolynomial<T>()) return false;
+            size_t count = 1;
+            for (size_t j = 0; j < i; ++j) count *= q;
+
+            for (size_t k = 0; k < count; ++k) {
+                size_t x = k;
+                Vector<T> v;
+                for (size_t j = 0; j < i; ++j) {
+                    v = v.append(T(x % q));
+                    x /= q;
                 }
-            } else {
-                auto I = IdentityMatrix<T>(i - 1);
-                auto v = I.rowspace();
-                for (auto it = v.begin(); it != v.end(); ++it) {
-                    auto p = Polynomial((*it).append(Vector<T>({T(1)})));
-                    if ((*this) % p == ZeroPolynomial<T>()) return false;
-                }
+                auto p = Polynomial(v.append(T(1)));
+                if (((*this) % p).is_zero()) return false;
             }
         }
+
         return true;
     }
 
@@ -970,6 +971,8 @@ Polynomial<T>& Polynomial<T>::operator%=(const Polynomial<T>& rhs)
             data[i] -= scalar * rhs[i];
         }
         set_coefficient(d, 0);
+        cache.invalidate();
+        prune();
     } else {  // full-blown polynomial long division
         auto res = this->poly_long_div(rhs);
         *this = res.second;
@@ -1797,7 +1800,7 @@ template <FieldType T>
 Polynomial<T> find_irreducible(size_t degree) {
     Polynomial<T> res;
     do {
-        res = Polynomial<T>().randomize(degree);
+        res.randomize(degree);
     } while (!res.is_irreducible());
 
     res.normalize();

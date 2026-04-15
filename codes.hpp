@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.17
+ * @version 2.0.18
  * @date 2026
  *
  * @copyright
@@ -793,7 +793,7 @@ class CodewordIterator {
             auto j = counter;
             for (size_t i = 0; i < k; ++i) {
                 const auto quot = j / q;
-                const auto rem = (j - quot).toInt();
+                const auto rem = (j % q).toInt();
                 u.set_component(i, T(rem));
                 j = quot;
             }
@@ -3417,14 +3417,14 @@ class GRSCode : public LinearCode<T> {
         }
     }
 
-    bool is_narrow_sense() const { return a == d; }
-
-    bool is_normalized() const {
+    bool is_narrow_sense() const {
         for (size_t i = 0; i < this->n; ++i) {
             if (d[i] != T(1)) return false;
         }
         return true;
     }
+
+    bool is_normalized() const { return a == d; }
 
     virtual void get_info(std::ostream& os) const override {
         if (os.iword(details::index) < 3) {
@@ -3680,21 +3680,21 @@ class RSCode : public GRSCode<T> {
    private:
     static std::pair<Vector<T>, Vector<T>> RS_a_and_D(const T& alpha, size_t b) {
         const size_t n = alpha.get_multiplicative_order();
-        const T alpha_b = sqm<T>(alpha, b % n);
+        const T alpha_1mb = sqm<T>(alpha, n + 1 - b % n);
         Vector<T> a(n), d(n);
         T a_pow = T(1), d_pow = T(1);
         for (size_t i = 0; i < n; ++i) {
             a.set_component(i, a_pow);
             d.set_component(i, d_pow);
             a_pow = a_pow * alpha;
-            d_pow = d_pow * alpha_b;
+            d_pow = d_pow * alpha_1mb;
         }
         return {std::move(a), std::move(d)};
     }
 
     static Polynomial<T> RS_gamma(const Vector<T>& a, size_t b, size_t k) {
         const size_t n = a.get_n();
-        const size_t start = (n + 1 - b % n) % n;  // index of alpha^{1-b mod n} in a
+        const size_t start = b % n;  // index of alpha^b in a
         auto gamma = ZeroPolynomial<T>();
         gamma.set_coefficient(0, T(1));
         for (size_t j = 0; j < n - k; ++j) {
@@ -4190,8 +4190,7 @@ class SubfieldSubcode : public LinearCode<typename B::FIELD::BASE_FIELD> {
     using SUB = typename SUPER::BASE_FIELD;
 
    public:
-    SubfieldSubcode(const B& SuperCode) try
-        : SubfieldSubcode(SuperCode, SSC_parameters(SuperCode)) {
+    SubfieldSubcode(const B& SuperCode) try : SubfieldSubcode(SuperCode, SSC_parameters(SuperCode)) {
     } catch (const std::invalid_argument& e) {
         throw std::invalid_argument(
             std::string("Trying to construct a subfield subcode from a super code that is not over a superfield: ") +
@@ -4237,7 +4236,7 @@ class SubfieldSubcode : public LinearCode<typename B::FIELD::BASE_FIELD> {
         if (os.iword(details::index) > 0) {
             const auto old = os.iword(details::index);
             os << "Subfield subcode with properties: {" << std::endl;
-            os << "Gamma = " << std::endl << Gamma << ", " <<  std::endl;
+            os << "Gamma = " << std::endl << Gamma << ", " << std::endl;
             os << "SuperCode = " << showbasic;
             SuperCode.get_info(os);
             os << " " << showspecial << SuperCode;
@@ -4257,7 +4256,8 @@ class SubfieldSubcode : public LinearCode<typename B::FIELD::BASE_FIELD> {
 
     SubfieldSubcode(const B& SuperCode, std::pair<size_t, Matrix<SUPER>> parameters)
         : LinearCode<SUB>(SuperCode.get_n(), parameters.first, parameters.second * SuperCode.get_G()),
-          SuperCode(SuperCode), Gamma(parameters.second) {}
+          SuperCode(SuperCode),
+          Gamma(parameters.second) {}
 
     static std::pair<size_t, Matrix<SUPER>> SSC_parameters(const B& SuperCode) {
         const size_t n = SuperCode.get_n();
@@ -4292,7 +4292,7 @@ class SubfieldSubcode : public LinearCode<typename B::FIELD::BASE_FIELD> {
                 Gamma.set_component(i, j, SUPER(Gammat.get_submatrix(i, j * m, 1, m).to_vector().reverse()));
         }
 
-        return std::make_pair(k, Gamma);
+        return std::make_pair(Gamma.is_zero() ? 0 : k, Gamma);
     }
 
     B SuperCode;
@@ -4304,6 +4304,108 @@ SubfieldSubcode(const B&) -> SubfieldSubcode<B>;
 
 template <class B>
 SubfieldSubcode(B&&) -> SubfieldSubcode<B>;
+
+template <class B>
+    requires std::derived_from<B, GRSCode<typename B::FIELD>>
+class AlternantCode : public SubfieldSubcode<B> {
+    using SUPER = typename B::FIELD;
+    using SUB = typename SUPER::BASE_FIELD;
+
+   public:
+    AlternantCode(const B& supercode) try : SubfieldSubcode
+        <B>(supercode), delta(supercode.get_n() - supercode.get_k() + 1) {}
+    catch (const std::invalid_argument& e) {
+        throw std::invalid_argument(std::string("Cannot construct alternant code: ") + e.what());
+    }
+
+    AlternantCode(const Vector<SUPER>& a, const Vector<SUPER>& d, size_t delta) try : SubfieldSubcode
+        <B>(GRSCode<SUPER>(a, d, a.get_n() - delta)), delta(delta) {}
+    catch (const std::invalid_argument& e) {
+        throw std::invalid_argument(std::string("Cannot construct alternant code: ") + e.what());
+    }
+
+    AlternantCode(const AlternantCode&) = default;
+    AlternantCode(AlternantCode&&) = default;
+    AlternantCode& operator=(const AlternantCode&) = default;
+    AlternantCode& operator=(AlternantCode&&) = default;
+
+    const Vector<SUPER>& get_a() const noexcept { return this->get_SuperCode().get_a(); }
+    const Vector<SUPER>& get_d() const noexcept { return this->get_SuperCode().get_d(); }
+    size_t get_delta() const noexcept { return delta; }
+
+    virtual void get_info(std::ostream& os) const override {
+        if (os.iword(details::index) < 3) {
+            SubfieldSubcode<B>::get_info(os);
+            if (os.iword(details::index) > 0) os << std::endl;
+        }
+        if (os.iword(details::index) > 0) {
+            os << "Alternant code: { delta = " << delta;
+            if (this->get_SuperCode().is_primitive()) os << ", primitive";
+            if (this->get_SuperCode().is_narrow_sense()) os << ", narrow-sense";
+            if (this->get_SuperCode().is_normalized()) os << ", normalized";
+            os << " }";
+        }
+    }
+
+   private:
+    size_t delta;
+};
+
+template <class B>
+AlternantCode(const B&) -> AlternantCode<B>;
+
+template <FiniteFieldType SUPER>
+AlternantCode(const Vector<SUPER>& a, const Vector<SUPER>& d, size_t) -> AlternantCode<GRSCode<SUPER>>;
+
+template <class B>
+    requires std::derived_from<B, RSCode<typename B::FIELD>>
+class BCHCode : public AlternantCode<B> {
+    using SUPER = typename B::FIELD;
+    using SUB = typename SUPER::BASE_FIELD;
+
+   public:
+    BCHCode(const B& rscode) try : AlternantCode
+        <B>(rscode) {}
+    catch (const std::invalid_argument& e) {
+        throw std::invalid_argument(std::string("Cannot construct BCH code: ") + e.what());
+    }
+
+    BCHCode(const SUPER& alpha, size_t b, size_t delta)
+        requires std::is_same_v<B, RSCode<SUPER>>
+    try : AlternantCode
+        <B>(RSCode<SUPER>(alpha, b, k_from_delta(alpha.get_multiplicative_order(), delta))) {}
+    catch (const std::invalid_argument& e) {
+        throw std::invalid_argument(std::string("Cannot construct BCH code: ") + e.what());
+    }
+
+    BCHCode(const BCHCode&) = default;
+    BCHCode(BCHCode&&) = default;
+    BCHCode& operator=(const BCHCode&) = default;
+    BCHCode& operator=(BCHCode&&) = default;
+
+    SUPER get_alpha() const noexcept { return this->get_SuperCode().get_alpha(); }
+    size_t get_b() const noexcept { return this->get_SuperCode().get_b(); }
+
+    virtual void get_info(std::ostream& os) const override {
+        if (os.iword(details::index) < 3) {
+            AlternantCode<B>::get_info(os);
+            if (os.iword(details::index) > 0) os << std::endl;
+        }
+        if (os.iword(details::index) > 0) os << "BCH code";
+    }
+
+   private:
+    static size_t k_from_delta(size_t n, size_t delta) {
+        if (delta == 0 || delta > n) throw std::invalid_argument("delta must satisfy 1 <= delta <= n");
+        return n - delta + 1;
+    }
+};
+
+template <class B>
+BCHCode(const B&) -> BCHCode<B>;
+
+template <FiniteFieldType SUPER>
+BCHCode(const SUPER&, size_t, size_t) -> BCHCode<RSCode<SUPER>>;
 
 template <FieldType T, class B>
     requires std::derived_from<B, LinearCode<T>>
