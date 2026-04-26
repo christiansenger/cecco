@@ -168,8 +168,6 @@ class Vector {
 
     /**
      * @brief Default constructor creating an empty vector
-     *
-     * Creates a vector with zero length.
      */
     constexpr Vector() noexcept : data(0) {}
 
@@ -407,7 +405,7 @@ class Vector {
      *
      * @throws std::invalid_argument if attempting to divide by zero
      *
-     * @warning Reliable results ((v / s) *  s == v)for a vector v and nonzero scalar s are only guaranteed in case T
+     * @note Reliable results ((v / s) * s == v) for a vector v and nonzero scalar s are only guaranteed in case T
      * fulfills concept FieldType<T>
      */
     Vector& operator/=(const T& s);
@@ -431,6 +429,31 @@ class Vector {
      * Uses the global random number generator from helpers.hpp.
      */
     Vector& randomize() noexcept;
+
+    /**
+     * @brief Randomize all vector components to nonzero values
+     * @return Reference to this vector after randomization
+     *
+     * Sets each component to a uniformly random nonzero field element by first zeroing
+     * each component and then calling randomize_force_change().
+     *
+     * Uses the global random number generator from helpers.hpp.
+     */
+    Vector& randomize_nonzero() noexcept
+        requires FieldType<T>;
+
+    /**
+     * @brief Randomize vector components to pairwise distinct field elements
+     * @return Reference to this vector after randomization
+     * @throws std::invalid_argument if the vector length exceeds the field size
+     *
+     * Fills the vector with n distinct elements chosen uniformly at random from the field,
+     * by shuffling the labels 0, ..., q-1 and taking the first n.
+     *
+     * Uses the global random number generator from helpers.hpp.
+     */
+    Vector& randomize_pairwise_distinct()
+        requires FiniteFieldType<T>;
 
     /** @} */
 
@@ -866,8 +889,6 @@ class Vector {
      *
      * @param value Value to assign to all components
      * @return Reference to this vector after filling
-     *
-     * Sets every component to the specified value.
      */
     constexpr Vector& fill(const T& value) noexcept;
 
@@ -1481,6 +1502,36 @@ Vector<T>& Vector<T>::randomize() noexcept {
 }
 
 template <ComponentType T>
+Vector<T>& Vector<T>::randomize_nonzero() noexcept
+    requires FieldType<T>
+{
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = T(0);
+        data[i].randomize_force_change();
+    }
+    cache.invalidate();
+    return *this;
+}
+
+template <ComponentType T>
+Vector<T>& Vector<T>::randomize_pairwise_distinct()
+    requires FiniteFieldType<T>
+{
+    constexpr size_t q = T::get_size();
+    const size_t n = data.size();
+    if (n > q)
+        throw std::invalid_argument("Cannot generate pairwise distinct vector: length " +
+                                    std::to_string(n) + " exceeds field size " + std::to_string(q));
+    std::vector<size_t> labels(q);
+    std::iota(labels.begin(), labels.end(), 0);
+    std::shuffle(labels.begin(), labels.end(), gen());
+    for (size_t i = 0; i < n; ++i)
+        data[i] = T(labels[i]);
+    cache.invalidate();
+    return *this;
+}
+
+template <ComponentType T>
 size_t Vector<T>::as_integer() const noexcept
     requires FiniteFieldType<T>
 {
@@ -1953,8 +2004,6 @@ T inner_product(const Vector<T>& lhs, const Vector<T>& rhs) {
  * @param rhs Second vector
  * @return Vector containing the Schur product (pointwise product)
  *
- * Computes the Schur product.
- *
  * @throws std::invalid_argument if vectors have different lengths
  */
 template <ComponentType T>
@@ -1964,7 +2013,7 @@ Vector<T> Schur_product(const Vector<T>& lhs, const Vector<T>& rhs) {
             "trying to calculate Schur product of "
             "vectors of different lengths");
     auto res = lhs;
-    for (size_t i = 0; i < lhs.get_n(); ++i) lhs.set_component(i, lhs[i] * rhs[i]);
+    for (size_t i = 0; i < res.get_n(); ++i) res.set_component(i, res[i] * rhs[i]);
     return res;
 }
 

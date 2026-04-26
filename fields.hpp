@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.8
+ * @version 2.3.10
  * @date 2026
  *
  * @copyright
@@ -105,6 +105,10 @@
  * + Immediate field operations after construction, LUTs are already in binary
  * - (Significantly) increased compilation time and compilation memory requirements for large fields
  *
+ * @note Compile-time LUT generation can exceed compiler step / recursion limits for larger fields. Raise with
+ * `-fconstexpr-depth=4294967295 -fconstexpr-steps=4294967295` (clang++) or `-fconstexpr-ops-limit=4294967295` (g++).
+ * Recommendation: use CompileTime mode for small fields (up to ~150 elements); otherwise prefer RunTime mode.
+ *
  * @section Irreducible_Polynomial_Construction
  *
  * Irreducible polynomials for extension field construction can be found using the library itself or using computational
@@ -119,7 +123,7 @@
  *                                   // ... irreducible over B
  * std::cout << p << std::endl;      // Output polynomial form
  * auto v = Vector(p);
- * std::cout << v << std::endl;      // Output vector form (to be used as modulus in the Ext constructor, replate (->{
+ * std::cout << v << std::endl;      // Output vector form (to be used as modulus in the Ext constructor, replace (->{
  *                                    // and )->})
  * @endcode
  *
@@ -179,6 +183,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <typeindex>
 // #include <random> // transitive through field_concepts_traits.hpp
 
@@ -553,7 +558,7 @@ constexpr T operator+(const T& lhs, const T& rhs) noexcept {
 }
 
 /**
- * @brief Field addition operator (lvalue + rvalue)
+ * @brief Field addition operator (rvalue + lvalue)
  * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (rvalue reference, moved)
  * @param rhs Right operand (const reference)
@@ -641,7 +646,7 @@ constexpr T operator-(const T& lhs, T&& rhs) noexcept {
  * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
  * @param lhs Left operand (rvalue reference, moved)
  * @param rhs Right operand (rvalue reference)
- * @return Difference lhs - rhs in the field.
+ * @return Difference lhs - rhs in the field
  */
 template <FieldType T>
 constexpr T operator-(T&& lhs, T&& rhs) noexcept {
@@ -831,7 +836,7 @@ constexpr T operator^(T&& base, int exponent) noexcept {
 /** @} */
 
 #ifdef CECCO_ERASURE_SUPPORT
-const std::string ERASURE_MARKER = "X";
+inline constexpr std::string_view ERASURE_MARKER = "X";
 #endif
 
 /**
@@ -1084,13 +1089,13 @@ class Rationals : public details::Field<Rationals<T>> {
      * @brief Get the numerator of this rational
      * @return Numerator value
      */
-    constexpr auto get_numerator() const noexcept { return numerator; }
+    constexpr const T& get_numerator() const noexcept { return numerator; }
 
     /**
      * @brief Get the denominator of this rational
      * @return Denominator value (always positive)
      */
-    constexpr auto get_denominator() const noexcept { return denominator; }
+    constexpr const T& get_denominator() const noexcept { return denominator; }
 
    private:
     T numerator;    ///< Numerator (can be negative)
@@ -1200,7 +1205,7 @@ Rationals<T>& Rationals<T>::randomize() noexcept {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
-    static std::uniform_int_distribution<int> dist(-100, 100);
+    thread_local std::uniform_int_distribution<int> dist(-100, 100);
     numerator = dist(gen());
     do {
         denominator = dist(gen());
@@ -1214,7 +1219,7 @@ Rationals<T>& Rationals<T>::randomize_force_change() noexcept {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
-    static std::uniform_int_distribution<int> dist(-100, 100);
+    thread_local std::uniform_int_distribution<int> dist(-100, 100);
     T n;
     T d;
     do {
@@ -1332,7 +1337,7 @@ namespace details {
  */
 template <uint16_t q, uint8_t m, size_t SIZE>
 static size_t constexpr integer_from_coeffs(const std::array<size_t, SIZE>& coeffs) noexcept {
-    static_assert(SIZE >= static_cast<size_t>(m), "Do not specify a custom Policy");
+    static_assert(SIZE >= static_cast<size_t>(m), "array size must be at least the extension degree m");
     size_t res = coeffs[0];
     size_t t = q;
     for (uint8_t i = 1; i < m; ++i) {
@@ -1487,10 +1492,12 @@ constexpr auto compute_multiplicative_inverses_direct()
     Lut1D<LabelType, FieldSize> lut_inv;
     lut_inv.values[0] = 0;
     for (LabelType i = 1; i < FieldSize; ++i) {
-        int s = modinv<FieldSize, int>(i);
-        if (s <= -(int)FieldSize || s >= (int)FieldSize) s %= (int)FieldSize;
-        if (s < 0) s += (int)FieldSize;
-        lut_inv.values[i] = s;
+        // int64_t avoids overflow in extended GCD for primes near 2^16.
+        int64_t s = modinv<FieldSize, int64_t>(i);
+        if (s <= -static_cast<int64_t>(FieldSize) || s >= static_cast<int64_t>(FieldSize))
+            s %= static_cast<int64_t>(FieldSize);
+        if (s < 0) s += static_cast<int64_t>(FieldSize);
+        lut_inv.values[i] = static_cast<LabelType>(s);
     }
     return lut_inv;
 }
@@ -1607,6 +1614,36 @@ constexpr auto compute_modular_addition_table()
     return lut_add;
 }
 
+/// @brief Smallest primitive root of F^* via direct power enumeration using F's own arithmetic
+///
+/// For each candidate g in {2, ..., p-1}, walks g, g^2, ..., g^(p-2). g is a primitive root iff
+/// none of these powers equals 1 (since the multiplicative order divides p-1).
+///
+/// @tparam F Prime-field type providing constexpr operator*=, operator==, F(int) and label_t
+/// @return Label of the smallest primitive root mod p
+///
+/// @note Evaluated at compile time using F's constexpr multiplication operator.
+template <typename F>
+constexpr typename F::label_t compute_primitive_root() {
+    constexpr auto p = F::get_p();
+    if constexpr (p == 2) return typename F::label_t{1};
+
+    for (uint16_t g_int = 2; g_int < p; ++g_int) {
+        const F g(g_int);
+        F power(1);
+        bool is_primitive = true;
+        for (uint16_t k = 1; k < p - 1; ++k) {
+            power *= g;
+            if (power == F(1)) {
+                is_primitive = false;
+                break;
+            }
+        }
+        if (is_primitive) return static_cast<typename F::label_t>(g_int);
+    }
+    return typename F::label_t{0};  // unreachable for prime p
+}
+
 /// @brief Computes addition table for extension fields using polynomial arithmetic
 ///
 /// This function generates a 2D lookup table for addition in extension fields 𝔽_{q^m}, where
@@ -1680,14 +1717,11 @@ size_t calculate_multiplicative_order(const FieldType& element) {
         temp *= element;
         ++i;
     }
-    return i;
 }
 
 /// @brief Finds a generator (primitive element) of the multiplicative group of 𝔽_Q \ {0}
 ///
-/// A generator g of the multiplicative group has multiplicative order Q-1, meaning
-/// {g⁰, g¹, g², ..., g^{Q-2}} = 𝔽_Q \ {0}. This function searches the multiplicative order table
-/// to find the first element with maximum order Q-1.
+/// Searches the multiplicative order table for the first element with order Q-1.
 ///
 /// @tparam LabelType The field element label type (e.g., uint8_t, uint16_t)
 /// @tparam FieldSize The size of the finite field Q
@@ -1722,8 +1756,11 @@ constexpr auto compute_modular_multiplication_table()
 {
     Lut2D<LabelType, FieldSize> lut_mul;
 
+    // uint32_t intermediate avoids overflow for primes near 2^16
+    // (matches the cast in Fp::operator*=).
     for (LabelType i = 0; i < FieldSize; ++i) {
-        for (LabelType j = i; j < FieldSize; ++j) lut_mul(i, j) = (i * j) % FieldSize;
+        for (LabelType j = i; j < FieldSize; ++j)
+            lut_mul(i, j) = static_cast<LabelType>((static_cast<uint32_t>(i) * j) % FieldSize);
     }
 
     return lut_mul;
@@ -1826,7 +1863,9 @@ constexpr auto compute_polynomial_multiplication_table(const LutCoeffType& lut_c
 
             lut_mul(i, j) = integer_from_coeffs<q, m>(temp);
             if (lut_mul(i, j) == 0) {
-                throw std::invalid_argument("* ERROR: Extension field construction requires _irreducible_ modulus! *");
+                // In CompileTime mode this throw surfaces upstream as
+                // "must be initialized by a constant expression" at LutHolder::lut.
+                throw std::invalid_argument("extension field construction requires irreducible modulus");
             }
         }
     }
@@ -1857,6 +1896,9 @@ struct LutHolderNoProvider;
  */
 template <typename LutType, LutType (*F)()>
 struct LutHolderNoProvider<LutType, F, LutMode::CompileTime> {
+    // If the compiler reports "must be initialized by a constant expression" here, see fields.hpp's
+    // LUT_Mode_Selection note: most likely the constexpr step budget was exhausted; switch to
+    // LutMode::RunTime or raise -fconstexpr-steps / -fconstexpr-ops-limit.
     static constexpr LutType lut = F();
     static constexpr const LutType& get_lut() { return lut; }
 };
@@ -1910,6 +1952,10 @@ struct LutHolder;
 template <typename LutType, typename ProviderLutType, const ProviderLutType& (*P)(),
           LutType (*F)(const ProviderLutType& (*)())>
 struct LutHolder<LutType, ProviderLutType, P, F, LutMode::CompileTime> {
+    // If the compiler reports "must be initialized by a constant expression" here, see fields.hpp's
+    // LUT_Mode_Selection note: most likely the constexpr step budget was exhausted; switch to
+    // LutMode::RunTime or raise -fconstexpr-steps / -fconstexpr-ops-limit. A reducible modulus
+    // surfaces here too via the throw in compute_polynomial_multiplication_table.
     static constexpr LutType lut = F(P);
     static constexpr const LutType& get_lut() { return lut; }
 };
@@ -2068,7 +2114,7 @@ class Embedding {
     constexpr SUBFIELD extract(const SUPERFIELD& super) const;
 
    private:
-    std::vector<size_t> embedding_map;
+    std::span<const size_t> embedding_map;
 
     /**
      * @brief Computes the embedding mapping vector
@@ -2085,13 +2131,11 @@ Embedding member functions
 
 template <FiniteFieldType SUBFIELD, FiniteFieldType SUPERFIELD>
     requires SubfieldOf<SUPERFIELD, SUBFIELD>
-Embedding<SUBFIELD, SUPERFIELD>::Embedding() : embedding_map(SUBFIELD::get_size()) {
-    // Use local static cache for each specific SUBFIELD,SUPERFIELD combination
+Embedding<SUBFIELD, SUPERFIELD>::Embedding() {
     static std::once_flag computed_flag;
-    static std::vector<size_t> cached_embedding(SUBFIELD::get_size());
+    static std::vector<size_t> cached_embedding;
     std::call_once(computed_flag, []() { cached_embedding = compute_embedding(); });
-    // Copy cached result to this instance
-    std::copy(cached_embedding.begin(), cached_embedding.end(), embedding_map.begin());
+    embedding_map = std::span<const size_t>(cached_embedding);
 }
 
 template <FiniteFieldType SUBFIELD, FiniteFieldType SUPERFIELD>
@@ -2459,7 +2503,7 @@ constexpr Isomorphism<B, A> Isomorphism<A, B>::inverse() const {
  * @class Fp
  * @brief Prime field 𝔽_p ≅ ℤ/pℤ
  *
- * @tparam p Prime modulus (must be prime and ≥ 2)
+ * @tparam p Prime modulus (must be prime, 2 ≤ p ≤ 65521 — the largest prime fitting in uint16_t)
  *
  * Implements finite fields of prime order p, consisting of integers {0, 1, 2, ..., p-1}
  * with arithmetic performed modulo p. These are the building blocks for all finite fields.
@@ -2795,7 +2839,11 @@ class Fp : public details::Field<Fp<p>> {
 
     constexpr size_t get_label() const noexcept { return label; }
 
-    static constexpr Fp get_generator() noexcept { return p == 2 ? Fp{1} : Fp{2}; }
+    /// @brief Get a generator (primitive root) of the multiplicative group F_p*
+    /// @return Field element whose multiplicative order is p - 1
+    ///
+    /// @see Gen for the precomputed underlying label
+    static constexpr Fp get_generator() noexcept { return Fp(Gen); }
 
     static constexpr size_t get_p() noexcept { return p; }
 
@@ -2921,6 +2969,12 @@ class Fp : public details::Field<Fp<p>> {
     }
 #endif
 
+    /// @brief Primitive element (generator) of F_p*
+    ///
+    /// Smallest primitive root mod p, computed at compile time via constexpr power enumeration
+    /// using Fp's own multiplication.
+    static constexpr label_t Gen = details::compute_primitive_root<Fp>();
+
    private:
     label_t label;  ///< Element value in {0, 1, ..., p-1}
 
@@ -2938,46 +2992,24 @@ class Fp : public details::Field<Fp<p>> {
      */
 
     /// @brief Addition lookup table: lut_add(a,b) = (a + b) mod p
-#ifdef USE_PRECOMPILED_LUTS
-    static const Lut2D lut_add;
-#else
     static constexpr Lut2D lut_add = details::compute_modular_addition_table<label_t, p>();
-#endif
 
     /// @brief Multiplication lookup table: lut_mul(a,b) = (a * b) mod p
-#ifdef USE_PRECOMPILED_LUTS
-    static const Lut2D lut_mul;
-#else
     static constexpr Lut2D lut_mul = details::compute_modular_multiplication_table<label_t, p>();
-#endif
 
     /// @brief Additive inverse lookup table: lut_neg[a] = (-a) mod p
-#ifdef USE_PRECOMPILED_LUTS
-    static const Lut1D lut_neg;
-#else
     static constexpr Lut1D lut_neg = details::compute_additive_inverses_direct<label_t, p>();
-#endif
 
     /// @brief Multiplicative inverse lookup table: lut_inv[a] = a^(-1) mod p
-#ifdef USE_PRECOMPILED_LUTS
-    static const Lut1D lut_inv;
-#else
     static constexpr Lut1D lut_inv = details::compute_multiplicative_inverses_direct<label_t, p>();
-#endif
 
     /// @brief Multiplicative order lookup table: lut_mul_ord[a] = multiplicative order of a in 𝔽_p\c\{0}
-#ifdef USE_PRECOMPILED_LUTS
-    static const Lut1D lut_mul_ord;
-#else
     static constexpr Lut1D lut_mul_ord = details::compute_multiplicative_orders<label_t, p>(lut_mul);
-#endif
 
     static constexpr bool luts_ready = []() constexpr {
-#ifndef USE_PRECOMPILED_LUTS
         static_assert(lut_add(0, 0) == 0);  // Forces immediate calculation of lut_add
         static_assert(lut_neg(0) == 0);     // Forces immediate calculation lut_neg
         static_assert(lut_mul(0, 1) == 0);  // Forces immediate calculation lut_mul
-#endif
         return true;
     }();
 
@@ -3003,7 +3035,10 @@ Fp<p>::Fp(const Ext<S, ext_modulus, mode>& other) {
                   "trying to convert between fields with different characteristic");
 
 #ifdef CECCO_ERASURE_SUPPORT
-    if (other.is_erased()) { this->erase(); return; }
+    if (other.is_erased()) {
+        this->erase();
+        return;
+    }
 #endif
 
     // Extract Fp<p> element from extension field (downcast via largest common subfield)
@@ -3035,7 +3070,7 @@ Fp<p>::Fp(const Iso<MAIN, OTHERS...>& other)
          ...);
 
         if (!converted) {
-            throw std::invalid_argument("No conversion path found from Iso to prime field");
+            throw std::invalid_argument("no conversion path found from Iso to prime field");
         }
     }
 }
@@ -3137,11 +3172,13 @@ constexpr Fp<p>& Fp<p>::operator*=(const Fp& rhs) noexcept {
     if (this->is_erased() || rhs.is_erased()) return this->erase();
 #endif
 #ifndef CECCO_USE_LUTS_FOR_FP
-    int temp = label * rhs.get_label();
+    // uint32_t intermediate avoids signed-int overflow for primes near 2^16
+    // (max product (p-1)^2 ≈ 4.29e9 fits in uint32_t but not in signed int).
+    uint32_t temp = static_cast<uint32_t>(label) * rhs.get_label();
     if (temp < p)
-        label = temp;
+        label = static_cast<label_t>(temp);
     else
-        label = temp % p;
+        label = static_cast<label_t>(temp % p);
 #else
     label = lut_mul(label, rhs.get_label());
 #endif
@@ -3166,7 +3203,7 @@ Fp<p>& Fp<p>::operator/=(const Fp& rhs) {
 #endif
     if (rhs.label == 0) throw std::invalid_argument("trying to divide by zero");
 #ifndef CECCO_USE_LUTS_FOR_FP
-    *this *= Fp(modinv<p, int>(rhs.get_label()));
+    *this *= Fp(modinv<p, int64_t>(rhs.get_label()));
 #else
     label = lut_mul(label, lut_inv(rhs.get_label()));
 #endif
@@ -3178,7 +3215,7 @@ Fp<p>& Fp<p>::randomize() noexcept {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
-    static std::uniform_int_distribution<int> dist(0, p - 1);
+    thread_local std::uniform_int_distribution<int> dist(0, p - 1);
 #ifndef CECCO_USE_LUTS_FOR_FP
     int temp = label + dist(gen());
     if (temp < p)
@@ -3196,7 +3233,7 @@ Fp<p>& Fp<p>::randomize_force_change() noexcept {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
-    static std::uniform_int_distribution<int> dist(1, p - 1);
+    thread_local std::uniform_int_distribution<int> dist(1, p - 1);
 #ifndef CECCO_USE_LUTS_FOR_FP
     int temp = label + dist(gen());
     if (temp < p)
@@ -3240,7 +3277,7 @@ void Fp<p>::show_tables() noexcept {
     }
 
 #ifdef CECCO_USE_LUTS_FOR_FP
-    std::cout << "additive inverse table (row and column headers omitted)" << std::endl;
+    std::cout << "additive inverse table (row headers omitted)" << std::endl;
     for (label_t i = 0; i < p; ++i) std::cout << (int)lut_neg(i) << std::endl;
 #endif
 
@@ -3251,9 +3288,7 @@ void Fp<p>::show_tables() noexcept {
     }
 
 #ifdef CECCO_USE_LUTS_FOR_FP
-    std::cout << "multiplicative inverse table (row and column headers "
-                 "omitted)"
-              << std::endl;
+    std::cout << "multiplicative inverse table (row headers omitted)" << std::endl;
     for (label_t i = 0; i < p; ++i) std::cout << (int)lut_inv(i) << std::endl;
 #endif
 }
@@ -3747,10 +3782,10 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      *
      * auto poly_F4 = alpha.get_minimal_polynomial<F4>();   // Over F4
      * auto poly_F2 = alpha.get_minimal_polynomial<F2>();   // Over F2 (absolute)
-     * auto poly_base = alpha.get_minimal_polynomial();     // Over F4 (default)
+     * auto poly_base = alpha.get_minimal_polynomial();     // Over F4 (default, immediate base field)
      * @endcode
      */
-    template <FiniteFieldType S>
+    template <FiniteFieldType S = B>
     Polynomial<S> get_minimal_polynomial() const
         requires SubfieldOf<Ext<B, modulus, mode>, S>;
 
@@ -3801,13 +3836,10 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      * Returns a generator element g such that g^(|field|-1) = 1 and g^k ≠ 1 for any
      * 0 < k < |field|-1. The generator spans the entire multiplicative group of the field.
      *
-     * **Conway Polynomial Priority**: For fields with ≤10,000 elements, this method first
-     * attempts to find a Conway polynomial root (that is always a generator/primitive). If successful,
-     * this ensures consistent canonical field representations across different construction
-     * paths. If no Conway generator is available, falls back to a random generator.
+     * The label is the smallest one with multiplicative order |field| − 1 — the same
+     * deterministic choice used by find_generator on the multiplicative-order LUT.
      *
      * @note The computed generator is cached statically for performance
-     * @see get_conway_generator() for Conway polynomial generator selection
      */
     static Ext get_generator() noexcept;
 
@@ -3886,8 +3918,8 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      *
      * @code{.cpp}
      * using F2 = Fp<2>;
-     * using F4 = Ext<C, MOD{1, 1, 1}>;
-     * using F16 = Ext<B, MOD{2, 1, 1}>;
+     * using F4 = Ext<F2, MOD{1, 1, 1}>;
+     * using F16 = Ext<F4, MOD{2, 1, 1}>;
      *
      * F16 x(10);
      * Vector<F4> v4 = x.as_vector<F4>();  // Length 2 (F16 = F4^2)
@@ -3950,25 +3982,6 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
    private:
     label_t label;  ///< Element label in {0, 1, ..., Q - 1}
 
-    /**
-     * @brief Attempt to find a Conway polynomial root (that is automatically a generator)
-     * @return Conway generator if available, std::nullopt otherwise
-     *
-     * This method searches for a field element that is a root of the Conway polynomial
-     * and thus automatically a generator of the multiplicative group. Conway polynomials provide canonical
-     * field representations that ensure consistent embeddings across different construction paths.
-     *
-     * **Algorithm**:
-     * 1. Retrieves the Conway polynomial for this field's size and characteristic
-     * 2. Converts the Conway polynomial to a polynomial over this field
-     * 3. Searches through all elements with multiplicative order |field|-1 (generators)
-     * 4. Returns the first generator that is also a Conway polynomial root
-     *
-     * @note Only available for fields with ≤10,000 elements where Conway polynomials are provided
-     * @note Used internally by get_generator() to prioritize Conway roots for canonical representations
-     */
-    static std::optional<Ext> get_conway_generator() noexcept;
-
     /// @brief Generator element storage
     struct Gen {
         label_t value{};  ///< Label of primitive element
@@ -3989,9 +4002,6 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      */
 
     /// @brief Element coefficients: lut_coeff[i] = polynomial coefficients of element i
-#ifdef USE_PRECOMPILED_LUTS
-    static const Lut2Dcoeff& lut_coeff();
-#else
     static constexpr auto lambda = []() constexpr -> Lut2Dcoeff {
         Lut2Dcoeff lut_coeff;
 
@@ -4010,79 +4020,54 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
 
     using LUT_COEFF = details::LutHolderNoProvider<Lut2Dcoeff, lambda, mode>;
     static constexpr auto& lut_coeff() { return LUT_COEFF::get_lut(); }
-#endif
 
     /// @brief Addition table: lut_add(a,b) = (polynomial_a + polynomial_b) mod f(X)
-#ifdef USE_PRECOMPILED_LUTS
-    static const Lut2D& lut_add();
-#else
     static constexpr Lut2D compute_add_lut_wrapper(const Lut2Dcoeff& (*provider)()) {
         const Lut2Dcoeff& coeffs = provider();
         return details::compute_polynomial_addition_table<label_t, Q, Lut2Dcoeff, m, B>(coeffs);
     }
     using LUT_ADD = details::LutHolder<Lut2D, Lut2Dcoeff, &lut_coeff, &compute_add_lut_wrapper, mode>;
     static constexpr auto& lut_add() { return LUT_ADD::get_lut(); }
-#endif
 
     /// @brief Multiplication table: lut_mul(a,b) = (polynomial_a * polynomial_b) mod f(X)
-#ifdef USE_PRECOMPILED_LUTS
-    static const Lut2D& lut_mul();
-#else
     static constexpr Lut2D compute_mul_lut_wrapper(const Lut2Dcoeff& (*provider)()) {
         const Lut2Dcoeff& coeffs = provider();
         return details::compute_polynomial_multiplication_table<label_t, Q, Lut2Dcoeff, m, B, modulus>(coeffs);
     }
     using LUT_MUL = details::LutHolder<Lut2D, Lut2Dcoeff, &lut_coeff, &compute_mul_lut_wrapper, mode>;
     static constexpr auto& lut_mul() { return LUT_MUL::get_lut(); }
-#endif
 
     /// @brief Additive inverse table: lut_neg[a] = -a
-#ifdef USE_PRECOMPILED_LUTS
-    static const Lut1D& lut_neg();
-#else
     static constexpr Lut1D compute_neg_lut_wrapper(const Lut2D& (*provider)()) {
         const Lut2D& add = provider();
         return details::compute_additive_inverses_search<label_t, Q>(add);
     }
     using LUT_NEG = details::LutHolder<Lut1D, Lut2D, &lut_add, &compute_neg_lut_wrapper, mode>;
     static constexpr auto& lut_neg() { return LUT_NEG::get_lut(); }
-#endif
 
     /// @brief Multiplicative inverse table: lut_inv[a] = a^(-1)
-#ifdef USE_PRECOMPILED_LUTS
-    static const Lut1D& lut_inv();
-#else
     static constexpr Lut1D compute_inv_lut_wrapper(const Lut2D& (*provider)()) {
         const Lut2D& mul = provider();
         return details::compute_multiplicative_inverses_search<label_t, Q>(mul);
     }
     using LUT_INV = details::LutHolder<Lut1D, Lut2D, &lut_mul, &compute_inv_lut_wrapper, mode>;
     static constexpr auto& lut_inv() { return LUT_INV::get_lut(); }
-#endif
 
     /// @brief Multiplicative order table: lut_mul_ord[a] = order of a in multiplicative group
-#ifdef USE_PRECOMPILED_LUTS
-    static const Lut1D& lut_mul_ord();
-#else
     static constexpr Lut1D compute_mul_ord_lut_wrapper(const Lut2D& (*provider)()) {
         const Lut2D& mul = provider();
         return details::compute_multiplicative_orders<label_t, Q>(mul);
     }
     using LUT_MUL_ORD = details::LutHolder<Lut1D, Lut2D, &lut_mul, &compute_mul_ord_lut_wrapper, mode>;
     static constexpr auto& lut_mul_ord() { return LUT_MUL_ORD::get_lut(); }
-#endif
 
     /// @brief Primitive element (generator) of the multiplicative group
-#ifdef USE_PRECOMPILED_LUTS
-    static const Gen& g();
-#else
     static constexpr Gen compute_generator_wrapper(const Lut1D& (*provider)()) {
         const Lut1D& mul_ord = provider();
         return Gen{details::find_generator<label_t, Q>(mul_ord)};
     }
     using LUT_GEN = details::LutHolder<Gen, Lut1D, &lut_mul_ord, &compute_generator_wrapper, mode>;
     static constexpr auto& g() { return LUT_GEN::get_lut(); }
-#endif
 
     // LUT-compatible interface for use as BaseFieldType
     // These allow Ext fields to be used as base fields for higher-order extensions
@@ -4092,7 +4077,6 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
     static constexpr label_t lut_inv(label_t a) noexcept { return lut_inv()(a); }
 
     static constexpr bool luts_ready = []() constexpr {
-#ifndef USE_PRECOMPILED_LUTS
         // Ensure base field LUTs are ready first
         static_assert(B::ready());  // Forces base field LUT computation
 
@@ -4106,7 +4090,6 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
             static_assert(g().value != 1);                 // Forces immediate calculation of generator g
         }
         // For Runtime mode, LUTs will be computed when first accessed
-#endif
         return true;
     }();
 
@@ -4124,7 +4107,10 @@ Ext<B, modulus, mode>::Ext(int l) {
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 Ext<B, modulus, mode>::Ext(const B& other) noexcept {
 #ifdef CECCO_ERASURE_SUPPORT
-    if (other.is_erased()) { this->erase(); return; }
+    if (other.is_erased()) {
+        this->erase();
+        return;
+    }
 #endif
     // Use cached subfield embedding for mathematically correct embedding
     auto embedding = Embedding<B, Ext>();
@@ -4161,7 +4147,10 @@ Ext<B, modulus, mode>::Ext(const Ext<S, ext_modulus, ext_mode>& other) {
                   "trying to convert between fields with different characteristic");
 
 #ifdef CECCO_ERASURE_SUPPORT
-    if (other.is_erased()) { this->erase(); return; }
+    if (other.is_erased()) {
+        this->erase();
+        return;
+    }
 #endif
 
     using IN = Ext<S, ext_modulus, ext_mode>;
@@ -4358,7 +4347,10 @@ constexpr Ext<B, modulus, mode>::Ext(const Fp<p>& other)
                   "Prime field characteristic must match extension field characteristic");
 
 #ifdef CECCO_ERASURE_SUPPORT
-    if (other.is_erased()) { this->erase(); return; }
+    if (other.is_erased()) {
+        this->erase();
+        return;
+    }
 #endif
 
     // Use the cached embedding for mathematically correct embedding
@@ -4473,7 +4465,7 @@ Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize() noexcept {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
-    static std::uniform_int_distribution<label_t> dist(0, Q - 1);
+    thread_local std::uniform_int_distribution<label_t> dist(0, Q - 1);
     label = dist(gen());
     return *this;
 }
@@ -4483,7 +4475,7 @@ Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize_force_change() noexcept 
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
-    static std::uniform_int_distribution<label_t> dist(1, Q - 1);
+    thread_local std::uniform_int_distribution<label_t> dist(1, Q - 1);
     label = lut_add()(label, dist(gen()));
     return *this;
 }
@@ -4493,7 +4485,7 @@ size_t Ext<B, modulus, mode>::get_multiplicative_order() const {
 #ifdef CECCO_ERASURE_SUPPORT
     if (is_erased()) throw std::invalid_argument("trying to calculate multiplicative order of erased element");
 #endif
-    if (label == 0) throw std::invalid_argument("calculation of multiplicative order of additive neutral element");
+    if (label == 0) throw std::invalid_argument("trying to calculate multiplicative order of additive neutral element");
     return lut_mul_ord()(label);
 }
 
@@ -4553,48 +4545,9 @@ Ext<B, modulus, mode> Ext<B, modulus, mode>::get_generator() noexcept {
     static std::once_flag computed_flag;
     static Ext cached_generator{0};
 
-    std::call_once(computed_flag, []() {
-        // Try to find Conway generator first (if polynomial.hpp defines Conway polynomial)
-        auto conway_gen = get_conway_generator();
-        if (conway_gen.has_value()) {
-            cached_generator = conway_gen.value();
-        } else {
-            // Fallback to conventional generator
-#ifdef USE_PRECOMPILED_LUTS
-            cached_generator = Ext(g.value);
-#else
-        cached_generator = Ext(g().value);
-#endif
-        }
-    });
+    std::call_once(computed_flag, []() { cached_generator = Ext(g().value); });
 
     return cached_generator;
-}
-
-template <FiniteFieldType B, MOD modulus, LutMode mode>
-std::optional<Ext<B, modulus, mode>> Ext<B, modulus, mode>::get_conway_generator() noexcept {
-    constexpr size_t m_over_prime = details::degree_over_prime_v<Ext>;
-
-    // Get Conway polynomial for this field
-    auto conway_poly = ConwayPolynomial<get_p(), m_over_prime>();
-
-    // If no Conway polynomial available, return empty
-    if (conway_poly.is_empty()) return std::nullopt;
-
-    // Convert to polynomial over this field
-    Polynomial<Ext> poly_over_field(conway_poly);
-
-    // Search among generators for a Conway root
-    const auto& mul_ord = lut_mul_ord();
-    for (label_t i = 2; i < Q; ++i) {
-        if (mul_ord(i) == Q - 1) {  // All roots of Conway polynomial are generators
-            Ext candidate(i);
-            if (poly_over_field(candidate).is_zero()) return candidate;
-        }
-    }
-
-    // Can never be here
-    return std::nullopt;
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
@@ -4638,7 +4591,7 @@ void Ext<B, modulus, mode>::show_tables() noexcept {
         std::cout << std::endl;
     }
 
-    std::cout << "additive inverse table (row and column headers omitted)" << std::endl;
+    std::cout << "additive inverse table (row headers omitted)" << std::endl;
     for (label_t i = 0; i < Q; ++i) std::cout << (int)(lut_neg()(i)) << std::endl;
 
     std::cout << "multiplication table (row and column headers omitted)" << std::endl;
@@ -4647,19 +4600,13 @@ void Ext<B, modulus, mode>::show_tables() noexcept {
         std::cout << std::endl;
     }
 
-    std::cout << "multiplicative inverse table (row and column headers "
-                 "omitted)"
-              << std::endl;
+    std::cout << "multiplicative inverse table (row headers omitted)" << std::endl;
     for (label_t i = 0; i < Q; ++i) std::cout << (int)(lut_inv()(i)) << std::endl;
 
-    std::cout << "multiplicative order table (row and column headers "
-                 "omitted)"
-              << std::endl;
+    std::cout << "multiplicative order table (row headers omitted)" << std::endl;
     for (label_t i = 0; i < Q; ++i) std::cout << (int)(lut_mul_ord()(i)) << std::endl;
 
-    std::cout << "element coefficients table (row and column "
-                 "headers omitted)"
-              << std::endl;
+    std::cout << "element coefficients table (column headers omitted)" << std::endl;
     for (label_t i = 0; i < Q; ++i) {
         std::cout << (int)i << ": ";
         for (uint8_t j = 0; j < m; ++j) std::cout << (int)(lut_coeff().values[i][j]) << ", ";
@@ -4690,13 +4637,6 @@ std::ostream& operator<<(std::ostream& os, const Ext<B, modulus, mode>& e) noexc
     }
 #endif
     os << (int)e.get_label();
-    /*
-    os << " [";
-    for (size_t i = 0; i < Fq<p, modulus>::get_m(); ++i) {
-        os << (int)Fq<p, modulus>::lut_coeff().values[e.get_label()][i];
-    }
-    os << "]";
-    */
     return os;
 }
 
@@ -4907,7 +4847,7 @@ class Iso : public details::Base {
      * using F2 = Fp<2>;
      * using F64 = Iso<F64_a, F64_b, F64_c>;  // All have characteristic 2
      * F2 a(1);
-     * F64 a(a);                              // Embeds F2 element into F64
+     * F64 b(a);                              // Embeds F2 element into F64
      * @endcode
      */
     template <uint16_t p>

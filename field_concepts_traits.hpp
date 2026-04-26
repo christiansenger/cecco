@@ -2,7 +2,7 @@
  * @file field_concepts_traits.hpp
  * @brief Concepts, traits, and type utilities for finite field arithmetic
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.1
+ * @version 2.1.2
  * @date 2026
  *
  * @copyright
@@ -52,7 +52,6 @@ namespace CECCO {
 enum class LutMode {
     CompileTime,  ///< Generate LUTs at compile-time using constexpr (default)
     RunTime       ///< Generate LUTs at runtime using lazy initialization
-    // Note: Precompiled mode is handled by the USE_PRECOMPILED_LUTS macro
 };
 
 namespace details {
@@ -168,55 +167,19 @@ concept FieldType =
 
 template <typename T>
 concept FiniteFieldType =
-    std::is_base_of_v<details::Base, T> && !std::is_same_v<details::Base, T> && requires(const T& t, T& mutable_t) {
-        // Basic field requirements (from FieldType, but inlined to avoid circular dependency)
-        requires std::constructible_from<T>;       // Default constructor
-        requires std::copy_constructible<T>;       // Copy constructor
-        requires std::move_constructible<T>;       // Move constructor
-        requires std::constructible_from<T, int>;  // From int constructor
-
-        // Assignment operators
-        { mutable_t = t } -> std::same_as<T&>;   // Field element assignment
-        { mutable_t = 42 } -> std::same_as<T&>;  // Integer assignment
-
-        // Compound assignment operators
-        { mutable_t += t } -> std::same_as<T&>;
-        { mutable_t -= t } -> std::same_as<T&>;
-        { mutable_t *= t } -> std::same_as<T&>;
-        { mutable_t /= t } -> std::same_as<T&>;
-
-        // Comparison operators
-        { t == t } -> std::same_as<bool>;
-
-        // Unary - operator
-        { -t } -> std::same_as<T>;
-
-        // Element properties
-        { t.is_zero() } -> std::same_as<bool>;
-        { t.has_positive_sign() } -> std::same_as<bool>;
-        { t.get_characteristic() } -> std::convertible_to<size_t>;
-        { t.get_info() } -> std::convertible_to<std::string>;
-
-        // Randomization
-        requires requires { mutable_t.randomize(); };
-        requires requires { mutable_t.randomize_force_change(); };
-
-        // Finite field specific requirements
+    FieldType<T> && requires(const T& t) {
         requires(T::get_characteristic() > 1);
         requires is_prime(T::get_p());
 
-        // Static field structure information
         { t.get_size() } -> std::convertible_to<size_t>;
-        { t.get_m() } -> std::convertible_to<size_t>;
-        { t.get_p() } -> std::convertible_to<size_t>;
-        { t.get_q() } -> std::convertible_to<size_t>;
+        { t.get_m()    } -> std::convertible_to<size_t>;
+        { t.get_p()    } -> std::convertible_to<size_t>;
+        { t.get_q()    } -> std::convertible_to<size_t>;
 
-        // Generator element
         { T::get_generator() } -> std::same_as<T>;
 
-        // Element properties
         { t.get_multiplicative_order() } -> std::convertible_to<size_t>;
-        { t.get_additive_order() } -> std::convertible_to<size_t>;
+        { t.get_additive_order()       } -> std::convertible_to<size_t>;
     };
 
 /**
@@ -416,12 +379,11 @@ class Iso;
  * using F64_1 = Ext<F8, {7, 1, 1}>;
  * using F64_2 = Ext<F4, {1, 2, 0, 1}>;
  *
- * static_assert(Isomorphic<F64_1, F64_2>);  // true: every field is isomorphic to itself
+ * static_assert(Isomorphic<F64_1, F64_2>);  // true: different constructions of 𝔽₆₄ are isomorphic
+ * static_assert(Isomorphic<F64_1, F64_1>);  // true: every field is isomorphic to itself (reflexive)
  * static_assert(Isomorphic<F4_1, F4_2>);    // true: both have 4 elements
  * static_assert(!Isomorphic<F4_1, F8>);     // false: 4 ≠ 8 elements
  * static_assert(!Isomorphic<F2, F3>);       // false: 2 ≠ 3 elements
- * static_assert(Isomorphic<F4_1, F4_1>);    // true: reflexive
- * static_assert(Isomorphic<F64_1, F64_2>);  // true: both have 64 elements
  * @endcode
  *
  * @note This concept only checks size equality. The actual isomorphism construction

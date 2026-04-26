@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.6
+ * @version 2.2.7
  * @date 2026
  *
  * @copyright
@@ -171,9 +171,9 @@ class Polynomial {
      */
 
     /**
-     * @brief Default constructor creating the zero polynomial
+     * @brief Default constructor creating an empty polynomial
      *
-     * Creates an empty polynomial representing the zero polynomial.
+     * Creates an empty polynomial (uninitialized state, distinct from the zero polynomial).
      */
     constexpr Polynomial() noexcept {}
 
@@ -181,8 +181,6 @@ class Polynomial {
      * @brief Constructs a constant polynomial from an integer
      *
      * @param e Integer value to convert to coefficient type T
-     *
-     * Creates a constant polynomial p(x) = T(e).
      */
     constexpr Polynomial(int e) noexcept : data(1) { data.back() = T(e); }
 
@@ -190,8 +188,6 @@ class Polynomial {
      * @brief Constructs a constant polynomial from a coefficient
      *
      * @param e Coefficient value of type T
-     *
-     * Creates a constant polynomial p(x) = e.
      */
     constexpr Polynomial(const T& e) : data(1) { data.back() = e; }
 
@@ -200,8 +196,7 @@ class Polynomial {
      *
      * @param l Initializer list containing coefficients in ascending degree order
      *
-     * Creates a polynomial where l[i] is the coefficient of x^i.
-     * Enables convenient polynomial initialization syntax:
+     * l[i] is the coefficient of x^i:
      * @code{.cpp}
      * Polynomial<int> p{1, 2, 3};       // 1 + 2x + 3x²
      * Polynomial<Fp<7>> q{0, 1, 0, 1};  // x + x³
@@ -235,9 +230,8 @@ class Polynomial {
      * @ref largest_common_subfield_t as the conversion bridge. Supports conversions across
      * different field towers, not just within the same construction hierarchy.
      *
-     * @throws std::invalid_argument if a coefficient cannot be represented in target field (downcasting not
-     * possible)
      * @throws std::bad_alloc if memory allocation fails
+     * @note May propagate exceptions from T's cross-field constructor if a coefficient cannot be represented
      */
     template <FiniteFieldType S>
         requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
@@ -298,9 +292,8 @@ class Polynomial {
      * @ref largest_common_subfield_t as the conversion bridge. Supports conversions across
      * different field towers, not just within the same construction hierarchy.
      *
-     * @throws std::invalid_argument if a coefficient cannot be represented in target field (downcasting not
-     * possible)
      * @throws std::bad_alloc if memory allocation fails
+     * @note May propagate exceptions from T's cross-field constructor if a coefficient cannot be represented
      */
     template <FiniteFieldType S>
         requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
@@ -334,7 +327,7 @@ class Polynomial {
      * Creates a new polynomial -p(x) where each coefficient is negated.
      * Uses copy constructor for lvalue references.
      */
-    constexpr Polynomial operator-() & noexcept;
+    constexpr Polynomial operator-() const& noexcept;
 
     /**
      * @brief Unary minus operator for rvalue references (move optimization)
@@ -351,8 +344,7 @@ class Polynomial {
      * @param s Value at which to evaluate the polynomial
      * @return Result of p(s) = a₀ + a₁s + a₂s² + ... + aₙsⁿ
      *
-     * Efficiently evaluates the polynomial at the given value using Horner's method
-     * for O(n) complexity. Essential for Reed-Solomon encoding/decoding and root finding.
+     * Evaluates the polynomial at the given value using Horner's method (O(n)).
      *
      * @throws std::invalid_argument if attempting to evaluate empty polynomial
      */
@@ -452,7 +444,7 @@ class Polynomial {
      *
      * @throws std::invalid_argument if attempting to divide by zero scalar
      *
-     * @warning Reliable results ((p / s) *  s == p) for a polynomial p and nonzero scalar s are only guaranteed in case
+     * @note Reliable results ((p / s) * s == p) for a polynomial p and nonzero scalar s are only guaranteed in case
      * T fulfills concept FieldType<T>
      */
     Polynomial& operator/=(const T& s);
@@ -477,9 +469,7 @@ class Polynomial {
      * @param rhs Divisor polynomial
      * @return Pair containing quotient and remainder polynomials
      *
-     * Performs complete polynomial long division: this = quotient * rhs + remainder.
-     * Essential for polynomial GCD computation and modular arithmetic.
-     * Handles special cases (constant divisor, degree conditions) efficiently.
+     * Performs polynomial long division: this = quotient * rhs + remainder.
      *
      * @throws std::invalid_argument if attempting division by zero polynomial
      *
@@ -562,9 +552,7 @@ class Polynomial {
     /**
      * @brief Get the degree of the polynomial
      *
-     * @return Degree of the polynomial (highest power of x with non-zero coefficient)
-     *
-     * Returns deg(p) = max{i : aᵢ ≠ 0} for polynomial p(x) = ∑ aᵢxᵢ.
+     * @return deg(p) = max{i : aᵢ ≠ 0}
      *
      * @throws std::invalid_argument if called on empty polynomial
      *
@@ -583,9 +571,7 @@ class Polynomial {
     /**
      * @brief Get the trailing degree (lowest power with non-zero coefficient)
      *
-     * @return Trailing degree of the polynomial
-     *
-     * Returns the trailing degree: min{i : aᵢ ≠ 0} for polynomial p(x) = ∑ aᵢxᵢ.
+     * @return min{i : aᵢ ≠ 0}
      *
      * @throws std::invalid_argument if called on empty polynomial
      *
@@ -597,9 +583,7 @@ class Polynomial {
     /**
      * @brief Get the trailing coefficient (coefficient of lowest power term)
      *
-     * @return Reference to trailing coefficient
-     *
-     * Returns the coefficient of x^k where k is the trailing degree.
+     * @return Const reference to the trailing coefficient
      *
      * @throws std::invalid_argument if called on empty polynomial
      *
@@ -611,31 +595,27 @@ class Polynomial {
     /**
      * @brief Get the leading coefficient (coefficient of highest power term)
      *
-     * @return Reference to leading coefficient
-     *
-     * Returns the coefficient of x^n where n is the degree.
+     * @return Const reference to the leading coefficient
      *
      * @throws std::invalid_argument if called on empty polynomial
      */
     const T& leading_coefficient() const;
 
     /**
-     * @brief Check if polynomial is empty
+     * @brief Check if polynomial is empty (uninitialized)
      *
      * @return true if polynomial has no coefficients, false otherwise
      *
-     * An empty polynomial represents an uninitialized state, distinct from
-     * the zero polynomial which has degree 0.
+     * @note Distinct from the zero polynomial.
      */
     constexpr bool is_empty() const noexcept { return data.empty(); }
 
     /**
      * @brief Check if polynomial is the zero polynomial
      *
-     * @return true if polynomial equals 0, false otherwise
+     * @return true if p(x) = 0, false otherwise
      *
-     * Tests whether the polynomial is identically zero: p(x) = 0.
-     * Different from empty polynomial.
+     * @note Distinct from empty polynomial.
      *
      * @throws std::invalid_argument if called on empty polynomial
      *
@@ -651,9 +631,7 @@ class Polynomial {
     /**
      * @brief Check if polynomial is the constant polynomial 1
      *
-     * @return true if polynomial equals 1, false otherwise
-     *
-     * Tests whether the polynomial is the multiplicative identity: p(x) = 1.
+     * @return true if p(x) = 1, false otherwise
      *
      * @throws std::invalid_argument if called on empty polynomial
      *
@@ -670,8 +648,6 @@ class Polynomial {
      * @brief Check if polynomial is monic (leading coefficient equals 1)
      *
      * @return true if leading coefficient is 1, false otherwise
-     *
-     * A monic polynomial has leading coefficient 1.
      *
      * @throws std::invalid_argument if called on empty polynomial
      *
@@ -690,8 +666,7 @@ class Polynomial {
      * @return True if the polynomial is irreducible, false otherwise
      *
      * Tests irreducibility by trial division: checks all monic polynomials of degree
-     * up to deg(p)/2 for divisibility. A constant polynomial (degree 0) is not
-     * considered irreducible; a linear polynomial (degree 1) is always irreducible.
+     * up to deg(p)/2 for divisibility.
      *
      * @throws std::invalid_argument if called on empty polynomial (via degree())
      *
@@ -894,7 +869,7 @@ Polynomial<T>& Polynomial<T>::operator=(const Polynomial<S>& rhs) {
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> Polynomial<T>::operator-() & noexcept {
+constexpr Polynomial<T> Polynomial<T>::operator-() const& noexcept {
     Polynomial res(*this);
     std::ranges::for_each(res.data, [](T& c) { c = -c; });
     return res;
@@ -1638,10 +1613,7 @@ Polynomial<T> OnePolynomial() {
  * @param b Second polynomial
  * @param s Optional pointer to store Bézout coefficient for polynomial a
  * @param t Optional pointer to store Bézout coefficient for polynomial b
- * @return Greatest common divisor polynomial gcd(a,b)
- *
- * Computes gcd(a,b) using the Extended Euclidean Algorithm. If s and t pointers are provided,
- * also computes Bézout coefficients such that: gcd(a,b) = s·a + t·b
+ * @return gcd(a,b); if s and t are provided, also satisfies gcd(a,b) = s·a + t·b
  *
  * @note Only available for coefficient types satisfying @ref CECCO::FieldType
  * @note Automatically handles degree ordering (larger degree polynomial processed first)
@@ -1687,10 +1659,7 @@ Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, 
  *
  * @tparam T Coefficient type satisfying @ref CECCO::FieldType
  * @param polys std::vector of polynomials to find GCD of
- * @return Greatest common divisor of all polynomials in the std::vector
- *
- * Computes gcd(p₁, p₂, ..., pₙ) by iteratively applying GCD.
- * Uses the associative property: gcd(a,b,c) = gcd(gcd(a,b), c).
+ * @return gcd(p₁, p₂, ..., pₙ) computed iteratively
  *
  * @throws std::invalid_argument if polys is empty
  *
@@ -1717,12 +1686,7 @@ Polynomial<T> GCD(const std::vector<Polynomial<T>>& polys)
  * @tparam T Coefficient type satisfying @ref CECCO::FieldType
  * @param a First polynomial
  * @param b Second polynomial
- * @return Least common multiple lcm(a,b)
- *
- * Computes lcm(a,b) using the identity: lcm(a,b) = (a·b)/gcd(a,b).
- * The LCM is the polynomial of smallest degree divisible by both a and b.
- *
- * Important for polynomial ideal operations and code construction algorithms.
+ * @return lcm(a,b) = (a·b)/gcd(a,b)
  *
  * @note Only available for coefficient types satisfying @ref CECCO::FieldType
  */
@@ -1781,30 +1745,6 @@ Polynomial<T> LCM(const std::vector<Polynomial<T>>& polys)
 template <ComponentType T>
 constexpr Polynomial<T> operator^(const Polynomial<T>& base, int exponent) noexcept {
     return sqm<Polynomial<T>>(base, exponent);
-}
-
-/**
- * @brief Find a random irreducible polynomial of given degree
- *
- * @tparam T Field type for coefficients (must satisfy @ref CECCO::FieldType)
- * @param degree Degree of the irreducible polynomial to find
- * @return A monic irreducible polynomial of the specified degree
- *
- * Generates random monic polynomials of the given degree and tests them for
- * irreducibility until one is found.
- *
- * @note Relies on randomization; runtime depends on the density of irreducible
- *       polynomials at the given degree
- */
-template <FieldType T>
-Polynomial<T> find_irreducible(size_t degree) {
-    Polynomial<T> res;
-    do {
-        res.randomize(degree);
-    } while (!res.is_irreducible());
-
-    res.normalize();
-    return res;
 }
 
 /**
@@ -2016,6 +1956,33 @@ template <uint16_t p, size_t m>
 constexpr Polynomial<Fp<p>> ConwayPolynomial() {
     return Polynomial<Fp<p>>(ConwayCoefficients<p, m>());
 }
+
+    /**
+     * @brief Find a random irreducible polynomial of given degree
+     *
+     * @tparam T Field type for coefficients (must satisfy @ref CECCO::FieldType)
+     * @param degree Degree of the irreducible polynomial to find
+     * @return A monic irreducible polynomial of the specified degree
+     *
+     * Generates random monic polynomials of the given degree and tests them for
+     * irreducibility until one is found.
+     *
+     * @note Relies on randomization; runtime depends on the density of irreducible
+     *       polynomials at the given degree
+     */
+    template <FieldType T>
+    Polynomial<T> find_irreducible(size_t degree) {
+        if (degree == 0) return Polynomial<T>(T(1));
+        Polynomial<T> res;
+        do {
+            res.randomize(degree);
+        } while (!res.is_irreducible());
+
+        res.normalize();
+        return res;
+    }
+
+
 
 }  // namespace CECCO
 

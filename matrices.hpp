@@ -2,7 +2,7 @@
  * @file matrices.hpp
  * @brief Matrix arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.6
+ * @version 2.2.7
  * @date 2026
  *
  * @copyright
@@ -283,9 +283,6 @@ class Matrix {
    public:
     /**
      * @brief Default constructor creating an empty matrix
-     *
-     * Creates a matrix with zero dimensions (0 × 0). The matrix is considered empty
-     * and has @ref details::Zero type by default.
      */
     constexpr Matrix() noexcept : data(0) {}
 
@@ -674,7 +671,7 @@ class Matrix {
      *
      * @note Only for types fulfilling CECCO::ReliablyComparableType.
      */
-    constexpr size_t wH() const noexcept
+    constexpr size_t wH() const
         requires ReliablyComparableType<T>;
 
     /**
@@ -725,7 +722,7 @@ class Matrix {
      *
      * @throws std::invalid_argument if matrix is not square or empty
      *
-     * @note Specialized algorithms for structured matrices (@ref details:Diagonal, @ref details::Vandermonde)
+     * @note Specialized algorithms for structured matrices (@ref details::Diagonal, @ref details::Vandermonde)
      * @note Only available for field types
      */
     Polynomial<T> characteristic_polynomial() const
@@ -838,7 +835,7 @@ class Matrix {
      *
      * @throws std::invalid_argument if either index is out of bounds
      *
-     * @note Matrix type may change decay after this operation
+     * @note Matrix type may decay to Generic after this operation
      */
     template <typename U>
     Matrix& set_component(size_t i, size_t j, U&& c)
@@ -974,7 +971,7 @@ class Matrix {
      * A.diagonal_join(B);                // A becomes 4 × 4 block diagonal matrix
      * @endcode
      */
-    Matrix<T>& diagonal_join(const Matrix& other) noexcept;
+    Matrix<T>& diagonal_join(const Matrix& other);
 
     /**
      * @brief Compute Kronecker product with another matrix
@@ -1026,8 +1023,7 @@ class Matrix {
      * @param i Index of row to scale
      * @return Reference to this matrix after row scaling
      *
-     * Multiplies all elements in row i by the scalar s. This is a fundamental
-     * row operation used in Gaussian elimination.
+     * Multiplies all elements in row i by the scalar s.
      *
      * @throws std::invalid_argument if row index is out of bounds
      *
@@ -1042,8 +1038,7 @@ class Matrix {
      * @param i Index of column to scale
      * @return Reference to this matrix after column scaling
      *
-     * Multiplies all elements in column i by the scalar s. This is a fundamental
-     * column operation.
+     * Multiplies all elements in column i by the scalar s.
      *
      * @throws std::invalid_argument if column index is out of bounds
      *
@@ -1244,7 +1239,7 @@ class Matrix {
     /**
      * @brief Erases specified column from the matrix (flags its components as erasures)
      *
-     * @param i Index of column to delete
+     * @param i Index of column to erase
      * @return Reference to this matrix after erasing
      *
      * Erases all components of the specified column.
@@ -1281,10 +1276,10 @@ class Matrix {
     /**
      * @brief Un-erases specified column from the matrix (removes the erasure flag from its components)
      *
-     * @param i Index of column to delete
+     * @param i Index of column to un-erase
      * @return Reference to this matrix after un-erasing
      *
-     * Un-Erases all components of the specified column.
+     * Un-erases all components of the specified column.
      *
      * @note Only available for field types (since erasure flag/unerase() is required)
      *
@@ -1318,7 +1313,7 @@ class Matrix {
     /**
      * @brief Erases specified row from the matrix (flags its components as erasures)
      *
-     * @param i Index of row to delete
+     * @param i Index of row to erase
      * @return Reference to this matrix after erasing
      *
      * Erases all components of the specified row.
@@ -1355,10 +1350,10 @@ class Matrix {
     /**
      * @brief Un-erases specified row from the matrix (removes the erasure flag from its components)
      *
-     * @param i Index of row to delete
+     * @param i Index of row to un-erase
      * @return Reference to this matrix after un-erasing
      *
-     * Un-Erases all components of the specified row.
+     * Un-erases all components of the specified row.
      *
      * @note Only available for field types (since erasure flag/unerase() is required)
      *
@@ -2128,7 +2123,7 @@ Matrix<T>& Matrix<T>::randomize() {
 }
 
 template <ComponentType T>
-constexpr size_t Matrix<T>::wH() const noexcept
+constexpr size_t Matrix<T>::wH() const
     requires ReliablyComparableType<T>
 {
     if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
@@ -2143,8 +2138,7 @@ constexpr size_t Matrix<T>::wH() const noexcept
     } else if (type == details::Identity) {
         return m;
     }
-    assert(false && "wH(): should never be here");
-    return 0;  // dummy
+    throw std::logic_error("wH(): unhandled matrix type");
 }
 
 template <ComponentType T>
@@ -2233,8 +2227,7 @@ Polynomial<T> Matrix<T>::characteristic_polynomial() const
         Polynomial<T> res({-1, 1});
         return res ^ m;
     }
-    assert(false && "characteristic_polynomial(): should never be here");
-    return Polynomial<T>();  // dummy
+    throw std::logic_error("characteristic_polynomial(): unhandled matrix type");
 }
 
 template <ComponentType T>
@@ -2304,8 +2297,7 @@ T Matrix<T>::determinant() const
     } else if (type == details::Identity) {
         return T(1);
     }
-    assert(false && "determinant(): should never be here");
-    return T(0);  // dummy
+    throw std::logic_error("determinant(): unhandled matrix type");
 }
 
 template <ComponentType T>
@@ -2526,7 +2518,7 @@ Matrix<T>& Matrix<T>::vertical_join(const Matrix& other) {
 }
 
 template <ComponentType T>
-Matrix<T>& Matrix<T>::diagonal_join(const Matrix& other) noexcept {
+Matrix<T>& Matrix<T>::diagonal_join(const Matrix& other) {
     if (type == details::Zero && other.type == details::Zero) {
         *this = ZeroMatrix<T>(m + other.m, n + other.n);
     } else if (type == details::Identity && other.type == details::Identity) {
@@ -3940,7 +3932,7 @@ constexpr bool operator!=(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
 template <ComponentType T>
 std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept {
     if (rhs.m == 0 || rhs.n == 0) {
-        os << "(empty matrix)";
+        os << "  (empty matrix)";
         return os;
     }
     size_t max = 0;
@@ -3951,7 +3943,7 @@ std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept {
             max = std::max(ss.str().length(), max);
             ss.str(std::string());  // clear stringstream
         }
-    os << (rhs.m == 1 ? "(" : "⌈");
+    os << "  " << (rhs.m == 1 ? "(" : "⌈");
     for (size_t j = 0; j + 1 < rhs.n; ++j) {
         os << std::setw(max) << rhs(0, j);
         os << " ";  // must be in extra line due to set::setw()
@@ -3961,7 +3953,7 @@ std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept {
     if (rhs.m > 1) os << std::endl;
     if (rhs.m > 2) {
         for (size_t i = 1; i + 1 < rhs.m; ++i) {
-            os << "|";
+            os << "  |";
             for (size_t j = 0; j + 1 < rhs.n; ++j) {
                 os << std::setw(max) << rhs(i, j);
                 os << " ";  // must be in extra line due to set::setw()
@@ -3971,7 +3963,7 @@ std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept {
         }
     }
     if (rhs.m > 1) {
-        os << "⌊";
+        os << "  ⌊";
         for (size_t j = 0; j + 1 < rhs.n; ++j) {
             os << std::setw(max) << rhs(rhs.m - 1, j);
             os << " ";  // must be in extra line due to set::setw()
