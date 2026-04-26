@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.7
+ * @version 2.2.8
  * @date 2026
  *
  * @copyright
@@ -625,7 +625,7 @@ class Polynomial {
         requires ReliablyComparableType<T>
     {
         if (is_empty()) throw std::invalid_argument("trying to check whether empty polynomial is zero");
-        return degree() == 0 && trailing_coefficient() == T(0);
+        return data.size() == 1 && data[0] == T(0);
     }
 
     /**
@@ -673,7 +673,7 @@ class Polynomial {
      * @note Only available for coefficient types satisfying @ref CECCO::FieldType
      */
     constexpr bool is_irreducible() const
-        requires FieldType<T>
+        requires FiniteFieldType<T>
     {
         const size_t d = degree();
         if (d == 0) return false;
@@ -912,6 +912,7 @@ constexpr Polynomial<T>& Polynomial<T>::operator-=(const Polynomial<T>& rhs) noe
 
 template <ComponentType T>
 constexpr Polynomial<T>& Polynomial<T>::operator*=(const Polynomial<T>& rhs) {
+    if (is_empty() || rhs.is_empty()) throw std::invalid_argument("trying to multiply with empty polynomial");
     Polynomial res;
     res.data.resize(data.size() + rhs.data.size() - 1);
     for (size_t i = 0; i < data.size(); ++i) {
@@ -1201,6 +1202,7 @@ constexpr Polynomial<T>& Polynomial<T>::set_coefficient(size_t i, U&& c)
 template <ComponentType T>
 constexpr Polynomial<T>& Polynomial<T>::reciprocal() noexcept {
     std::reverse(data.begin(), data.end());
+    prune();  // a zero constant term in the original becomes a leading zero after reversal
     return *this;
 }
 

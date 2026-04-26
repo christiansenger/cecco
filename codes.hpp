@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.18
+ * @version 2.0.19
  * @date 2026
  *
  * @copyright
@@ -11,14 +11,6 @@
  * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
  * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
  * repository root for full terms and how to request a commercial license.
- */
-
-/*
- * +==============================================================+
- * |  !!! WARNING !!!                                             |
- * |  this file is work in progress                               |
- * |  and not production-ready                                    |
- * +==============================================================+
  */
 
 #ifndef CODES_HPP
@@ -257,17 +249,17 @@ namespace details {
 
 template <FieldType T>
 struct Vertex {
-    explicit Vertex(uint16_t id) : id(id) {}
+    explicit Vertex(uint32_t id) : id(id) {}
 
-    uint16_t id;
+    uint32_t id;
 };
 
 template <FieldType T>
 struct Edge {
-    Edge(uint16_t from_id, uint16_t to_id, T value) : from_id(from_id), to_id(to_id), value(value) {}
+    Edge(uint32_t from_id, uint32_t to_id, T value) : from_id(from_id), to_id(to_id), value(value) {}
 
-    uint16_t from_id;
-    uint16_t to_id;
+    uint32_t from_id;
+    uint32_t to_id;
     T value;
 };
 
@@ -282,7 +274,7 @@ template <FieldType T>
 struct Trellis {
     Trellis() : V(1) { V[0].emplace_back(details::Vertex<T>(0)); }
 
-    void add_edge(size_t segment, uint16_t id_from, uint16_t id_to, T value) {
+    void add_edge(size_t segment, uint32_t id_from, uint32_t id_to, T value) {
         if (segment >= E.size()) {
             V.resize(segment + 2);
             E.resize(segment + 1);
@@ -291,21 +283,21 @@ struct Trellis {
         auto& Vf = V[segment];
         if (std::ranges::find_if(Vf, [id_from](const auto& v) { return v.id == id_from; }) == Vf.cend())
             throw std::invalid_argument("Start node id " + std::to_string(id_from) + " not found in V[" +
-                                       std::to_string(segment) + "]!");
+                                        std::to_string(segment) + "]!");
 
         auto& Vt = V[segment + 1];
         if (std::ranges::find_if(Vt, [id_to](const auto& v) { return v.id == id_to; }) == Vt.cend()) {
             if (id_to != Vt.size())
                 throw std::invalid_argument("New sink id " + std::to_string(id_to) + " in V[" +
-                                           std::to_string(segment + 1) +
-                                           "] must equal its position (id==index invariant)!");
+                                            std::to_string(segment + 1) +
+                                            "] must equal its position (id==index invariant)!");
             Vt.emplace_back(id_to);
         }
 
         auto& Es = E[segment];
         if (std::ranges::any_of(Es, [&](const auto& e) { return e.from_id == id_from && e.to_id == id_to; }))
             throw std::invalid_argument("Edge (" + std::to_string(id_from) + " -> " + std::to_string(id_to) +
-                                       ") already exists in E[" + std::to_string(segment) + "]!");
+                                        ") already exists in E[" + std::to_string(segment) + "]!");
         Es.emplace_back(id_from, id_to, value);
     }
 
@@ -313,11 +305,11 @@ struct Trellis {
         if (E.size() != other.E.size()) throw std::invalid_argument("Trellises must have the same number of segments!");
 
         const size_t num_segments = E.size();
-        std::vector<std::unordered_map<uint32_t, uint16_t>> vmap(num_segments + 1);
+        std::vector<std::unordered_map<uint64_t, uint32_t>> vmap(num_segments + 1);
 
-        auto get_or_add = [&](size_t s, uint16_t a, uint16_t b) -> uint16_t {
-            const uint32_t key = (static_cast<uint32_t>(a) << 16) | b;
-            auto [it, inserted] = vmap[s].try_emplace(key, static_cast<uint16_t>(vmap[s].size()));
+        auto get_or_add = [&](size_t s, uint32_t a, uint32_t b) -> uint32_t {
+            const uint64_t key = (static_cast<uint64_t>(a) << 32) | b;
+            auto [it, inserted] = vmap[s].try_emplace(key, static_cast<uint32_t>(vmap[s].size()));
             return it->second;
         };
 
@@ -1930,19 +1922,15 @@ class LinearCode : public Code<T> {
                     if (j < s || (!open_ended && j > (span_one ? s + 1 : e)) || (open_ended && j > e)) {
                         tr.add_edge(j, 0, 0, T(0));
                     } else if (j == s) {
-                        for (uint16_t a = 0; a < q; ++a) {
-                            tr.add_edge(j, 0, a, T(a) * Gp(i, s));
-                        }
+                        for (uint32_t a = 0; a < q; ++a) tr.add_edge(j, 0, a, T(a) * Gp(i, s));
                     } else if (!open_ended && j == (span_one ? s + 1 : e)) {
                         if (span_one) {
-                            for (uint16_t a = 0; a < q; ++a) tr.add_edge(j, a, 0, T(0));
+                            for (uint32_t a = 0; a < q; ++a) tr.add_edge(j, a, 0, T(0));
                         } else {
-                            for (uint16_t a = 0; a < q; ++a) tr.add_edge(j, a, 0, T(a) * Gp(i, j));
+                            for (uint32_t a = 0; a < q; ++a) tr.add_edge(j, a, 0, T(a) * Gp(i, j));
                         }
                     } else {
-                        for (uint16_t a = 0; a < q; ++a) {
-                            tr.add_edge(j, a, a, T(a) * Gp(i, j));
-                        }
+                        for (uint32_t a = 0; a < q; ++a) tr.add_edge(j, a, a, T(a) * Gp(i, j));
                     }
                 }
 
