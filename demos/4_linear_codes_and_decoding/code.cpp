@@ -158,14 +158,18 @@ int main(void) {
             std::vector<double> reliabilities(n);
             for (size_t i = 0; i < C.get_n(); ++i) reliabilities[i] = abs(LLRs[i]);
 
-            auto c_est = C.dec_GMD(r, reliabilities);
-            auto u_est = C.encinv(c_est);
-            std::cout << "Pseudo-soft GMD decoding message estimate: " << u_est << std::endl;
-            if (u_est == u) {
-                std::cout << "... this is correct decoding." << std::endl;
-            } else {
-                std::cout << "... this is wrong decoding/a word error with " << dH(u, u_est)
-                          << " (message) symbol errors" << std::endl;
+            try {
+                auto c_est = C.dec_GMD(r, reliabilities);
+                auto u_est = C.encinv(c_est);
+                std::cout << "Pseudo-soft GMD decoding message estimate: " << u_est << std::endl;
+                if (u_est == u) {
+                    std::cout << "... this is correct decoding." << std::endl;
+                } else {
+                    std::cout << "... this is wrong decoding/a word error with " << dH(u, u_est)
+                              << " (message) symbol errors" << std::endl;
+                }
+            } catch (const decoding_failure& e) {
+                std::cout << "GMD decoding failure: " << e.what() << std::endl;
             }
         }
     }
