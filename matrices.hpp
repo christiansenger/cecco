@@ -2,7 +2,7 @@
  * @file matrices.hpp
  * @brief Matrix arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.7
+ * @version 2.2.8
  * @date 2026
  *
  * @copyright
@@ -2212,7 +2212,8 @@ Polynomial<T> Matrix<T>::characteristic_polynomial() const
         Polynomial<T> res;
         for (size_t i = 0; i <= m; ++i) res.set_coefficient(m - i, P(i, 0));
 
-        // for odd n: negate characteristic polynomial *ToDo: verify*
+        // Samuelson-Berkowitz raw produces det(A - λI) = (-1)^m · det(λI - A);
+        // negate for odd m to obtain the standard monic det(λI - A).
         if (m % 2) res *= T(-1);
 
         return res;
@@ -2221,7 +2222,7 @@ Polynomial<T> Matrix<T>::characteristic_polynomial() const
         return res ^ m;
     } else if (type == details::Diagonal) {
         Polynomial<T> res({1});
-        for (size_t mu = 0; mu < m; ++mu) res *= Polynomial<T>({(*this)(mu, mu), -1});
+        for (size_t mu = 0; mu < m; ++mu) res *= Polynomial<T>({-(*this)(mu, mu), T(1)});
         return res;
     } else if (type == details::Identity) {
         Polynomial<T> res({-1, 1});
@@ -2234,6 +2235,18 @@ template <ComponentType T>
 Matrix<T> Matrix<T>::basis_of_nullspace() const
     requires FieldType<T>
 {
+    if (type == details::Zero) return IdentityMatrix<T>(n);
+    if (type == details::Identity) return Matrix<T>(1, n, T(0));
+    if (type == details::Diagonal) {
+        std::vector<size_t> zero_positions;
+        for (size_t i = 0; i < m; ++i)
+            if ((*this)(i, i) == T(0)) zero_positions.push_back(i);
+        if (zero_positions.empty()) return Matrix<T>(1, n, T(0));
+        Matrix<T> B(zero_positions.size(), n);
+        for (size_t k = 0; k < zero_positions.size(); ++k) B.set_component(k, zero_positions[k], T(1));
+        return B;
+    }
+
     Matrix<T> temp(*this);
     size_t r = 0;
     temp.rref(&r);
@@ -2279,21 +2292,23 @@ T Matrix<T>::determinant() const
     if (m == 0) throw std::invalid_argument("trying to calculate determinant of empty matrix");
     if (m == 1) return ((*this))(0, 0);
     if (type == details::Generic || type == details::Toeplitz) {
-        return characteristic_polynomial()[0];
+        // char_poly is monic det(λI - A), so [0] = (-1)^m · det(A).
+        const auto c = characteristic_polynomial()[0];
+        return (m % 2 == 0) ? c : -c;
     } else if (type == details::Vandermonde) {
-        T acc(1);
+        T s(1);
         for (size_t mu = 1; mu < m; ++mu)
-            for (size_t i = 0; i < mu; ++i) acc *= (*this)(1, mu) - (*this)(1, i);
-        return acc;
+            for (size_t i = 0; i < mu; ++i) s *= (*this)(1, mu) - (*this)(1, i);
+        return s;
     } else if (type == details::Zero) {
         return T(0);
     } else if (type == details::Diagonal) {
-        T acc(1);
+        T s(1);
         for (size_t i = 0; i < m; ++i) {
             if ((*this)(i, i) == T(0)) return T(0);
-            acc *= (*this)(i, i);
+            s *= (*this)(i, i);
         }
-        return acc;
+        return s;
     } else if (type == details::Identity) {
         return T(1);
     }
@@ -4028,15 +4043,19 @@ constexpr Matrix<T> IdentityMatrix(size_t m) {
 template <ComponentType T>
 constexpr Matrix<T> PermutationMatrix(const std::vector<size_t>& perm) {
     const size_t m = perm.size();
-    auto res = Matrix<T>(m, m);
 
     std::vector<bool> seen(m, false);
+    bool is_identity_perm = true;
     for (size_t i = 0; i < m; ++i) {
         if (perm[i] >= m || seen[perm[i]])
             throw std::invalid_argument("Trying to construct permutation matrix from a list that is not a permutation");
         seen[perm[i]] = true;
+        if (perm[i] != i) is_identity_perm = false;
     }
 
+    if (is_identity_perm) return IdentityMatrix<T>(m);
+
+    auto res = Matrix<T>(m, m);
     for (size_t i = 0; i < m; ++i) res.set_component(i, perm[i], T(1));
 
     return res;

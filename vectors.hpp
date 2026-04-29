@@ -2059,8 +2059,9 @@ std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) noexcept {
  *
  * @tparam T Vector component type (must satisfy @ref CECCO::FiniteFieldType or @ref CECCO::SignedIntType)
  * @param v Vector to analyze
- * @return Number of non-zero components in the vector
+ * @return Number of non-zero, non-erased components in the vector
  *
+ * @note Erased positions (under CECCO_ERASURE_SUPPORT) are not counted.
  * @note Not available for types T, where precise comparison for zero is not possible (all floating point types,
  * Rationals<T> with T != InfInt.
  */
@@ -2093,8 +2094,11 @@ std::vector<size_t> supp(const Vector<T>& v) {
  * @param rhs Second vector
  * @return Hamming distance dₕ(lhs, rhs) = wₕ(lhs - rhs)
  *
- * The Hamming distance is the number of positions where two vectors differ.
+ * The Hamming distance is the number of positions where the two vectors differ, counting only positions
+ * where both components carry an actual field value/are not erased.
  *
+ * @note Erased positions on either side (under CECCO_ERASURE_SUPPORT) are not counted, since subtraction
+ *       propagates the erasure marker and wH() skips erased components.
  * @note Only for types fulfilling CECCO::ReliablyComparableType.
  *
  * @throws std::invalid_argument if vectors have different lengths

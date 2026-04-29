@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.19
+ * @version 2.0.20
  * @date 2026
  *
  * @copyright
@@ -47,19 +47,20 @@ long double HammingUpperBound(size_t n, size_t dmin) {
         return n - std::log2l(h.toUnsignedLongLong()) / std::log2l(q);
     } catch (const InfIntException& e) {
         std::cerr << " [Hamming bound overflow]";
-        return 0;
+        return std::numeric_limits<long double>::infinity();
     }
 }
 
 namespace details {
 
 template <FiniteFieldType T>
-size_t A(size_t n, size_t d, size_t w) {
+InfInt A(size_t n, size_t d, size_t w) {
     if (2 * w < d) return 1;
     constexpr size_t q = T::get_size();
     const size_t e = std::ceil(d / 2.0);
-    size_t res = 1;
-    for (size_t i = e; i <= w; ++i) res *= (n - w + i) * (q - 1) / (long double)i;
+    // Johnson's recursion with integer floor at every step: A(n,d,w) <= floor(... A(n-1, d, w-1) ...).
+    InfInt res = 1;
+    for (size_t i = e; i <= w; ++i) res = res * (InfInt(n - w + i) * (q - 1)) / i;
     return res;
 }
 
@@ -73,14 +74,13 @@ long double JohnsonUpperBound(size_t n, size_t dmin) {
         const size_t s = dmin % 2;
         InfInt h = 0;
         for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-        return n - std::log2l(h.toUnsignedLongLong() + (bin<InfInt>(n, tmax + 1) * sqm<InfInt>(q - 1, tmax + 1) -
-                                                        InfInt(s) * bin<InfInt>(dmin, tmax) * A<T>(n, dmin, dmin))
-                                                               .toUnsignedLongLong() /
-                                                           (long double)A<T>(n, dmin, tmax + 1)) /
-                       std::log2l(q);
+        const InfInt num = bin<InfInt>(n, tmax + 1) * sqm<InfInt>(q - 1, tmax + 1) -
+                           InfInt(s) * bin<InfInt>(dmin, tmax) * details::A<T>(n, dmin, dmin);
+        const long double Antp = details::A<T>(n, dmin, tmax + 1).toUnsignedLongLong();
+        return n - std::log2l(h.toUnsignedLongLong() + num.toUnsignedLongLong() / Antp) / std::log2l(q);
     } catch (const InfIntException& e) {
         std::cerr << " [Johnson bound overflow]";
-        return 0;
+        return std::numeric_limits<long double>::infinity();
     }
 }
 
@@ -97,7 +97,7 @@ long double PlotkinUpperBound(size_t n, size_t dmin) {
         }
     } catch (const InfIntException& e) {
         std::cerr << " [Plotkin bound overflow]";
-        return 0;
+        return std::numeric_limits<long double>::infinity();
     }
 }
 
@@ -119,11 +119,14 @@ long double EliasUpperBound(size_t n, size_t dmin) {
         return n + std::log2l(min) / std::log2l(q);
     } catch (const InfIntException& e) {
         std::cerr << " [Elias bound overflow]";
-        return 0;
+        return std::numeric_limits<long double>::infinity();
     }
 }
 
-inline size_t SingletonUpperBound(size_t n, size_t dmin) { return n - dmin + 1; }
+inline size_t SingletonUpperBound(size_t n, size_t dmin) {
+    if (dmin > n + 1) throw std::invalid_argument("Singleton bound: dmin must be at most n + 1");
+    return n - dmin + 1;
+}
 
 template <FiniteFieldType T>
 size_t GriesmerUpperBound(size_t n, size_t dmin) {
@@ -141,8 +144,8 @@ size_t GriesmerUpperBound(size_t n, size_t dmin) {
 }
 
 template <FiniteFieldType T>
-double UpperBound(size_t n, size_t dmin) {
-    long double min = std::numeric_limits<long double>::max();
+long double UpperBound(size_t n, size_t dmin) {
+    long double min = std::numeric_limits<long double>::infinity();
     for (size_t delta = 0; delta < dmin; ++delta) {
         const long double hamming = HammingUpperBound<T>(n - delta, dmin - delta);
         const long double johnson = JohnsonUpperBound<T>(n - delta, dmin - delta);
@@ -157,13 +160,19 @@ double UpperBound(size_t n, size_t dmin) {
 
 template <FiniteFieldType T>
 size_t GilbertVarshamovLowerBound(size_t n, size_t dmin) {
-    if (dmin == 1) return n;
-    if (dmin == n) return 1;
     constexpr size_t q = T::get_size();
     try {
+        // Linear GV (Roth Thm 4.5): an [n,k,d,q] linear code exists if V_q(n-1, d-2) < q^(n-k).
+        // Largest such k = n - (smallest r such that q^r > V_q(n-1, d-2)).
         InfInt sum = 0;
-        for (size_t i = 0; i < dmin; ++i) sum += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-        return std::ceil(n - std::log2(sum.toUnsignedLongLong()) / std::log2(q));
+        for (size_t j = 0; j + 2 <= dmin; ++j) sum += bin<InfInt>(n - 1, j) * sqm<InfInt>(q - 1, j);
+        InfInt qpow = 1;
+        size_t r = 0;
+        while (qpow <= sum) {
+            qpow *= q;
+            ++r;
+        }
+        return n - r;
     } catch (const InfIntException& e) {
         std::cerr << " [Gilbert-Varshamov bound overflow]";
         return 0;
@@ -172,6 +181,7 @@ size_t GilbertVarshamovLowerBound(size_t n, size_t dmin) {
 
 template <FiniteFieldType T>
 size_t BurstUpperBound(size_t n, size_t ell) {
+    if (ell > n) throw std::invalid_argument("Burst bound: burst length ell must be at most n");
     constexpr size_t q = T::get_size();
     return std::floor(n - ell - std::log2(1 + (q - 1) * (n - ell) / q) / std::log2(q));
 }
@@ -669,7 +679,7 @@ class Code {
     virtual Vector<T> dec_recursive(const Vector<T>& r) const {
         throw std::logic_error("Recursive decoding not supported for this code!");
     }
-    virtual Vector<T> dec_BD_Meggitt(const Vector<T>& r) const {
+    virtual Vector<T> dec_Meggitt(const Vector<T>& r) const {
         throw std::logic_error("Meggitt decoding not supported for this code!");
     }
     virtual Vector<T> dec_WBA(const Vector<T>& r) const {
@@ -1345,7 +1355,8 @@ class LinearCode : public Code<T> {
         std::call_once(Meggitt_table_flag, [this] {
             if (Meggitt_table.has_value()) return;
 
-            if (!is_cyclic()) throw std::logic_error("Meggitt table only makes sense for cyclic code!");
+            if (k == 0) throw std::invalid_argument("Meggitt table only available for codes with k>0!");
+            if (!is_cyclic()) throw std::logic_error("Meggitt table only available for cyclic codes!");
 
             std::clog << "--> Calculating Meggitt table" << std::endl;
 
@@ -1713,7 +1724,7 @@ class LinearCode : public Code<T> {
         }
         if (os.iword(details::index) > 0) {
             if (os.iword(details::index) != 3) os << std::endl;
-            os << BOLD("Linear code") " with properties: {";
+            os << BOLD("Linear code") " with properties: { ";
             if (os.iword(details::index) != 3) {
                 os << std::endl;
                 os << "G = " << std::endl;
@@ -1748,7 +1759,8 @@ class LinearCode : public Code<T> {
             if (!is_self_dual() && is_weakly_self_dual()) os << "weakly_self-dual " << std::flush;
             if (!is_self_dual() && is_dual_containing()) os << "dual-containing " << std::flush;
             if (is_self_dual()) os << "self-dual " << std::flush;
-            if (os.iword(details::index) != 3) os << std::endl << "}" << std::flush;
+            if (os.iword(details::index) != 3) os << std::endl;
+            os << "}" << std::flush;
         }
     }
 
@@ -1897,6 +1909,9 @@ class LinearCode : public Code<T> {
             const size_t n = this->n;
             const auto Gp = get_G_in_trellis_oriented_form();
 
+            std::clog << "--> Calculating minimal trellis for code with " << sqm<InfInt>(q, k) << " codewords"
+                      << std::endl;
+
             auto row_trellis = [q, n, &Gp](size_t i) {
                 size_t s = 0, e = 0;
 
@@ -2040,11 +2055,10 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_BD_Meggitt(const Vector<T>& r) const override {
+    virtual Vector<T> dec_Meggitt(const Vector<T>& r) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Meggitt BD decoding only available for codes over finite fields!");
         } else {
-            if (!is_cyclic()) throw std::logic_error("Meggitt BD decoding requires a cyclic code!");
 #ifdef CECCO_ERASURE_SUPPORT
             if (LinearCode<T>::erasures_present(r))
                 throw std::invalid_argument("Trying to correct erasures with a Meggitt BD decoder!");
@@ -5264,7 +5278,7 @@ class Enc {
     const Code<T>& C;
 };
 
-enum class method {
+enum class method_t {
     BD,
     boosted_BD,
     ML,
@@ -5273,7 +5287,7 @@ enum class method {
     Viterbi_soft,
     BCJR,
     recursive,
-    BD_Meggitt,
+    Meggitt,
     WBA,
     BMA,
 #ifdef CECCO_ERASURE_SUPPORT
@@ -5289,54 +5303,54 @@ enum class method {
 template <FieldType T>
 class Dec {
    public:
-    explicit Dec(const Code<T>& C, method method = method::ML, size_t cache_limit = 10000)
+    explicit Dec(const Code<T>& C, method_t method = method_t::ML, size_t cache_limit = 10000)
         : C(C), method(method), cache_limit(cache_limit) {
         switch (method) {
-            case method::BD:
+            case method_t::BD:
                 dec = [this](const Vector<T>& r) { return this->C.dec_BD(r); };
                 break;
-            case method::boosted_BD:
+            case method_t::boosted_BD:
                 dec = [this](const Vector<T>& r) { return this->C.dec_boosted_BD(r); };
                 break;
-            case method::ML:
+            case method_t::ML:
                 dec = [this](const Vector<T>& r) { return this->C.dec_ML(r); };
                 break;
-            case method::Viterbi:
+            case method_t::Viterbi:
                 dec = [this](const Vector<T>& r) { return this->C.dec_Viterbi(r); };
                 break;
-            case method::recursive:
+            case method_t::recursive:
                 dec = [this](const Vector<T>& r) { return this->C.dec_recursive(r); };
                 break;
-            case method::BD_Meggitt:
-                dec = [this](const Vector<T>& r) { return this->C.dec_BD_Meggitt(r); };
+            case method_t::Meggitt:
+                dec = [this](const Vector<T>& r) { return this->C.dec_Meggitt(r); };
                 break;
-            case method::WBA:
+            case method_t::WBA:
                 dec = [this](const Vector<T>& r) { return this->C.dec_WBA(r); };
                 break;
-            case method::BMA:
+            case method_t::BMA:
                 dec = [this](const Vector<T>& r) { return this->C.dec_BMA(r); };
                 break;
-            case method::ML_soft:
-            case method::Viterbi_soft:
-            case method::BCJR:
+            case method_t::ML_soft:
+            case method_t::Viterbi_soft:
+            case method_t::BCJR:
                 break;
 #ifdef CECCO_ERASURE_SUPPORT
-            case method::WBA_EE:
+            case method_t::WBA_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_WBA_EE(r); };
                 break;
-            case method::BMA_EE:
+            case method_t::BMA_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_BMA_EE(r); };
                 break;
-            case method::BD_EE:
+            case method_t::BD_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_BD_EE(r); };
                 break;
-            case method::ML_EE:
+            case method_t::ML_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_ML_EE(r); };
                 break;
-            case method::Viterbi_EE:
+            case method_t::Viterbi_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_Viterbi_EE(r); };
                 break;
-            case method::recursive_EE:
+            case method_t::recursive_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_recursive_EE(r); };
                 break;
 #endif
@@ -5351,8 +5365,8 @@ class Dec {
     }
 
     Vector<T> operator()(const Vector<double>& in) const {
-        if (method == method::Viterbi || method == method::Viterbi_soft) return C.dec_Viterbi_soft(in);
-        if (method == method::BCJR) {
+        if (method == method_t::Viterbi || method == method_t::Viterbi_soft) return C.dec_Viterbi_soft(in);
+        if (method == method_t::BCJR) {
             const auto llrs = C.dec_BCJR(in);
             Vector<T> c_est(llrs.get_n());
             for (size_t i = 0; i < llrs.get_n(); ++i)
@@ -5365,7 +5379,7 @@ class Dec {
    private:
     const Code<T>& C;
     std::function<Vector<T>(const Vector<T>&)> dec;
-    method method;
+    method_t method;
     size_t cache_limit;
 };
 

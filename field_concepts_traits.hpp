@@ -2,7 +2,7 @@
  * @file field_concepts_traits.hpp
  * @brief Concepts, traits, and type utilities for finite field arithmetic
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.2
+ * @version 2.1.4
  * @date 2026
  *
  * @copyright
@@ -511,14 +511,9 @@ struct is_subfield_of<Ext<B_SUP, modulus_SUP, mode_SUP>, Ext<B_SUB, modulus_SUB,
     : std::bool_constant<std::is_same_v<B_SUP, Ext<B_SUB, modulus_SUB, mode_SUB>> ||
                          is_subfield_of_v<B_SUP, Ext<B_SUB, modulus_SUB, mode_SUB>>> {};
 
-// Iso components: Any component (MAIN or OTHERS) is a subfield of the Iso
+// Iso super, non-Iso sub: SUB ⊆ Iso if SUB is a subfield of any component (covers reflexive
+// SUB == MAIN / SUB == one of OTHERS via the per-component reflexive specializations below).
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS, FiniteFieldType SUB>
-    requires(std::is_same_v<SUB, MAIN> || ((std::is_same_v<SUB, OTHERS>) || ...))
-struct is_subfield_of<Iso<MAIN, OTHERS...>, SUB> : std::true_type {};
-
-// General Iso case: SUB ⊆ Iso if SUB is a subfield of any component
-template <FiniteFieldType MAIN, FiniteFieldType... OTHERS, FiniteFieldType SUB>
-    requires(!std::is_same_v<SUB, MAIN> && !((std::is_same_v<SUB, OTHERS>) || ...))
 struct is_subfield_of<Iso<MAIN, OTHERS...>, SUB>
     : std::bool_constant<is_subfield_of_v<MAIN, SUB> || (is_subfield_of_v<OTHERS, SUB> || ...)> {};
 
@@ -640,66 +635,6 @@ concept SubfieldOf = details::is_subfield_of_v<SUPERFIELD, SUBFIELD>;
  */
 template <typename S, typename E>
 concept ExtensionOf = SubfieldOf<E, S>;
-
-/**
- * @concept InSameTower
- * @brief Enhanced concept for testing if two fields are in the same field tower including Iso types
- * @tparam F First field type
- * @tparam G Second field type
- *
- * This concept validates that F and G are in the same construction tower,
- * meaning one is a subfield of the other (in either direction). This is a symmetric
- * relationship useful for field conversions and compatibility checks.
- *
- * The concept now handles:
- * - Traditional field tower relationships (nested construction)
- * - Iso type representations and their mathematical equivalences
- * - Multiple construction paths connecting the same mathematical fields
- * - Complex field hierarchies with intersection fields
- *
- * @warning This validates field tower relationships in the sense of this library (nested construction of extension
- * fields), not in the mathematical sense. Depending on the actual construction, the construction tower may skip one or
- * more intermediate fields from the mathematical tower.
- *
- * @note This relationship is symmetric and reflexive: InSameTower<F, G> ↔ InSameTower<G, F> and InSameTower<F, F> is
- * always true.
- *
- * @note Isomorphic fields (like F4_1 and F4_2) are mathematically never in the same construction tower unless connected
- * via an Iso type.
- *
- * @section Usage_Examples
- *
- * @code{.cpp}
- * using F2 = Fp<2>;
- * using F3 = Fp<3>;
- * using F4_1 = Ext<F2, {1, 1, 1}>;     // F₄ construction 1
- * using F4_2 = Ext<F2, {1, 0, 1}>;     // F₄ construction 2 (isomorphic)
- * using F4_Iso = Iso<F4_1, F4_2>;      // Intersection field
- * using F16 = Ext<F4_Iso, {2, 1, 1}>;  // Extension using Iso as base
- * using F8 = Ext<F2, {1, 1, 0, 1}>;    // Different branch from F2
- *
- * // Traditional relationships (symmetric and reflexive)
- * static_assert(InSameTower<F2, F4_1>);    // true: F2 ⊆ F4_1
- * static_assert(InSameTower<F4_1, F2>);    // true: symmetric to above
- * static_assert(InSameTower<F4_1, F4_1>);  // true: reflexive
- * static_assert(InSameTower<F2, F16>);     // true: F2 ⊆ F16 via F4_Iso
- *
- * // Enhanced Iso relationships
- * static_assert(InSameTower<F4_1, F16>);  // true: via Iso representation
- * static_assert(InSameTower<F4_2, F16>);  // true: via Iso representation
- * static_assert(InSameTower<F16, F4_1>);  // true: symmetric to above
- *
- * // Negative cases (different towers)
- * static_assert(!InSameTower<F4_1, F4_2>);  // false: non-identical isomorphic fields
- * static_assert(!InSameTower<F8, F16>);     // false: different leaves
- * static_assert(!InSameTower<F4_1, F8>);    // false: different leaves
- * static_assert(!InSameTower<F2, F3>);      // false: different primes
- * static_assert(!InSameTower<F4_1, F3>);    // false: different characteristics
- * static_assert(!InSameTower<F16, F3>);     // false: completely separate towers
- * @endcode
- */
-template <typename F, typename G>
-concept InSameTower = SubfieldOf<F, G> || SubfieldOf<G, F>;
 
 namespace details {
 
@@ -972,29 +907,19 @@ struct largest_common_subfield {
     using common_subfields = intersect_type_lists_t<subfields_F, subfields_G>;
     using raw_largest = largest_field_in_list_t<common_subfields>;
 
-    // Post-processing: If the largest common subfield (an Ext) is isomorphic to one of the
-    // input parameters and that parameter is an Iso, return the Iso instead of the Ext
+    // Detect Iso types
+    template <typename T>
+    struct is_iso : std::false_type {};
+    template <typename MAIN, typename... OTHERS>
+    struct is_iso<Iso<MAIN, OTHERS...>> : std::true_type {};
+
     template <typename Largest, typename Param1, typename Param2>
-    struct prefer_iso_over_isomorphic_ext {
-        using type = Largest;  // Default: return the raw largest
-    };
-
-    // Specialization: If Largest is isomorphic to Param1 and Param1 is an Iso, return Param1
-    template <typename Largest, typename MAIN1, typename... OTHERS1, typename Param2>
-        requires Isomorphic<Largest, Iso<MAIN1, OTHERS1...>>
-    struct prefer_iso_over_isomorphic_ext<Largest, Iso<MAIN1, OTHERS1...>, Param2> {
-        using type = Iso<MAIN1, OTHERS1...>;
-    };
-
-    // Specialization: If Largest is isomorphic to Param2 and Param2 is an Iso, return Param2
-    template <typename Largest, typename Param1, typename MAIN2, typename... OTHERS2>
-        requires Isomorphic<Largest, Iso<MAIN2, OTHERS2...>>
-    struct prefer_iso_over_isomorphic_ext<Largest, Param1, Iso<MAIN2, OTHERS2...>> {
-        using type = Iso<MAIN2, OTHERS2...>;
-    };
+    using prefer_iso = std::conditional_t<
+        is_iso<Param1>::value && Isomorphic<Largest, Param1>, Param1,
+        std::conditional_t<is_iso<Param2>::value && Isomorphic<Largest, Param2>, Param2, Largest>>;
 
    public:
-    using type = typename prefer_iso_over_isomorphic_ext<raw_largest, F, G>::type;
+    using type = prefer_iso<raw_largest, F, G>;
 };
 
 template <typename F, typename G>
