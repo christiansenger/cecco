@@ -68,6 +68,18 @@
         <priority>0.5</priority>
     </url>
     <url>
+      <loc>https://cecco.senger.eu/5_polynomial_and_cyclic_codes</loc>
+        <lastmod>2026-04-28</lastmod>
+        <changefreq>always</changefreq>
+        <priority>0.5</priority>
+    </url>
+    <url>
+        <loc>https://cecco.senger.eu/5_polynomial_and_cyclic_codes/index</loc>
+        <lastmod>2026-04-28</lastmod>
+        <changefreq>always</changefreq>
+        <priority>0.5</priority>
+    </url>
+    <url>
         <loc>https://cecco.senger.eu/imprint</loc>
         <lastmod>2026-04-28</lastmod>
         <changefreq>always</changefreq>
