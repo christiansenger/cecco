@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.20
+ * @version 2.0.21
  * @date 2026
  *
  * @copyright
@@ -39,12 +39,18 @@ namespace CECCO {
 
 template <FiniteFieldType T>
 long double HammingUpperBound(size_t n, size_t dmin) {
+    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
+    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
+    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
+
     constexpr size_t q = T::get_size();
     try {
         const size_t tmax = (dmin - 1) / 2;
         InfInt h = 0;
         for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-        return n - std::log2l(h.toUnsignedLongLong()) / std::log2l(q);
+
+        return n -
+               std::log2l(static_cast<long double>(h.toUnsignedLongLong())) / std::log2l(static_cast<long double>(q));
     } catch (const InfIntException& e) {
         std::cerr << " [Hamming bound overflow]";
         return std::numeric_limits<long double>::infinity();
@@ -54,13 +60,15 @@ long double HammingUpperBound(size_t n, size_t dmin) {
 namespace details {
 
 template <FiniteFieldType T>
-InfInt A(size_t n, size_t d, size_t w) {
-    if (2 * w < d) return 1;
+InfInt A(size_t n, size_t d, InfInt w) {
+    const InfInt e = (d + 1) / 2;
+    if (w < e) return 1;
+
     constexpr size_t q = T::get_size();
-    const size_t e = std::ceil(d / 2.0);
-    // Johnson's recursion with integer floor at every step: A(n,d,w) <= floor(... A(n-1, d, w-1) ...).
+    const InfInt Q = q, N = n;
     InfInt res = 1;
-    for (size_t i = e; i <= w; ++i) res = res * (InfInt(n - w + i) * (q - 1)) / i;
+    for (InfInt i = e; i <= w; ++i) res = res * ((N - w + i) * (Q - 1)) / i;
+
     return res;
 }
 
@@ -68,16 +76,26 @@ InfInt A(size_t n, size_t d, size_t w) {
 
 template <FiniteFieldType T>
 long double JohnsonUpperBound(size_t n, size_t dmin) {
+    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
+    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
+    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
+
     constexpr size_t q = T::get_size();
     try {
         const size_t tmax = (dmin - 1) / 2;
-        const size_t s = dmin % 2;
+        const InfInt s = dmin % 2;
         InfInt h = 0;
         for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-        const InfInt num = bin<InfInt>(n, tmax + 1) * sqm<InfInt>(q - 1, tmax + 1) -
-                           InfInt(s) * bin<InfInt>(dmin, tmax) * details::A<T>(n, dmin, dmin);
-        const long double Antp = details::A<T>(n, dmin, tmax + 1).toUnsignedLongLong();
-        return n - std::log2l(h.toUnsignedLongLong() + num.toUnsignedLongLong() / Antp) / std::log2l(q);
+
+        const InfInt numerator = bin<InfInt>(n, tmax + 1) * sqm<InfInt>(q - 1, tmax + 1) -
+                                 s * bin<InfInt>(dmin, tmax) * details::A<T>(n, dmin, dmin);
+
+        const InfInt denominator = details::A<T>(n, dmin, tmax + 1);
+
+        return n - std::log2l(static_cast<long double>(h.toUnsignedLongLong()) +
+                              static_cast<long double>(numerator.toUnsignedLongLong()) /
+                                  static_cast<long double>(denominator.toUnsignedLongLong())) /
+                       std::log2l(static_cast<long double>(q));
     } catch (const InfIntException& e) {
         std::cerr << " [Johnson bound overflow]";
         return std::numeric_limits<long double>::infinity();
@@ -86,14 +104,23 @@ long double JohnsonUpperBound(size_t n, size_t dmin) {
 
 template <FiniteFieldType T>
 long double PlotkinUpperBound(size_t n, size_t dmin) {
+    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
+    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
+    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
+
     constexpr size_t q = T::get_size();
     try {
-        if ((long double)dmin / n > (long double)(q - 1) / q) {  // conventional
-            return 1 - std::log2(q - (long double)n * (q - 1) / dmin) / std::log2(q);
+        const InfInt Q = q, N = n, D = dmin;
+        if (Q * D > N * (Q - 1)) {  // conventional
+            return std::log2l(static_cast<long double>((Q * D).toUnsignedLongLong()) /
+                              static_cast<long double>((Q * D - N * (Q - 1)).toUnsignedLongLong())) /
+                   std::log2l(static_cast<long double>(q));
         } else {  // improved
-            const size_t Delta = n - std::floor((long double)dmin * q / (q - 1)) + 1;
-            const size_t M = sqm(q, Delta + 1) * (long double)dmin / ((q * dmin - (n - Delta) * (q - 1)));
-            return std::log2(M) / std::log2(q);
+            const InfInt Delta = N - Q * D / (Q - 1) + 1;
+            const InfInt M = sqm<InfInt>(q, Delta.toUnsignedLongLong() + 1) * D / (Q * D - (N - Delta) * (Q - 1));
+
+            return std::log2l(static_cast<long double>(M.toUnsignedLongLong())) /
+                   std::log2l(static_cast<long double>(q));
         }
     } catch (const InfIntException& e) {
         std::cerr << " [Plotkin bound overflow]";
@@ -103,20 +130,30 @@ long double PlotkinUpperBound(size_t n, size_t dmin) {
 
 template <FiniteFieldType T>
 long double EliasUpperBound(size_t n, size_t dmin) {
+    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
+    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
+    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
+
     constexpr size_t q = T::get_size();
     try {
-        const long double r = 1 - (long double)1 / q;
-        long double min = std::numeric_limits<long double>::max();
-        for (size_t w = 0; w <= r * n; ++w) {
-            if (w * w - 2 * r * n * w + r * n * dmin > 0) {
+        long double minimum = std::numeric_limits<long double>::infinity();
+        const InfInt Q = q, N = n, D = dmin;
+        for (size_t w = 0; Q * w <= (Q - 1) * N; ++w) {
+            const InfInt denominator = Q * w * w - InfInt(2) * (Q - 1) * N * w + (Q - 1) * N * D;
+            if (denominator > 0) {
                 InfInt h = 0;
-                for (size_t i = 0; i <= w; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-                long double temp = (long double)(r * n * dmin) / (w * w - 2 * r * n * w + r * n * dmin);
-                temp /= h.toUnsignedLongLong();
-                min = std::min<long double>(temp, min);
+                for (size_t i = 0; i <= w; ++i) h += bin<InfInt>(N, i) * sqm<InfInt>(Q - 1, i);
+
+                long double temp = static_cast<long double>(((Q - 1) * N * D).toUnsignedLongLong()) /
+                                   static_cast<long double>(denominator.toUnsignedLongLong());
+
+                temp /= static_cast<long double>(h.toUnsignedLongLong());
+
+                minimum = std::min(minimum, temp);
             }
         }
-        return n + std::log2l(min) / std::log2l(q);
+
+        return n + std::log2l(minimum) / std::log2l(static_cast<long double>(q));
     } catch (const InfIntException& e) {
         std::cerr << " [Elias bound overflow]";
         return std::numeric_limits<long double>::infinity();
@@ -124,55 +161,76 @@ long double EliasUpperBound(size_t n, size_t dmin) {
 }
 
 inline size_t SingletonUpperBound(size_t n, size_t dmin) {
-    if (dmin > n + 1) throw std::invalid_argument("Singleton bound: dmin must be at most n + 1");
+    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
+    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
+    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
     return n - dmin + 1;
 }
 
 template <FiniteFieldType T>
 size_t GriesmerUpperBound(size_t n, size_t dmin) {
+    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
+    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
+    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
+
     constexpr size_t q = T::get_size();
     size_t k = 0;
     for (size_t kp = 1; kp <= n; ++kp) {
         size_t sum = 0;
-        for (size_t i = 0; i < kp; ++i) sum += std::ceil(dmin / sqm<long double>(q, i));
+        size_t qi = 1;
+        for (size_t i = 0; i < kp; ++i) {
+            sum += qi >= dmin ? 1 : (dmin + qi - 1) / qi;
+            if (sum > n) break;
+            if (qi < dmin) {
+                if (qi > dmin / q)
+                    qi = dmin;
+                else
+                    qi *= q;
+            }
+        }
         if (sum <= n)
             k = kp;
         else
             break;
     }
+
     return k;
 }
 
 template <FiniteFieldType T>
 long double UpperBound(size_t n, size_t dmin) {
-    long double min = std::numeric_limits<long double>::infinity();
-    for (size_t delta = 0; delta < dmin; ++delta) {
+    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
+    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
+    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
+
+    long double minimum = std::numeric_limits<long double>::infinity();
+    for (size_t delta = 0; delta < std::min(n, dmin); ++delta) {
         const long double hamming = HammingUpperBound<T>(n - delta, dmin - delta);
         const long double johnson = JohnsonUpperBound<T>(n - delta, dmin - delta);
         const long double plotkin = PlotkinUpperBound<T>(n - delta, dmin - delta);
         const long double elias = EliasUpperBound<T>(n - delta, dmin - delta);
         const long double singleton = SingletonUpperBound(n - delta, dmin - delta);
         const long double griesmer = GriesmerUpperBound<T>(n - delta, dmin - delta);
-        for (long double bound : {hamming, johnson, plotkin, elias, singleton, griesmer}) min = std::min(bound, min);
+        minimum = std::min({minimum, hamming, johnson, plotkin, elias, singleton, griesmer});
     }
-    return min;
+    return minimum;
 }
 
 template <FiniteFieldType T>
 size_t GilbertVarshamovLowerBound(size_t n, size_t dmin) {
+    if (n == 0) throw std::invalid_argument("Cannot calculate lower bound with n=0!");
+    if (dmin == 0) throw std::invalid_argument("Cannot calculate lower bound with dmin=0!");
+    if (dmin > n) throw std::invalid_argument("Cannot calculate lower bound with dmin>n");
+    if (dmin == 1) return n;
+
     constexpr size_t q = T::get_size();
     try {
-        // Linear GV (Roth Thm 4.5): an [n,k,d,q] linear code exists if V_q(n-1, d-2) < q^(n-k).
-        // Largest such k = n - (smallest r such that q^r > V_q(n-1, d-2)).
         InfInt sum = 0;
-        for (size_t j = 0; j + 2 <= dmin; ++j) sum += bin<InfInt>(n - 1, j) * sqm<InfInt>(q - 1, j);
-        InfInt qpow = 1;
+        for (size_t i = 0; i <= dmin - 2; ++i) sum += bin<InfInt>(n - 1, i) * sqm<InfInt>(q - 1, i);
         size_t r = 0;
-        while (qpow <= sum) {
-            qpow *= q;
-            ++r;
-        }
-        return n - r;
+        for (InfInt qr = 1; qr <= sum; qr *= q) ++r;
+
+        return r <= n ? n - r : 0;
     } catch (const InfIntException& e) {
         std::cerr << " [Gilbert-Varshamov bound overflow]";
         return 0;
