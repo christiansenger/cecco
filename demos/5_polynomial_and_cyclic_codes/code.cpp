@@ -34,12 +34,12 @@ int main(void) {
     SDMC<F> channel(pe);
 
     // RX
+    auto r = channel(c);
     try {
         auto c_est = C.dec_BD(r);
         if (C.is_cyclic()) assert(c_est == C.dec_Meggitt(r));
         auto u_est = C.encinv(c_est);
         std::cout << "BD decoding message estimate: " << u_est << std::endl;
-        }
     } catch (const decoding_failure& e) {
         std::cout << "BD decoding failure!" << std::endl;
     }

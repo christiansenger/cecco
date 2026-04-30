@@ -208,10 +208,13 @@ Random message:               ( 1, 3, 3, 0, 2, 0, 1, 1, 0 )
         <div class="card shadow-sm snippet-card my-4">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span><strong>code.cpp</strong></span>
-    <span class="text-secondary snippet-meta">Lines 33&ndash;34</span>
+    <span class="text-secondary snippet-meta">Lines 33&ndash;37</span>
   </div>
   <div class="highlight"><pre><span></span><span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">pe</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.05</span><span class="p">;</span>
 <span class="w">    </span><span class="n">SDMC</span><span class="o">&lt;</span><span class="n">F</span><span class="o">&gt;</span><span class="w"> </span><span class="n">channel</span><span class="p">(</span><span class="n">pe</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// RX</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">channel</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
 </pre></div>
 
 </div>
@@ -224,14 +227,13 @@ Random message:               ( 1, 3, 3, 0, 2, 0, 1, 1, 0 )
         <div class="card shadow-sm snippet-card my-4">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span><strong>code.cpp</strong></span>
-    <span class="text-secondary snippet-meta">Lines 37&ndash;45</span>
+    <span class="text-secondary snippet-meta">Lines 38&ndash;45</span>
   </div>
   <div class="highlight"><pre><span></span><span class="w">    </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
 <span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">c_est</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_BD</span><span class="p">(</span><span class="n">r</span><span class="p">);</span>
 <span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">C</span><span class="p">.</span><span class="n">is_cyclic</span><span class="p">())</span><span class="w"> </span><span class="n">assert</span><span class="p">(</span><span class="n">c_est</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_Meggitt</span><span class="p">(</span><span class="n">r</span><span class="p">));</span>
 <span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">u_est</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_est</span><span class="p">);</span>
 <span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;BD decoding message estimate: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_est</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
-<span class="w">        </span><span class="p">}</span>
 <span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">decoding_failure</span><span class="o">&amp;</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
 <span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;BD decoding failure!&quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
 <span class="w">    </span><span class="p">}</span>
@@ -337,12 +339,12 @@ Supercode = [F_4; 17, 9] Linear code with properties: { polynomial(cyclic, gamma
 <span class="w">    </span><span class="n">SDMC</span><span class="o">&lt;</span><span class="n">F</span><span class="o">&gt;</span><span class="w"> </span><span class="n">channel</span><span class="p">(</span><span class="n">pe</span><span class="p">);</span>
 
 <span class="w">    </span><span class="c1">// RX</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">channel</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
 <span class="w">    </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
 <span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">c_est</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_BD</span><span class="p">(</span><span class="n">r</span><span class="p">);</span>
 <span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">C</span><span class="p">.</span><span class="n">is_cyclic</span><span class="p">())</span><span class="w"> </span><span class="n">assert</span><span class="p">(</span><span class="n">c_est</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_Meggitt</span><span class="p">(</span><span class="n">r</span><span class="p">));</span>
 <span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">u_est</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_est</span><span class="p">);</span>
 <span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;BD decoding message estimate: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_est</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
-<span class="w">        </span><span class="p">}</span>
 <span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">decoding_failure</span><span class="o">&amp;</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
 <span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;BD decoding failure!&quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
 <span class="w">    </span><span class="p">}</span>
