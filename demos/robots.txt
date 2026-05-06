@@ -1,2 +1,3 @@
 User-agent: *
 Allow: /
+Sitemap: https://christiansenger.github.io/cecco/www/robots.txt
