@@ -124,24 +124,37 @@
  */
 #define CECCO_COMPRESS_LUTS_FROM_Q 256
 
-#include <any>
-#include <memory>
-#include <mutex>
-#include <optional>
 #include <span>
-#include <typeindex>
-// #include <random> // transitive through field_concepts_traits.hpp
 
 #include "polynomials.hpp"
-// #include "field_concepts_traits.hpp" // transitive through polynomials.hpp
-// #include "matrices.hpp"// transitive through polynomials.hpp
-// #include <string> // transitive through polynomials.hpp
-// #include <vector> // transitive through polynomials.hpp
-// #include <array> // transitive through polynomials.hpp
-// #include <ranges> // transitive through polynomials.hpp
-// #include <map> // transitive through polynomials.hpp
-// #include "InfInt.hpp" // transitive through polynomials.hpp
-// #include "helpers.hpp" // transitive through polynomials.hpp
+/*
+//transitive
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <iomanip>
+#include <iostream>
+#include <iterator>
+#include <limits>
+#include <numeric>
+#include <map>
+#include <optional>
+#include <random>
+#include <ranges>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include "InfInt.hpp"
+#include "field_concepts_traits.hpp"
+#include "helpers.hpp"
+#include "matrices.hpp"
+*/
 
 namespace CECCO {
 
@@ -210,14 +223,14 @@ class Field : public details::Base {
     /// @{
 
     /// @brief Inequality, defined as `!(*this == rhs)`
-    constexpr bool operator!=(const T& rhs) const noexcept { return !(static_cast<const T&>(*this) == rhs); }
+    constexpr bool operator!=(const T& rhs) const { return !(static_cast<const T&>(*this) == rhs); }
 
     /// @}
     /// @name Unary Operations
     /// @{
 
     /// @brief Unary `+` on an lvalue: returns a copy
-    constexpr T operator+() const& noexcept { return static_cast<const T&>(*this); }
+    constexpr T operator+() const& { return static_cast<const T&>(*this); }
     /// @brief Unary `+` on an rvalue: returns the rvalue itself
     constexpr T&& operator+() && noexcept { return static_cast<T&&>(*this); }
 
@@ -254,7 +267,8 @@ class Field : public details::Base {
 
     /// @brief Smallest k > 0 with `this^k == 1`; throws `std::invalid_argument` if `*this` is zero
     size_t get_multiplicative_order() const = delete;
-    /// @brief Smallest k > 0 with `k * *this == 0`; for finite fields of characteristic p this is p (or 1 for zero); for ℚ it is 1 for zero and 0 (infinite) otherwise
+    /// @brief Smallest k > 0 with `k * *this == 0`; for finite fields of characteristic p this is p (or 1 for zero);
+    /// for ℚ it is 1 for zero and 0 (infinite) otherwise
     size_t get_additive_order() const = delete;
     /// @brief True if the element is "positive" (always true for finite fields; sign of numerator for ℚ)
     bool has_positive_sign() const noexcept = delete;
@@ -290,112 +304,112 @@ class Field : public details::Base {
  */
 
 template <FieldType T>
-constexpr T operator+(const T& lhs, const T& rhs) noexcept {
+constexpr T operator+(const T& lhs, const T& rhs) {
     T res(lhs);
     res += rhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator+(T&& lhs, const T& rhs) noexcept {
+constexpr T operator+(T&& lhs, const T& rhs) {
     T res(std::move(lhs));
     res += rhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator+(const T& lhs, T&& rhs) noexcept {
+constexpr T operator+(const T& lhs, T&& rhs) {
     T res(std::move(rhs));
     res += lhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator+(T&& lhs, T&& rhs) noexcept {
+constexpr T operator+(T&& lhs, T&& rhs) {
     T res(std::move(lhs));
     res += rhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator-(const T& lhs, const T& rhs) noexcept {
+constexpr T operator-(const T& lhs, const T& rhs) {
     T res(lhs);
     res -= rhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator-(T&& lhs, const T& rhs) noexcept {
+constexpr T operator-(T&& lhs, const T& rhs) {
     T res(std::move(lhs));
     res -= rhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator-(const T& lhs, T&& rhs) noexcept {
+constexpr T operator-(const T& lhs, T&& rhs) {
     T res(-std::move(rhs));
     res += lhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator-(T&& lhs, T&& rhs) noexcept {
+constexpr T operator-(T&& lhs, T&& rhs) {
     T res(std::move(lhs));
     res -= rhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator*(const T& lhs, const T& rhs) noexcept {
+constexpr T operator*(const T& lhs, const T& rhs) {
     T res(lhs);
     res *= rhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator*(T&& lhs, const T& rhs) noexcept {
+constexpr T operator*(T&& lhs, const T& rhs) {
     T res(std::move(lhs));
     res *= rhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator*(const T& lhs, T&& rhs) noexcept {
+constexpr T operator*(const T& lhs, T&& rhs) {
     T res(std::move(rhs));
     res *= lhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator*(T&& lhs, T&& rhs) noexcept {
+constexpr T operator*(T&& lhs, T&& rhs) {
     T res(std::move(lhs));
     res *= rhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator*(const T& lhs, uint16_t rhs) noexcept {
+constexpr T operator*(const T& lhs, uint16_t rhs) {
     T res(lhs);
     res *= rhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator*(uint16_t lhs, const T& rhs) noexcept {
+constexpr T operator*(uint16_t lhs, const T& rhs) {
     T res(rhs);
     res *= lhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator*(T&& lhs, int rhs) noexcept {
+constexpr T operator*(T&& lhs, int rhs) {
     T res(std::move(lhs));
     res *= rhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator*(int lhs, T&& rhs) noexcept {
+constexpr T operator*(int lhs, T&& rhs) {
     T res(std::move(rhs));
     res *= lhs;
     return res;
@@ -416,12 +430,12 @@ T operator/(T&& lhs, const T& rhs) {
 }
 
 template <FieldType T>
-constexpr T operator^(const T& base, int exponent) noexcept {
+constexpr T operator^(const T& base, int exponent) {
     return sqm<T>(base, exponent);
 }
 
 template <FieldType T>
-constexpr T operator^(T&& base, int exponent) noexcept {
+constexpr T operator^(T&& base, int exponent) {
     return sqm<T>(std::move(base), exponent);
 }
 
@@ -465,17 +479,17 @@ class Rationals : public details::Field<Rationals<T>> {
      */
     Rationals(int n = 0, int d = 1);
 
-    Rationals(const Rationals& other) noexcept = default;
-    Rationals(Rationals&& other) noexcept = default;
+    Rationals(const Rationals& other) = default;
+    Rationals(Rationals&& other) = default;
 
     /// @brief Assign the integer @p l as `l / 1`
-    constexpr Rationals& operator=(int l) noexcept;
+    constexpr Rationals& operator=(int l);
 
-    constexpr Rationals& operator=(const Rationals& rhs) noexcept = default;
-    Rationals& operator=(Rationals&& rhs) noexcept = default;
+    constexpr Rationals& operator=(const Rationals& rhs) = default;
+    Rationals& operator=(Rationals&& rhs) = default;
 
     /// @brief Cross-multiplication equality
-    constexpr bool operator==(const Rationals<T>& rhs) const noexcept {
+    constexpr bool operator==(const Rationals<T>& rhs) const {
 #ifdef CECCO_ERASURE_SUPPORT
         if (is_erased() != rhs.is_erased()) return false;
 #endif
@@ -483,23 +497,23 @@ class Rationals : public details::Field<Rationals<T>> {
     }
 
     /// @brief Additive inverse (lvalue overload returns a copy with negated numerator)
-    constexpr Rationals operator-() const& noexcept;
+    constexpr Rationals operator-() const&;
     /// @brief Additive inverse (rvalue overload negates in place)
-    constexpr Rationals& operator-() && noexcept;
+    constexpr Rationals& operator-() &&;
 
     /// @brief `*this += rhs`, result kept in lowest terms
-    constexpr Rationals& operator+=(const Rationals& rhs) noexcept;
+    constexpr Rationals& operator+=(const Rationals& rhs);
     /// @brief `*this -= rhs`, result kept in lowest terms
-    constexpr Rationals& operator-=(const Rationals& rhs) noexcept;
+    constexpr Rationals& operator-=(const Rationals& rhs);
     /// @brief `*this *= rhs`, result kept in lowest terms
-    constexpr Rationals& operator*=(const Rationals& rhs) noexcept;
+    constexpr Rationals& operator*=(const Rationals& rhs);
     /// @brief `*this /= rhs`; throws `std::invalid_argument` if rhs is zero
     Rationals& operator/=(const Rationals& rhs);
 
     /// @brief Random rational (bounded numerator and denominator), simplified
-    Rationals& randomize() noexcept;
+    Rationals& randomize();
     /// @brief Like @ref randomize but guaranteed to differ from the current value
-    Rationals& randomize_force_change() noexcept;
+    Rationals& randomize_force_change();
 
     /**
      * @brief Multiplicative order
@@ -513,7 +527,7 @@ class Rationals : public details::Field<Rationals<T>> {
     size_t get_additive_order() const noexcept;
 
     /// @brief Human-readable description: `"rational number"`
-    static const std::string get_info() noexcept {
+    static const std::string get_info() {
         static const std::string info = "rational number";
         return info;
     }
@@ -553,7 +567,7 @@ class Rationals : public details::Field<Rationals<T>> {
     T denominator;
 
     /// @brief Reduce to lowest terms with positive denominator; called automatically
-    constexpr void simplify() noexcept;
+    constexpr void simplify();
 };
 
 /* member functions for Rationals */
@@ -565,14 +579,14 @@ Rationals<T>::Rationals(int n, int d) : numerator(n), denominator(d) {
 }
 
 template <SignedIntType T>
-constexpr Rationals<T>& Rationals<T>::operator=(int l) noexcept {
+constexpr Rationals<T>& Rationals<T>::operator=(int l) {
     numerator = l;
     denominator = 1;
     return *this;
 }
 
 template <SignedIntType T>
-constexpr Rationals<T> Rationals<T>::operator-() const& noexcept {
+constexpr Rationals<T> Rationals<T>::operator-() const& {
 #ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return Rationals().erase();
 #endif
@@ -582,7 +596,7 @@ constexpr Rationals<T> Rationals<T>::operator-() const& noexcept {
 }
 
 template <SignedIntType T>
-constexpr Rationals<T>& Rationals<T>::operator-() && noexcept {
+constexpr Rationals<T>& Rationals<T>::operator-() && {
 #ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return this->erase();
 #endif
@@ -591,7 +605,7 @@ constexpr Rationals<T>& Rationals<T>::operator-() && noexcept {
 }
 
 template <SignedIntType T>
-constexpr Rationals<T>& Rationals<T>::operator+=(const Rationals& rhs) noexcept {
+constexpr Rationals<T>& Rationals<T>::operator+=(const Rationals& rhs) {
 #ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
 #endif
@@ -604,7 +618,7 @@ constexpr Rationals<T>& Rationals<T>::operator+=(const Rationals& rhs) noexcept 
 }
 
 template <SignedIntType T>
-constexpr Rationals<T>& Rationals<T>::operator-=(const Rationals& rhs) noexcept {
+constexpr Rationals<T>& Rationals<T>::operator-=(const Rationals& rhs) {
 #ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
 #endif
@@ -617,7 +631,7 @@ constexpr Rationals<T>& Rationals<T>::operator-=(const Rationals& rhs) noexcept 
 }
 
 template <SignedIntType T>
-constexpr Rationals<T>& Rationals<T>::operator*=(const Rationals& rhs) noexcept {
+constexpr Rationals<T>& Rationals<T>::operator*=(const Rationals& rhs) {
 #ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
 #endif
@@ -644,7 +658,7 @@ Rationals<T>& Rationals<T>::operator/=(const Rationals& rhs) {
 }
 
 template <SignedIntType T>
-Rationals<T>& Rationals<T>::randomize() noexcept {
+Rationals<T>& Rationals<T>::randomize() {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
@@ -658,7 +672,7 @@ Rationals<T>& Rationals<T>::randomize() noexcept {
 }
 
 template <SignedIntType T>
-Rationals<T>& Rationals<T>::randomize_force_change() noexcept {
+Rationals<T>& Rationals<T>::randomize_force_change() {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
@@ -716,7 +730,7 @@ constexpr Rationals<T>& Rationals<T>::unerase() noexcept {
 #endif
 
 template <SignedIntType T>
-constexpr void Rationals<T>::simplify() noexcept {
+constexpr void Rationals<T>::simplify() {
     if (numerator == 0) {
         denominator = 1;
         return;
@@ -737,7 +751,7 @@ constexpr void Rationals<T>::simplify() noexcept {
  * Single stream insertion for `std::setw` compatibility.
  */
 template <SignedIntType T>
-std::ostream& operator<<(std::ostream& os, const Rationals<T>& e) noexcept {
+std::ostream& operator<<(std::ostream& os, const Rationals<T>& e) {
 #ifdef CECCO_ERASURE_SUPPORT
     if (e.is_erased()) {
         os << ERASURE_MARKER;
@@ -1290,7 +1304,10 @@ class Embedding {
     Embedding();
 
     /// @brief Apply φ: SUBFIELD → SUPERFIELD
-    constexpr SUPERFIELD operator()(const SUBFIELD& sub) const noexcept {
+    constexpr SUPERFIELD operator()(const SUBFIELD& sub) const {
+#ifdef CECCO_ERASURE_SUPPORT
+        if (sub.is_erased()) return SUPERFIELD().erase();
+#endif
         return SUPERFIELD(embedding_map[sub.get_label()]);
     }
 
@@ -1327,6 +1344,9 @@ Embedding<SUBFIELD, SUPERFIELD>::Embedding() {
 template <FiniteFieldType SUBFIELD, FiniteFieldType SUPERFIELD>
     requires SubfieldOf<SUPERFIELD, SUBFIELD>
 constexpr SUBFIELD Embedding<SUBFIELD, SUPERFIELD>::extract(const SUPERFIELD& super) const {
+#ifdef CECCO_ERASURE_SUPPORT
+    if (super.is_erased()) return SUBFIELD().erase();
+#endif
     if constexpr (details::iso_info<SUPERFIELD>::is_iso) {
         // SUPERFIELD is an Iso type - find the correct component containing SUBFIELD
 
@@ -1554,7 +1574,12 @@ class Isomorphism {
     constexpr Isomorphism(const std::vector<size_t>& iso) : iso(iso) {}
 
     /// @brief Apply φ to @p a
-    constexpr B operator()(const A& a) const noexcept { return B(iso[a.get_label()]); }
+    constexpr B operator()(const A& a) const {
+#ifdef CECCO_ERASURE_SUPPORT
+        if (a.is_erased()) return B().erase();
+#endif
+        return B(iso[a.get_label()]);
+    }
 
     /// @brief Inverse isomorphism φ⁻¹: B → A
     constexpr Isomorphism<B, A> inverse() const;
@@ -1696,9 +1721,9 @@ class Fp : public details::Field<Fp<p>> {
     Fp& operator/=(const Fp& rhs);
 
     /// @brief Uniform random element in {0, …, p − 1}
-    Fp& randomize() noexcept;
+    Fp& randomize();
     /// @brief Like @ref randomize but guaranteed to differ from the current value
-    Fp& randomize_force_change() noexcept;
+    Fp& randomize_force_change();
 
     /**
      * @brief Multiplicative order in 𝔽_p*
@@ -1711,7 +1736,7 @@ class Fp : public details::Field<Fp<p>> {
     size_t get_additive_order() const;
 
     /// @brief Human-readable description: `"prime field with p elements"`
-    static std::string get_info() noexcept {
+    static std::string get_info() {
         static const std::string info = "prime field with " + std::to_string(p) + " elements";
         return info;
     }
@@ -1738,7 +1763,7 @@ class Fp : public details::Field<Fp<p>> {
     static constexpr bool is_constexpr_ready() noexcept { return true; }
 
     /// @brief Print all lookup tables to `std::cout` (debugging aid)
-    static void show_tables() noexcept;
+    static void show_tables();
 
     /// @brief Always true (finite fields are unordered)
     constexpr bool has_positive_sign() const noexcept { return true; }
@@ -1752,9 +1777,9 @@ class Fp : public details::Field<Fp<p>> {
      * @warning Erased elements must not participate in field arithmetic — see
      * @ref CECCO_ERASURE_SUPPORT.
      */
-    constexpr Fp& erase();
+    constexpr Fp& erase() noexcept;
     /// @brief Clear the erasure flag, resetting to the additive identity
-    constexpr Fp& unerase();
+    constexpr Fp& unerase() noexcept;
     /// @brief Test whether this element is currently erased
     constexpr bool is_erased() const noexcept { return label == std::numeric_limits<label_t>::max(); }
 #endif
@@ -1883,6 +1908,13 @@ template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 Fp<p>::Fp(const Iso<MAIN, OTHERS...>& other)
     requires SubfieldOf<Iso<MAIN, OTHERS...>, Fp<p>>
 {
+#ifdef CECCO_ERASURE_SUPPORT
+    if (other.is_erased()) {
+        this->erase();
+        return;
+    }
+#endif
+
     // Try to extract from MAIN first
     if constexpr (SubfieldOf<MAIN, Fp<p>>) {
         *this = Fp(other.main());
@@ -2041,7 +2073,7 @@ Fp<p>& Fp<p>::operator/=(const Fp& rhs) {
 }
 
 template <uint16_t p>
-Fp<p>& Fp<p>::randomize() noexcept {
+Fp<p>& Fp<p>::randomize() {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
@@ -2059,7 +2091,7 @@ Fp<p>& Fp<p>::randomize() noexcept {
 }
 
 template <uint16_t p>
-Fp<p>& Fp<p>::randomize_force_change() noexcept {
+Fp<p>& Fp<p>::randomize_force_change() {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
@@ -2099,7 +2131,7 @@ size_t Fp<p>::get_additive_order() const {
 }
 
 template <uint16_t p>
-void Fp<p>::show_tables() noexcept {
+void Fp<p>::show_tables() {
     std::cout << "addition table (row and column headers omitted)" << std::endl;
     for (label_t i = 0; i < p; ++i) {
         for (label_t j = 0; j < p; ++j) std::cout << (int)lut_add(i, j) << ", ";
@@ -2125,13 +2157,13 @@ void Fp<p>::show_tables() noexcept {
 
 #ifdef CECCO_ERASURE_SUPPORT
 template <uint16_t p>
-constexpr Fp<p>& Fp<p>::erase() {
+constexpr Fp<p>& Fp<p>::erase() noexcept {
     label = std::numeric_limits<label_t>::max();
     return *this;
 }
 
 template <uint16_t p>
-constexpr Fp<p>& Fp<p>::unerase() {
+constexpr Fp<p>& Fp<p>::unerase() noexcept {
     if (is_erased()) (*this) = 0;
     return *this;
 }
@@ -2139,7 +2171,7 @@ constexpr Fp<p>& Fp<p>::unerase() {
 
 /// @brief Print as the integer label (or @ref ERASURE_MARKER if erased)
 template <uint16_t p>
-std::ostream& operator<<(std::ostream& os, const Fp<p>& e) noexcept {
+std::ostream& operator<<(std::ostream& os, const Fp<p>& e) {
 #ifdef CECCO_ERASURE_SUPPORT
     if (e.is_erased()) {
         os << ERASURE_MARKER;
@@ -2212,7 +2244,7 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
     constexpr Ext(Ext&& other) noexcept = default;
 
     /// @brief Embed a base-field element via the natural embedding B → Ext<B, modulus, mode>
-    Ext(const B& other) noexcept;
+    Ext(const B& other);
 
     /**
      * @brief Cross-field conversion from another extension field of the same characteristic
@@ -2287,25 +2319,25 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
     constexpr bool operator==(const Ext& rhs) const noexcept { return label == rhs.get_label(); }
 
     /// @brief Additive inverse (lvalue): returns a new element
-    constexpr Ext operator-() const& noexcept;
+    constexpr Ext operator-() const&;
     /// @brief Additive inverse (rvalue): in place
-    constexpr Ext& operator-() && noexcept;
+    constexpr Ext& operator-() &&;
 
     /// @brief `*this += rhs` via the addition LUT
-    constexpr Ext& operator+=(const Ext& rhs) noexcept;
+    constexpr Ext& operator+=(const Ext& rhs);
     /// @brief `*this -= rhs` via the addition LUT applied to `−rhs`
-    constexpr Ext& operator-=(const Ext& rhs) noexcept;
+    constexpr Ext& operator-=(const Ext& rhs);
     /// @brief `*this *= rhs` via the multiplication LUT
-    constexpr Ext& operator*=(const Ext& rhs) noexcept;
+    constexpr Ext& operator*=(const Ext& rhs);
     /// @brief Scalar multiplication by an `int` (repeated addition, reduced mod characteristic)
-    constexpr Ext& operator*=(int s) noexcept;
+    constexpr Ext& operator*=(int s);
     /// @brief `*this /= rhs`; throws `std::invalid_argument` if rhs is zero
     Ext& operator/=(const Ext& rhs);
 
     /// @brief Uniform random element in {0, …, Q − 1}
-    Ext& randomize() noexcept;
+    Ext& randomize();
     /// @brief Like @ref randomize but guaranteed to differ from the current value
-    Ext& randomize_force_change() noexcept;
+    Ext& randomize_force_change();
 
     /**
      * @brief Multiplicative order in the field's multiplicative group
@@ -2337,7 +2369,7 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
         requires SubfieldOf<Ext<B, modulus, mode>, S>;
 
     /// @brief Human-readable description (size, base field, modulus)
-    static std::string get_info() noexcept;
+    static std::string get_info();
 
     static constexpr size_t get_characteristic() noexcept { return B::get_p(); }
     /// @brief Underlying integer label in {0, …, Q − 1}
@@ -2352,14 +2384,14 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
     static constexpr bool is_constexpr_ready() noexcept { return mode == LutMode::CompileTime; }
 
     /// @brief Modulus polynomial f(x) — the irreducible used to construct this field
-    static constexpr Polynomial<B> get_modulus() noexcept;
+    static constexpr Polynomial<B> get_modulus();
 
     /**
      * @brief Generator (primitive element) of the multiplicative group
      *
      * Smallest label with multiplicative order |field| − 1; cached statically.
      */
-    static Ext get_generator() noexcept;
+    static Ext get_generator();
 
     static constexpr size_t get_p() noexcept { return B::get_p(); }
     static constexpr size_t get_m() noexcept { return m; }
@@ -2371,7 +2403,7 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
     static Isomorphism<Ext, T> isomorphism_to();
 
     /// @brief Print all lookup tables to `std::cout` (debugging aid)
-    static void show_tables() noexcept;
+    static void show_tables();
 
     /// @brief Always true (finite fields are unordered)
     constexpr bool has_positive_sign() const noexcept { return true; }
@@ -2407,7 +2439,7 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      */
     template <FiniteFieldType T = B>
         requires(SubfieldOf<Ext<B, modulus, mode>, T>) && (!std::is_same_v<Ext<B, modulus, mode>, T>)
-    Vector<T> as_vector() const noexcept;
+    Vector<T> as_vector() const;
 
     /**
      * @brief Compile-time signal that all LUTs are constructed
@@ -2513,10 +2545,10 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
 
     // LUT-compatible interface for use as BaseFieldType
     // These allow Ext fields to be used as base fields for higher-order extensions
-    static constexpr label_t lut_add(label_t a, label_t b) noexcept { return lut_add()(a, b); }
-    static constexpr label_t lut_mul(label_t a, label_t b) noexcept { return lut_mul()(a, b); }
-    static constexpr label_t lut_neg(label_t a) noexcept { return lut_neg()(a); }
-    static constexpr label_t lut_inv(label_t a) noexcept { return lut_inv()(a); }
+    static constexpr label_t lut_add(label_t a, label_t b) { return lut_add()(a, b); }
+    static constexpr label_t lut_mul(label_t a, label_t b) { return lut_mul()(a, b); }
+    static constexpr label_t lut_neg(label_t a) { return lut_neg()(a); }
+    static constexpr label_t lut_inv(label_t a) { return lut_inv()(a); }
 
     static constexpr bool luts_ready = []() constexpr {
         // Ensure base field LUTs are ready first
@@ -2547,7 +2579,7 @@ Ext<B, modulus, mode>::Ext(int l) {
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-Ext<B, modulus, mode>::Ext(const B& other) noexcept {
+Ext<B, modulus, mode>::Ext(const B& other) {
 #ifdef CECCO_ERASURE_SUPPORT
     if (other.is_erased()) {
         this->erase();
@@ -2687,6 +2719,13 @@ Ext<B, modulus, mode>::Ext(const Iso<MAIN, OTHERS...>& other) {
     static_assert(Ext<B, modulus, mode>::get_characteristic() == Iso<MAIN, OTHERS...>::get_characteristic(),
                   "trying to convert between fields with different characteristic");
 
+#ifdef CECCO_ERASURE_SUPPORT
+    if (other.is_erased()) {
+        this->erase();
+        return;
+    }
+#endif
+
     using IN = Iso<MAIN, OTHERS...>;
     using OUT = Ext;
 
@@ -2805,7 +2844,7 @@ Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator=(const Iso<MAIN, OTHERS..
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-constexpr Ext<B, modulus, mode> Ext<B, modulus, mode>::operator-() const& noexcept {
+constexpr Ext<B, modulus, mode> Ext<B, modulus, mode>::operator-() const& {
 #ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return Ext().erase();
 #endif
@@ -2815,7 +2854,7 @@ constexpr Ext<B, modulus, mode> Ext<B, modulus, mode>::operator-() const& noexce
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator-() && noexcept {
+constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator-() && {
 #ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return this->erase();
 #endif
@@ -2824,7 +2863,7 @@ constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator-() && noexcept 
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator+=(const Ext& rhs) noexcept {
+constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator+=(const Ext& rhs) {
 #ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
 #endif
@@ -2833,7 +2872,7 @@ constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator+=(const Ext& rh
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator-=(const Ext& rhs) noexcept {
+constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator-=(const Ext& rhs) {
 #ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
 #endif
@@ -2842,7 +2881,7 @@ constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator-=(const Ext& rh
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator*=(const Ext& rhs) noexcept {
+constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator*=(const Ext& rhs) {
 #ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased() || rhs.is_erased()) return this->erase();
 #endif
@@ -2851,7 +2890,7 @@ constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator*=(const Ext& rh
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator*=(int s) noexcept {
+constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator*=(int s) {
 #ifdef CECCO_ERASURE_SUPPORT
     if (this->is_erased()) return *this;
 #endif
@@ -2872,7 +2911,7 @@ Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator/=(const Ext& rhs) {
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize() noexcept {
+Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize() {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
@@ -2882,7 +2921,7 @@ Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize() noexcept {
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize_force_change() noexcept {
+Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize_force_change() {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
@@ -2931,7 +2970,7 @@ Polynomial<S> Ext<B, modulus, mode>::get_minimal_polynomial() const
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-std::string Ext<B, modulus, mode>::get_info() noexcept {
+std::string Ext<B, modulus, mode>::get_info() {
     std::stringstream ss;
     ss << "finite field with " + std::to_string(Q) + " elements, specified as degree " + std::to_string(m) +
               " extension of (" + B::get_info() + "), irreducible polynomial ";
@@ -2940,7 +2979,7 @@ std::string Ext<B, modulus, mode>::get_info() noexcept {
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-constexpr Polynomial<B> Ext<B, modulus, mode>::get_modulus() noexcept {
+constexpr Polynomial<B> Ext<B, modulus, mode>::get_modulus() {
     Polynomial<B> rho;
     uint8_t i = 0;
     for (auto it = modulus.cbegin(); it != modulus.cend(); ++it) {
@@ -2951,7 +2990,7 @@ constexpr Polynomial<B> Ext<B, modulus, mode>::get_modulus() noexcept {
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-Ext<B, modulus, mode> Ext<B, modulus, mode>::get_generator() noexcept {
+Ext<B, modulus, mode> Ext<B, modulus, mode>::get_generator() {
     // Use local static cache for each specific field type
     static std::once_flag computed_flag;
     static Ext cached_generator{0};
@@ -2964,7 +3003,7 @@ Ext<B, modulus, mode> Ext<B, modulus, mode>::get_generator() noexcept {
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 template <FiniteFieldType T>
     requires(SubfieldOf<Ext<B, modulus, mode>, T>) && (!std::is_same_v<Ext<B, modulus, mode>, T>)
-Vector<T> Ext<B, modulus, mode>::as_vector() const noexcept {
+Vector<T> Ext<B, modulus, mode>::as_vector() const {
     if constexpr (std::is_same_v<B, T>) {
         Vector<T> res(m);
 #ifdef CECCO_ERASURE_SUPPORT
@@ -2995,7 +3034,7 @@ Vector<T> Ext<B, modulus, mode>::as_vector() const noexcept {
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-void Ext<B, modulus, mode>::show_tables() noexcept {
+void Ext<B, modulus, mode>::show_tables() {
     std::cout << "addition table (row and column headers omitted)" << std::endl;
     for (label_t i = 0; i < Q; ++i) {
         for (label_t j = 0; j < Q; ++j) std::cout << (int)(lut_add()(i, j)) << ", ";
@@ -3030,7 +3069,7 @@ void Ext<B, modulus, mode>::show_tables() noexcept {
 
 /// @brief Print as the integer label (or @ref ERASURE_MARKER if erased)
 template <FiniteFieldType B, MOD modulus, LutMode mode>
-std::ostream& operator<<(std::ostream& os, const Ext<B, modulus, mode>& e) noexcept {
+std::ostream& operator<<(std::ostream& os, const Ext<B, modulus, mode>& e) {
 #ifdef CECCO_ERASURE_SUPPORT
     if (e.is_erased()) {
         os << ERASURE_MARKER;
@@ -3104,10 +3143,10 @@ class Iso : public details::Base {
 
     /// @brief Wrap an `OTHERS` element by converting to MAIN
     template <BelongsTo<OTHERS...> OTHER>
-    constexpr Iso(const OTHER& other) noexcept : main_(MAIN(other)) {}
+    constexpr Iso(const OTHER& other) : main_(MAIN(other)) {}
     /// @brief Wrap an `OTHERS` rvalue by converting to MAIN
     template <BelongsTo<OTHERS...> OTHER>
-    constexpr Iso(OTHER&& other) noexcept : main_(MAIN(std::move(other))) {}
+    constexpr Iso(OTHER&& other) : main_(MAIN(std::move(other))) {}
 
     constexpr Iso(const Iso& other) noexcept = default;
     constexpr Iso(Iso&& other) noexcept = default;
@@ -3164,7 +3203,7 @@ class Iso : public details::Base {
     Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other);
 
     /// @brief Additive inverse (delegates to MAIN)
-    constexpr Iso operator-() const noexcept { return Iso{-main_}; }
+    constexpr Iso operator-() const { return Iso{-main_}; }
 
     /// @brief `*this += other` (delegates to MAIN)
     constexpr Iso& operator+=(const Iso& other);
@@ -3188,7 +3227,7 @@ class Iso : public details::Base {
         requires BelongsTo<OTHER, OTHERS...>;
 
     /// @brief Scalar multiplication by an `int` (delegates to MAIN)
-    constexpr Iso& operator*=(int s) noexcept;
+    constexpr Iso& operator*=(int s);
 
     /// @brief `*this /= other`; throws `std::invalid_argument` if other is zero
     Iso& operator/=(const Iso& other);
@@ -3277,16 +3316,16 @@ class Iso : public details::Base {
 
     constexpr bool operator==(const MAIN& other) const noexcept { return main_ == other; }
 
-    constexpr bool operator!=(const Iso& other) const noexcept { return main_ != other.main_; }
+    constexpr bool operator!=(const Iso& other) const { return main_ != other.main_; }
 
-    constexpr bool operator!=(const MAIN& other) const noexcept { return main_ != other; }
+    constexpr bool operator!=(const MAIN& other) const { return main_ != other; }
 
     // Binary arithmetic operators handled by global template functions (like Fp and Ext)
 
     // Stream operator - delegate to underlying value
     friend std::ostream& operator<<(std::ostream& os, const Iso& iso) { return os << iso.main_; }
 
-    static const std::string get_info() noexcept;
+    static const std::string get_info();
 
     // Static methods required by FiniteFieldType concept
     static constexpr size_t get_characteristic() noexcept { return MAIN::get_characteristic(); }
@@ -3301,7 +3340,7 @@ class Iso : public details::Base {
 
     static constexpr Polynomial<BASE_FIELD> get_modulus() { return MAIN::get_modulus(); }
 
-    static constexpr Iso get_generator() noexcept { return Iso{MAIN::get_generator()}; }
+    static constexpr Iso get_generator() { return Iso{MAIN::get_generator()}; }
 
     /// @brief Inherits constexpr-readiness from MAIN (`OTHERS` may differ; isomorphisms run at runtime)
     static constexpr bool is_constexpr_ready() noexcept { return MAIN::is_constexpr_ready(); }
@@ -3321,13 +3360,13 @@ class Iso : public details::Base {
 
     // LUT-compatible interface for use as BaseFieldType
     // These allow Iso fields to be used as base fields for higher-order extensions
-    static constexpr label_t lut_add(label_t a, label_t b) noexcept { return lut_add()(a, b); }
+    static constexpr label_t lut_add(label_t a, label_t b) { return lut_add()(a, b); }
 
-    static constexpr label_t lut_mul(label_t a, label_t b) noexcept { return lut_mul()(a, b); }
+    static constexpr label_t lut_mul(label_t a, label_t b) { return lut_mul()(a, b); }
 
-    static constexpr label_t lut_neg(label_t a) noexcept { return lut_neg()(a); }
+    static constexpr label_t lut_neg(label_t a) { return lut_neg()(a); }
 
-    static constexpr label_t lut_inv(label_t a) noexcept { return lut_inv()(a); }
+    static constexpr label_t lut_inv(label_t a) { return lut_inv()(a); }
 
     /**
      * @brief Coordinate vector over a subfield T of MAIN or any `OTHERS` representation
@@ -3335,7 +3374,7 @@ class Iso : public details::Base {
      * @tparam T Subfield reachable from MAIN or one of `OTHERS`
      */
     template <FiniteFieldType T>
-    Vector<T> as_vector() const noexcept
+    Vector<T> as_vector() const
         requires((SubfieldOf<MAIN, T> || ((SubfieldOf<OTHERS, T>) || ...))) &&
                 (!std::is_same_v<Iso<MAIN, OTHERS...>, T>);
 };
@@ -3405,6 +3444,13 @@ Iso<MAIN, OTHERS...>::Iso(const Ext<B, modulus, mode>& other) {
     static_assert(MAIN::get_characteristic() == Ext<B, modulus, mode>::get_characteristic(),
                   "trying to convert between fields with different characteristic");
 
+#ifdef CECCO_ERASURE_SUPPORT
+    if (other.is_erased()) {
+        this->erase();
+        return;
+    }
+#endif
+
     using IN = Ext<B, modulus, mode>;
     using OUT = Iso;
 
@@ -3421,14 +3467,12 @@ Iso<MAIN, OTHERS...>::Iso(const Ext<B, modulus, mode>& other) {
             main_ = embedding(other);
         } else if constexpr ((SubfieldOf<OTHERS, IN> || ...)) {
             // Check which OTHERS type contains ExtType as subfield
-            bool conversion_done = false;
             auto try_embedding = [&]<typename OtherType>() {
                 if constexpr (SubfieldOf<OtherType, IN>) {
                     auto embedding = Embedding<IN, OtherType>();
                     OtherType other_repr = embedding(other);
                     OUT temp_iso(other_repr);
                     main_ = temp_iso.main_;
-                    conversion_done = true;
                 }
             };
             (try_embedding.template operator()<OTHERS>(), ...);
@@ -3439,14 +3483,12 @@ Iso<MAIN, OTHERS...>::Iso(const Ext<B, modulus, mode>& other) {
             auto embedding = Embedding<MAIN, IN>();
             main_ = embedding.extract(other);
         } else if constexpr ((SubfieldOf<OTHERS, IN> || ...)) {
-            bool conversion_done = false;
             auto try_downcast = [&]<typename OtherType>() {
                 if constexpr (SubfieldOf<OtherType, IN>) {
                     auto embedding = Embedding<IN, OtherType>();
                     OtherType other_repr = embedding.extract(other);
                     OUT temp_iso(other_repr);
                     main_ = temp_iso.main_;
-                    conversion_done = true;
                 }
             };
             (try_downcast.template operator()<OTHERS>(), ...);
@@ -3475,6 +3517,13 @@ constexpr Iso<MAIN, OTHERS...>::Iso(const Fp<p>& other)
 {
     static_assert(MAIN::get_characteristic() == p, "Prime field characteristic must match Iso field characteristic");
 
+#ifdef CECCO_ERASURE_SUPPORT
+    if (other.is_erased()) {
+        this->erase();
+        return;
+    }
+#endif
+
     // Try direct embedding into MAIN first
     if constexpr (SubfieldOf<MAIN, Fp<p>>) {
         main_ = MAIN(other);
@@ -3501,6 +3550,13 @@ template <FiniteFieldType OTHER_MAIN, FiniteFieldType... OTHER_OTHERS>
 Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
     static_assert(MAIN::get_characteristic() == OTHER_MAIN::get_characteristic(),
                   "trying to convert between fields with different characteristic");
+
+#ifdef CECCO_ERASURE_SUPPORT
+    if (other.is_erased()) {
+        this->erase();
+        return;
+    }
+#endif
 
     using IN = Iso<OTHER_MAIN, OTHER_OTHERS...>;
     using OUT = Iso;
@@ -3709,7 +3765,7 @@ constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator*=(const OTHER& ot
 }
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
-constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator*=(int s) noexcept {
+constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator*=(int s) {
     main_ *= s;
     return *this;
 }
@@ -3734,12 +3790,16 @@ template <typename TO>
 constexpr TO Iso<MAIN, OTHERS...>::as() const
     requires BelongsTo<TO, OTHERS...>
 {
+#ifdef CECCO_ERASURE_SUPPORT
+    if (this->is_erased()) return TO().erase();
+#endif
+
     auto phi = Isomorphism<MAIN, TO>();
     return phi(main_);
 }
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
-const std::string Iso<MAIN, OTHERS...>::get_info() noexcept {
+const std::string Iso<MAIN, OTHERS...>::get_info() {
     std::stringstream ss;
     ss << "stack of isomorphic fields, main field: ";
     ss << MAIN::get_info();
@@ -3748,7 +3808,7 @@ const std::string Iso<MAIN, OTHERS...>::get_info() noexcept {
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 template <FiniteFieldType T>
-Vector<T> Iso<MAIN, OTHERS...>::as_vector() const noexcept
+Vector<T> Iso<MAIN, OTHERS...>::as_vector() const
     requires((SubfieldOf<MAIN, T> || ((SubfieldOf<OTHERS, T>) || ...))) && (!std::is_same_v<Iso<MAIN, OTHERS...>, T>)
 {
     if constexpr (std::is_same_v<T, MAIN>) {

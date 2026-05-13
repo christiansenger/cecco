@@ -52,14 +52,28 @@
 #define POLYNOMIALS_HPP
 
 #include <initializer_list>
-// #include <ranges> // transitive through matrices.hpp
-// #include <utility> // transitive through field_concepts_traits.hpp
-// #include <vector> // transitive through field_concepts_traits.hpp
 
 #include "matrices.hpp"
-// #include <algorithm> // transitive through matrices.hpp
-// #include "field_concepts_traits.hpp" // transitive through matrices.hpp
-// #include "helpers.hpp" // transitive through field_concepts_traits.hpp
+
+/*
+// transitive
+#include <algorithm>
+#include <complex>
+#include <concepts>
+#include <functional>
+#include <iostream>
+#include <iterator>
+#include <numeric>
+#include <random>
+#include <ranges>
+#include <stdexcept>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include "field_concepts_traits.hpp"
+#include "helpers.hpp"
+*/
 
 namespace CECCO {
 
@@ -69,9 +83,9 @@ template <ComponentType T>
 class Polynomial;
 
 template <ComponentType T>
-constexpr bool operator==(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept;
+constexpr bool operator==(const Polynomial<T>& lhs, const Polynomial<T>& rhs);
 template <ComponentType T>
-std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) noexcept;
+std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs);
 
 template <ComponentType T>
 Polynomial<T> ZeroPolynomial();
@@ -105,8 +119,8 @@ Polynomial<T> ZeroPolynomial();
  */
 template <ComponentType T>
 class Polynomial {
-    friend bool operator== <>(const Polynomial& lhs, const Polynomial& rhs) noexcept;
-    friend std::ostream& operator<< <>(std::ostream& os, const Polynomial& rhs) noexcept;
+    friend bool operator== <>(const Polynomial& lhs, const Polynomial& rhs);
+    friend std::ostream& operator<< <>(std::ostream& os, const Polynomial& rhs);
 
    public:
     // Cache configuration for this class
@@ -117,10 +131,10 @@ class Polynomial {
      */
 
     /// @brief Default constructor: empty polynomial (no coefficients; distinct from the zero polynomial)
-    constexpr Polynomial() noexcept {}
+    constexpr Polynomial() noexcept = default;
 
     /// @brief Constant polynomial from an `int` (constructs `T(e)`)
-    constexpr Polynomial(int e) noexcept : data(1) { data.back() = T(e); }
+    constexpr Polynomial(int e) : data(1) { data.back() = T(e); }
 
     /// @brief Constant polynomial from a coefficient
     constexpr Polynomial(const T& e) : data(1) { data.back() = e; }
@@ -133,7 +147,7 @@ class Polynomial {
      */
     constexpr Polynomial(const std::initializer_list<T>& l) : data(l) { prune(); }
 
-    constexpr Polynomial(const Polynomial& other) noexcept : data(other.data), cache(other.cache) {}
+    constexpr Polynomial(const Polynomial& other) : data(other.data), cache(other.cache) {}
     constexpr Polynomial(Polynomial&& other) noexcept : data(std::move(other.data)), cache(std::move(other.cache)) {}
 
     /**
@@ -181,14 +195,14 @@ class Polynomial {
      */
 
     /// @brief Unary `+` (lvalue): returns a copy
-    constexpr Polynomial operator+() const& noexcept { return *this; }
+    constexpr Polynomial operator+() const& { return *this; }
     /// @brief Unary `+` (rvalue): returns the rvalue itself
     constexpr Polynomial operator+() && noexcept { return std::move(*this); }
 
     /// @brief Unary `−` (lvalue): returns a new polynomial with each coefficient negated
-    constexpr Polynomial operator-() const& noexcept;
+    constexpr Polynomial operator-() const&;
     /// @brief Unary `−` (rvalue): negates coefficients in place
-    constexpr Polynomial operator-() && noexcept;
+    constexpr Polynomial operator-() &&;
 
     /**
      * @brief Evaluate at @p s using Horner's method (O(n))
@@ -205,9 +219,9 @@ class Polynomial {
      */
 
     /// @brief Coefficient-wise addition; expands storage if @p rhs has higher degree, then prunes
-    constexpr Polynomial& operator+=(const Polynomial& rhs) noexcept;
+    constexpr Polynomial& operator+=(const Polynomial& rhs);
     /// @brief Coefficient-wise subtraction; expands storage if @p rhs has higher degree, then prunes
-    constexpr Polynomial& operator-=(const Polynomial& rhs) noexcept;
+    constexpr Polynomial& operator-=(const Polynomial& rhs);
 
     /**
      * @brief Polynomial multiplication by convolution (O(n²))
@@ -236,7 +250,7 @@ class Polynomial {
         requires FieldType<T>;
 
     /// @brief Multiply every coefficient by the scalar @p s
-    constexpr Polynomial& operator*=(const T& s) noexcept;
+    constexpr Polynomial& operator*=(const T& s);
 
     /**
      * @brief Divide every coefficient by the scalar @p s
@@ -248,7 +262,7 @@ class Polynomial {
     Polynomial& operator/=(const T& s);
 
     /// @brief Multiply every coefficient by the integer @p n; reduces @p n modulo characteristic
-    constexpr Polynomial& operator*=(size_t n) noexcept
+    constexpr Polynomial& operator*=(size_t n)
         requires FieldType<T>;
 
     /**
@@ -272,7 +286,7 @@ class Polynomial {
      * Distribution per coefficient: finite-field types draw uniformly from the field; signed
      * integers from [−100, 100]; `double` and the parts of `std::complex<double>` from [−1, 1].
      */
-    Polynomial& randomize(size_t d) noexcept;
+    Polynomial& randomize(size_t d);
 
     /** @} */
 
@@ -417,7 +431,7 @@ class Polynomial {
     }
 
     /// @brief Hamming weight: number of non-zero, non-erased coefficients; cached on first call
-    size_t wH() const noexcept
+    size_t wH() const
         requires ReliablyComparableType<T>
     {
         return cache.template get_or_compute<Weight>([this] { return calculate_weight(); });
@@ -450,14 +464,14 @@ class Polynomial {
         requires std::convertible_to<std::decay_t<U>, T>;
 
     /// @brief Reciprocal: reverse coefficients, sending p(x) to xⁿ · p(1/x)
-    constexpr Polynomial& reciprocal() noexcept;
+    constexpr Polynomial& reciprocal();
 
     /// @brief Make monic by dividing every coefficient by the leading one (no-op on zero or already-monic)
     constexpr Polynomial& normalize()
         requires FieldType<T>;
 
     /// @brief Coefficient of x^i; returns T(0) for `i > degree`
-    constexpr T operator[](size_t i) const noexcept;
+    constexpr T operator[](size_t i) const;
 
     /** @} */
 
@@ -467,10 +481,10 @@ class Polynomial {
     /// @brief Cache for Hamming weight (invalidated by mutating operations)
     mutable details::Cache<details::CacheEntry<Weight, size_t>> cache;
 
-    constexpr size_t calculate_weight() const noexcept
+    constexpr size_t calculate_weight() const
         requires ReliablyComparableType<T>;
 
-    constexpr Polynomial& prune() noexcept;
+    constexpr Polynomial& prune();
 };
 
 /* member functions for Polynomial */
@@ -544,14 +558,14 @@ Polynomial<T>& Polynomial<T>::operator=(const Polynomial<S>& rhs) {
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> Polynomial<T>::operator-() const& noexcept {
+constexpr Polynomial<T> Polynomial<T>::operator-() const& {
     Polynomial res(*this);
     std::ranges::for_each(res.data, [](T& c) { c = -c; });
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> Polynomial<T>::operator-() && noexcept {
+constexpr Polynomial<T> Polynomial<T>::operator-() && {
     std::ranges::for_each(data, [](T& c) { c = -c; });
     cache.invalidate();
     return std::move(*this);
@@ -568,7 +582,7 @@ T Polynomial<T>::operator()(const T& s) const {
 }
 
 template <ComponentType T>
-constexpr Polynomial<T>& Polynomial<T>::operator+=(const Polynomial<T>& rhs) noexcept {
+constexpr Polynomial<T>& Polynomial<T>::operator+=(const Polynomial<T>& rhs) {
     if (data.size() < rhs.data.size()) data.resize(rhs.data.size());
     std::transform(data.begin(), data.begin() + rhs.data.size(), rhs.data.begin(), data.begin(), std::plus<T>{});
     cache.invalidate();
@@ -577,7 +591,7 @@ constexpr Polynomial<T>& Polynomial<T>::operator+=(const Polynomial<T>& rhs) noe
 }
 
 template <ComponentType T>
-constexpr Polynomial<T>& Polynomial<T>::operator-=(const Polynomial<T>& rhs) noexcept {
+constexpr Polynomial<T>& Polynomial<T>::operator-=(const Polynomial<T>& rhs) {
     if (data.size() < rhs.data.size()) data.resize(rhs.data.size());
     std::transform(data.begin(), data.begin() + rhs.data.size(), rhs.data.begin(), data.begin(), std::minus<T>{});
     cache.invalidate();
@@ -634,7 +648,7 @@ Polynomial<T>& Polynomial<T>::operator%=(const Polynomial<T>& rhs)
 }
 
 template <ComponentType T>
-constexpr Polynomial<T>& Polynomial<T>::operator*=(const T& s) noexcept {
+constexpr Polynomial<T>& Polynomial<T>::operator*=(const T& s) {
     if (s == T(0)) {
         cache.template set<Weight>(0);
         data.resize(1);
@@ -647,7 +661,7 @@ constexpr Polynomial<T>& Polynomial<T>::operator*=(const T& s) noexcept {
 }
 
 template <ComponentType T>
-constexpr Polynomial<T>& Polynomial<T>::operator*=(size_t n) noexcept
+constexpr Polynomial<T>& Polynomial<T>::operator*=(size_t n)
     requires FieldType<T>
 {
     if (T::get_characteristic() != 0) {
@@ -699,7 +713,7 @@ std::pair<Polynomial<T>, Polynomial<T>> Polynomial<T>::poly_long_div(const Polyn
 }
 
 template <ComponentType T>
-Polynomial<T>& Polynomial<T>::randomize(size_t d) noexcept {
+Polynomial<T>& Polynomial<T>::randomize(size_t d) {
     data.resize(d + 1);
     if constexpr (FieldType<T>) {
         std::ranges::for_each(data, std::mem_fn(&T::randomize));
@@ -875,7 +889,7 @@ constexpr Polynomial<T>& Polynomial<T>::set_coefficient(size_t i, U&& c)
 }
 
 template <ComponentType T>
-constexpr Polynomial<T>& Polynomial<T>::reciprocal() noexcept {
+constexpr Polynomial<T>& Polynomial<T>::reciprocal() {
     std::reverse(data.begin(), data.end());
     prune();  // a zero constant term in the original becomes a leading zero after reversal
     return *this;
@@ -891,13 +905,13 @@ constexpr Polynomial<T>& Polynomial<T>::normalize()
 }
 
 template <ComponentType T>
-constexpr T Polynomial<T>::operator[](size_t i) const noexcept {
+constexpr T Polynomial<T>::operator[](size_t i) const {
     if (i >= data.size()) return T(0);
     return data[i];
 }
 
 template <ComponentType T>
-constexpr size_t Polynomial<T>::calculate_weight() const noexcept
+constexpr size_t Polynomial<T>::calculate_weight() const
     requires ReliablyComparableType<T>
 {
     size_t res = data.size() - std::count(data.cbegin(), data.cend(), T(0));
@@ -910,7 +924,7 @@ constexpr size_t Polynomial<T>::calculate_weight() const noexcept
 }
 
 template <ComponentType T>
-constexpr Polynomial<T>& Polynomial<T>::prune() noexcept {
+constexpr Polynomial<T>& Polynomial<T>::prune() {
     if (data.empty()) return *this;
 
     const auto lc = std::find_if(data.crbegin(), data.crend(), [](const T& e) { return e != T(0); });
@@ -926,49 +940,49 @@ constexpr Polynomial<T>& Polynomial<T>::prune() noexcept {
 /* free functions wrt. Polynomial */
 
 template <ComponentType T>
-constexpr Polynomial<T> operator+(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept {
+constexpr Polynomial<T> operator+(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(lhs);
     res += rhs;
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator+(Polynomial<T>&& lhs, const Polynomial<T>& rhs) noexcept {
+constexpr Polynomial<T> operator+(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(std::move(lhs));
     res += rhs;
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator+(const Polynomial<T>& lhs, Polynomial<T>&& rhs) noexcept {
+constexpr Polynomial<T> operator+(const Polynomial<T>& lhs, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(rhs));
     res += lhs;
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator+(Polynomial<T>&& lhs, Polynomial<T>&& rhs) noexcept {
+constexpr Polynomial<T> operator+(Polynomial<T>&& lhs, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(lhs));
     res += rhs;
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator-(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept {
+constexpr Polynomial<T> operator-(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(lhs);
     res -= rhs;
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator-(Polynomial<T>&& lhs, const Polynomial<T>& rhs) noexcept {
+constexpr Polynomial<T> operator-(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(std::move(lhs));
     res -= rhs;
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator-(const Polynomial<T>& lhs, Polynomial<T>&& rhs) noexcept {
+constexpr Polynomial<T> operator-(const Polynomial<T>& lhs, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(rhs));
     res = -res;
     res += lhs;
@@ -976,7 +990,7 @@ constexpr Polynomial<T> operator-(const Polynomial<T>& lhs, Polynomial<T>&& rhs)
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator-(Polynomial<T>&& lhs, Polynomial<T>&& rhs) noexcept {
+constexpr Polynomial<T> operator-(Polynomial<T>&& lhs, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(lhs));
     res -= rhs;
     return res;
@@ -1039,28 +1053,28 @@ constexpr Polynomial<T> operator%(Polynomial<T>&& lhs, const Polynomial<T>& rhs)
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator*(const Polynomial<T>& lhs, const T& rhs) noexcept {
+constexpr Polynomial<T> operator*(const Polynomial<T>& lhs, const T& rhs) {
     Polynomial<T> res(lhs);
     res *= rhs;
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator*(Polynomial<T>&& lhs, const T& rhs) noexcept {
+constexpr Polynomial<T> operator*(Polynomial<T>&& lhs, const T& rhs) {
     Polynomial<T> res(std::move(lhs));
     res *= rhs;
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator*(const T& lhs, const Polynomial<T>& rhs) noexcept {
+constexpr Polynomial<T> operator*(const T& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(rhs);
     res *= lhs;
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator*(const T& lhs, Polynomial<T>&& rhs) noexcept {
+constexpr Polynomial<T> operator*(const T& lhs, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(rhs));
     res *= lhs;
     return res;
@@ -1082,28 +1096,28 @@ constexpr Polynomial<T> operator/(Polynomial<T>&& lhs, const T& rhs) {
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator*(const Polynomial<T>& lhs, size_t n) noexcept {
+constexpr Polynomial<T> operator*(const Polynomial<T>& lhs, size_t n) {
     Polynomial<T> res(lhs);
     res *= n;
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator*(Polynomial<T>&& lhs, size_t n) noexcept {
+constexpr Polynomial<T> operator*(Polynomial<T>&& lhs, size_t n) {
     Polynomial<T> res(std::move(lhs));
     res *= n;
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator*(size_t n, const Polynomial<T>& rhs) noexcept {
+constexpr Polynomial<T> operator*(size_t n, const Polynomial<T>& rhs) {
     Polynomial<T> res(rhs);
     res *= n;
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> operator*(size_t n, Polynomial<T>&& rhs) noexcept {
+constexpr Polynomial<T> operator*(size_t n, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(rhs));
     res *= n;
     return res;
@@ -1157,14 +1171,14 @@ constexpr Polynomial<T> Hasse_derivative(Polynomial<T>&& poly, size_t s)
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> reciprocal(const Polynomial<T>& poly) noexcept {
+constexpr Polynomial<T> reciprocal(const Polynomial<T>& poly) {
     Polynomial<T> res(poly);
     res.reciprocal();
     return res;
 }
 
 template <ComponentType T>
-constexpr Polynomial<T> reciprocal(Polynomial<T>&& poly) noexcept {
+constexpr Polynomial<T> reciprocal(Polynomial<T>&& poly) {
     Polynomial<T> res(std::move(poly));
     res.reciprocal();
     return res;
@@ -1189,17 +1203,17 @@ constexpr Polynomial<T> normalize(Polynomial<T>&& poly)
 }
 
 template <ComponentType T>
-constexpr bool operator==(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept {
+constexpr bool operator==(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     return lhs.data == rhs.data;
 }
 
 template <ComponentType T>
-constexpr bool operator!=(const Polynomial<T>& lhs, const Polynomial<T>& rhs) noexcept {
+constexpr bool operator!=(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     return !(lhs == rhs);
 }
 
 template <ComponentType T>
-std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) noexcept {
+std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) {
     if (rhs.data.empty()) {
         os << "()";
         return os;
@@ -1248,7 +1262,7 @@ std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) noexcept {
  * @param a Coefficient (defaults to T(1))
  */
 template <ComponentType T>
-constexpr Polynomial<T> Monomial(size_t i, auto&& a = T(1)) noexcept
+constexpr Polynomial<T> Monomial(size_t i, auto&& a = T(1))
     requires std::convertible_to<std::decay_t<decltype(a)>, T>
 {
     Polynomial<T> res;
@@ -1377,7 +1391,7 @@ Polynomial<T> LCM(const std::vector<Polynomial<T>>& polys)
  * @ref CECCO::sqm directly.
  */
 template <ComponentType T>
-constexpr Polynomial<T> operator^(const Polynomial<T>& base, int exponent) noexcept {
+constexpr Polynomial<T> operator^(const Polynomial<T>& base, int exponent) {
     return sqm<Polynomial<T>>(base, exponent);
 }
 
@@ -1581,26 +1595,24 @@ constexpr Polynomial<Fp<p>> ConwayPolynomial() {
     return Polynomial<Fp<p>>(ConwayCoefficients<p, m>());
 }
 
-    /**
-     * @brief Sample a random monic irreducible polynomial of degree @p degree over T
-     *
-     * Tries random polynomials until @ref Polynomial::is_irreducible accepts one. Runtime is
-     * bounded in expectation by the density of irreducibles, but unbounded in the worst case;
-     * suitable as a `modulus` for @ref CECCO::Ext.
-     */
-    template <FieldType T>
-    Polynomial<T> find_irreducible(size_t degree) {
-        if (degree == 0) return Polynomial<T>(T(1));
-        Polynomial<T> res;
-        do {
-            res.randomize(degree);
-        } while (!res.is_irreducible());
+/**
+ * @brief Sample a random monic irreducible polynomial of degree @p degree over T
+ *
+ * Tries random polynomials until @ref Polynomial::is_irreducible accepts one. Runtime is
+ * bounded in expectation by the density of irreducibles, but unbounded in the worst case;
+ * suitable as a `modulus` for @ref CECCO::Ext.
+ */
+template <FieldType T>
+Polynomial<T> find_irreducible(size_t degree) {
+    if (degree == 0) return Polynomial<T>(T(1));
+    Polynomial<T> res;
+    do {
+        res.randomize(degree);
+    } while (!res.is_irreducible());
 
-        res.normalize();
-        return res;
-    }
-
-
+    res.normalize();
+    return res;
+}
 
 }  // namespace CECCO
 

@@ -35,11 +35,15 @@
 
 #include <complex>
 #include <concepts>
+
+#include "helpers.hpp"
+/*
+//transitive
 #include <string>
 #include <type_traits>
 
-#include "helpers.hpp"
-// #include "InfInt.hpp" // transitive through helpers.hpp
+#include "InfInt.hpp"
+*/
 
 namespace CECCO {
 
@@ -133,21 +137,20 @@ concept FieldType =
  */
 
 template <typename T>
-concept FiniteFieldType =
-    FieldType<T> && requires(const T& t) {
-        requires(T::get_characteristic() > 1);
-        requires is_prime(T::get_p());
+concept FiniteFieldType = FieldType<T> && requires(const T& t) {
+    requires(T::get_characteristic() > 1);
+    requires is_prime(T::get_p());
 
-        { t.get_size() } -> std::convertible_to<size_t>;
-        { t.get_m()    } -> std::convertible_to<size_t>;
-        { t.get_p()    } -> std::convertible_to<size_t>;
-        { t.get_q()    } -> std::convertible_to<size_t>;
+    { t.get_size() } -> std::convertible_to<size_t>;
+    { t.get_m() } -> std::convertible_to<size_t>;
+    { t.get_p() } -> std::convertible_to<size_t>;
+    { t.get_q() } -> std::convertible_to<size_t>;
 
-        { T::get_generator() } -> std::same_as<T>;
+    { T::get_generator() } -> std::same_as<T>;
 
-        { t.get_multiplicative_order() } -> std::convertible_to<size_t>;
-        { t.get_additive_order()       } -> std::convertible_to<size_t>;
-    };
+    { t.get_multiplicative_order() } -> std::convertible_to<size_t>;
+    { t.get_additive_order() } -> std::convertible_to<size_t>;
+};
 
 /**
  * @concept SignedIntType
@@ -633,9 +636,9 @@ struct largest_common_subfield {
     struct is_iso<Iso<MAIN, OTHERS...>> : std::true_type {};
 
     template <typename Largest, typename Param1, typename Param2>
-    using prefer_iso = std::conditional_t<
-        is_iso<Param1>::value && Isomorphic<Largest, Param1>, Param1,
-        std::conditional_t<is_iso<Param2>::value && Isomorphic<Largest, Param2>, Param2, Largest>>;
+    using prefer_iso =
+        std::conditional_t<is_iso<Param1>::value && Isomorphic<Largest, Param1>, Param1,
+                           std::conditional_t<is_iso<Param2>::value && Isomorphic<Largest, Param2>, Param2, Largest>>;
 
    public:
     using type = prefer_iso<raw_largest, F, G>;

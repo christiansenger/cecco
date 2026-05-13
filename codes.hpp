@@ -16,238 +16,47 @@
 #ifndef CODES_HPP
 #define CODES_HPP
 
-#include "blocks.hpp"
-// #include <ranges> // transitive through blocks.hpp
-// #include <algorithm> // transitive through blocks.hpp
-// #include <vector> // transitive through blocks.hpp
-// #include <fstream> // transitive through matrices.hpp
-// #include <iostream> // transitive through blocks.hpp
-// #include <variant> // transitive through blocks.hpp
-// #include <optional> // transitive through blocks.hpp
-// #include "InfInt.hpp" // transitive through blocks.hpp
-// #include "field_concepts_traits.hpp" // transitive through blocks.hpp
-// #include "helpers.hpp" // transitive through blocks.hpp
-// #include "matrices.hpp" // transitive through blocks.hpp
-// #include "vectors.hpp" // transitive through blocks.hpp
-// #include "fields.hpp" // transitive through blocks.hpp
-// #include "polynomials.hpp" // transitive through blocks.hpp
 #include <bit>
+
+#include "code_bounds.hpp"
+#include "trellises.hpp"
+/*
+// transitive
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <fstream>
+#include <functional>
+#include <iomanip>
+#include <iostream>
+#include <iterator>
+#include <limits>
+#include <numeric>
+#include <optional>
+#include <random>
+#include <ranges>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "fields.hpp"
+#include "helpers.hpp"
+#include "matrices.hpp"
+#include "polynomials.hpp"
+#include "vectors.hpp"
+*/
 
 #define BOLD(x) "\033[1m" x "\033[0m"
 
 namespace CECCO {
-
-template <FiniteFieldType T>
-long double HammingUpperBound(size_t n, size_t dmin) {
-    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
-    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
-    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
-
-    constexpr size_t q = T::get_size();
-    try {
-        const size_t tmax = (dmin - 1) / 2;
-        InfInt h = 0;
-        for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-
-        return n -
-               std::log2l(static_cast<long double>(h.toUnsignedLongLong())) / std::log2l(static_cast<long double>(q));
-    } catch (const InfIntException& e) {
-        std::cerr << " [Hamming bound overflow]";
-        return std::numeric_limits<long double>::infinity();
-    }
-}
-
-namespace details {
-
-template <FiniteFieldType T>
-InfInt A(size_t n, size_t d, InfInt w) {
-    const InfInt e = (d + 1) / 2;
-    if (w < e) return 1;
-
-    constexpr size_t q = T::get_size();
-    const InfInt Q = q, N = n;
-    InfInt res = 1;
-    for (InfInt i = e; i <= w; ++i) res = res * ((N - w + i) * (Q - 1)) / i;
-
-    return res;
-}
-
-}  // namespace details
-
-template <FiniteFieldType T>
-long double JohnsonUpperBound(size_t n, size_t dmin) {
-    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
-    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
-    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
-
-    constexpr size_t q = T::get_size();
-    try {
-        const size_t tmax = (dmin - 1) / 2;
-        const InfInt s = dmin % 2;
-        InfInt h = 0;
-        for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-
-        const InfInt numerator = bin<InfInt>(n, tmax + 1) * sqm<InfInt>(q - 1, tmax + 1) -
-                                 s * bin<InfInt>(dmin, tmax) * details::A<T>(n, dmin, dmin);
-
-        const InfInt denominator = details::A<T>(n, dmin, tmax + 1);
-
-        return n - std::log2l(static_cast<long double>(h.toUnsignedLongLong()) +
-                              static_cast<long double>(numerator.toUnsignedLongLong()) /
-                                  static_cast<long double>(denominator.toUnsignedLongLong())) /
-                       std::log2l(static_cast<long double>(q));
-    } catch (const InfIntException& e) {
-        std::cerr << " [Johnson bound overflow]";
-        return std::numeric_limits<long double>::infinity();
-    }
-}
-
-template <FiniteFieldType T>
-long double PlotkinUpperBound(size_t n, size_t dmin) {
-    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
-    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
-    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
-
-    constexpr size_t q = T::get_size();
-    try {
-        const InfInt Q = q, N = n, D = dmin;
-        if (Q * D > N * (Q - 1)) {  // conventional
-            return std::log2l(static_cast<long double>((Q * D).toUnsignedLongLong()) /
-                              static_cast<long double>((Q * D - N * (Q - 1)).toUnsignedLongLong())) /
-                   std::log2l(static_cast<long double>(q));
-        } else {  // improved
-            const InfInt Delta = N - Q * D / (Q - 1) + 1;
-            const InfInt M = sqm<InfInt>(q, Delta.toUnsignedLongLong() + 1) * D / (Q * D - (N - Delta) * (Q - 1));
-
-            return std::log2l(static_cast<long double>(M.toUnsignedLongLong())) /
-                   std::log2l(static_cast<long double>(q));
-        }
-    } catch (const InfIntException& e) {
-        std::cerr << " [Plotkin bound overflow]";
-        return std::numeric_limits<long double>::infinity();
-    }
-}
-
-template <FiniteFieldType T>
-long double EliasUpperBound(size_t n, size_t dmin) {
-    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
-    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
-    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
-
-    constexpr size_t q = T::get_size();
-    try {
-        long double minimum = std::numeric_limits<long double>::infinity();
-        const InfInt Q = q, N = n, D = dmin;
-        for (size_t w = 0; Q * w <= (Q - 1) * N; ++w) {
-            const InfInt denominator = Q * w * w - InfInt(2) * (Q - 1) * N * w + (Q - 1) * N * D;
-            if (denominator > 0) {
-                InfInt h = 0;
-                for (size_t i = 0; i <= w; ++i) h += bin<InfInt>(N, i) * sqm<InfInt>(Q - 1, i);
-
-                long double temp = static_cast<long double>(((Q - 1) * N * D).toUnsignedLongLong()) /
-                                   static_cast<long double>(denominator.toUnsignedLongLong());
-
-                temp /= static_cast<long double>(h.toUnsignedLongLong());
-
-                minimum = std::min(minimum, temp);
-            }
-        }
-
-        return n + std::log2l(minimum) / std::log2l(static_cast<long double>(q));
-    } catch (const InfIntException& e) {
-        std::cerr << " [Elias bound overflow]";
-        return std::numeric_limits<long double>::infinity();
-    }
-}
-
-inline size_t SingletonUpperBound(size_t n, size_t dmin) {
-    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
-    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
-    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
-    return n - dmin + 1;
-}
-
-template <FiniteFieldType T>
-size_t GriesmerUpperBound(size_t n, size_t dmin) {
-    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
-    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
-    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
-
-    constexpr size_t q = T::get_size();
-    size_t k = 0;
-    for (size_t kp = 1; kp <= n; ++kp) {
-        size_t sum = 0;
-        size_t qi = 1;
-        for (size_t i = 0; i < kp; ++i) {
-            sum += qi >= dmin ? 1 : (dmin + qi - 1) / qi;
-            if (sum > n) break;
-            if (qi < dmin) {
-                if (qi > dmin / q)
-                    qi = dmin;
-                else
-                    qi *= q;
-            }
-        }
-        if (sum <= n)
-            k = kp;
-        else
-            break;
-    }
-
-    return k;
-}
-
-template <FiniteFieldType T>
-long double UpperBound(size_t n, size_t dmin) {
-    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
-    if (dmin == 0) throw std::invalid_argument("Cannot calculate upper bounds with dmin=0!");
-    if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
-
-    long double minimum = std::numeric_limits<long double>::infinity();
-    for (size_t delta = 0; delta < std::min(n, dmin); ++delta) {
-        const long double hamming = HammingUpperBound<T>(n - delta, dmin - delta);
-        const long double johnson = JohnsonUpperBound<T>(n - delta, dmin - delta);
-        const long double plotkin = PlotkinUpperBound<T>(n - delta, dmin - delta);
-        const long double elias = EliasUpperBound<T>(n - delta, dmin - delta);
-        const long double singleton = SingletonUpperBound(n - delta, dmin - delta);
-        const long double griesmer = GriesmerUpperBound<T>(n - delta, dmin - delta);
-        minimum = std::min({minimum, hamming, johnson, plotkin, elias, singleton, griesmer});
-    }
-    return minimum;
-}
-
-template <FiniteFieldType T>
-size_t GilbertVarshamovLowerBound(size_t n, size_t dmin) {
-    if (n == 0) throw std::invalid_argument("Cannot calculate lower bound with n=0!");
-    if (dmin == 0) throw std::invalid_argument("Cannot calculate lower bound with dmin=0!");
-    if (dmin > n) throw std::invalid_argument("Cannot calculate lower bound with dmin>n");
-    if (dmin == 1) return n;
-
-    constexpr size_t q = T::get_size();
-    try {
-        InfInt sum = 0;
-        for (size_t i = 0; i <= dmin - 2; ++i) sum += bin<InfInt>(n - 1, i) * sqm<InfInt>(q - 1, i);
-        size_t r = 0;
-        for (InfInt qr = 1; qr <= sum; qr *= q) ++r;
-
-        return r <= n ? n - r : 0;
-    } catch (const InfIntException& e) {
-        std::cerr << " [Gilbert-Varshamov bound overflow]";
-        return 0;
-    }
-}
-
-template <FiniteFieldType T>
-size_t BurstUpperBound(size_t n, size_t ell) {
-    if (ell > n) throw std::invalid_argument("Burst bound: burst length ell must be at most n");
-    constexpr size_t q = T::get_size();
-    return std::floor(n - ell - std::log2(1 + (q - 1) * (n - ell) / q) / std::log2(q));
-}
-
-inline size_t ReigerBurstUpperBound(size_t n, size_t ell) {
-    if (2 * ell > n) return 0;
-    return n - 2 * ell;
-}
 
 template <FiniteFieldType T>
 Polynomial<InfInt> MacWilliamsIdentity(const Polynomial<InfInt>& A, size_t n, size_t k) {
@@ -312,424 +121,6 @@ inline std::ostream& showspecial(std::ostream& os) {
     os.iword(details::index) = 3;
     return os;
 }
-
-namespace details {
-
-template <FieldType T>
-struct Vertex {
-    explicit Vertex(uint32_t id) : id(id) {}
-
-    uint32_t id;
-};
-
-template <FieldType T>
-struct Edge {
-    Edge(uint32_t from_id, uint32_t to_id, T value) : from_id(from_id), to_id(to_id), value(value) {}
-
-    uint32_t from_id;
-    uint32_t to_id;
-    T value;
-};
-
-}  // namespace details
-
-// Invariant: within each layer, V[s][i].id == i. The Viterbi / BCJR data plane
-// indexes path_costs, alpha, beta, backptrs by edge from_id/to_id directly,
-// so ids must equal positions. add_edge preserves this as long as new to_ids
-// are introduced in increasing order (0, 1, 2, ...); all in-tree constructors
-// (row_trellis, operator*, merge_segments) do.
-template <FieldType T>
-struct Trellis {
-    Trellis() : V(1) { V[0].emplace_back(details::Vertex<T>(0)); }
-
-    void add_edge(size_t segment, uint32_t id_from, uint32_t id_to, T value) {
-        if (segment >= E.size()) {
-            V.resize(segment + 2);
-            E.resize(segment + 1);
-        }
-
-        auto& Vf = V[segment];
-        if (std::ranges::find_if(Vf, [id_from](const auto& v) { return v.id == id_from; }) == Vf.cend())
-            throw std::invalid_argument("Start node id " + std::to_string(id_from) + " not found in V[" +
-                                        std::to_string(segment) + "]!");
-
-        auto& Vt = V[segment + 1];
-        if (std::ranges::find_if(Vt, [id_to](const auto& v) { return v.id == id_to; }) == Vt.cend()) {
-            if (id_to != Vt.size())
-                throw std::invalid_argument("New sink id " + std::to_string(id_to) + " in V[" +
-                                            std::to_string(segment + 1) +
-                                            "] must equal its position (id==index invariant)!");
-            Vt.emplace_back(id_to);
-        }
-
-        auto& Es = E[segment];
-        if (std::ranges::any_of(Es, [&](const auto& e) { return e.from_id == id_from && e.to_id == id_to; }))
-            throw std::invalid_argument("Edge (" + std::to_string(id_from) + " -> " + std::to_string(id_to) +
-                                        ") already exists in E[" + std::to_string(segment) + "]!");
-        Es.emplace_back(id_from, id_to, value);
-    }
-
-    Trellis operator*(const Trellis& other) const {
-        if (E.size() != other.E.size()) throw std::invalid_argument("Trellises must have the same number of segments!");
-
-        const size_t num_segments = E.size();
-        std::vector<std::unordered_map<uint64_t, uint32_t>> vmap(num_segments + 1);
-
-        auto get_or_add = [&](size_t s, uint32_t a, uint32_t b) -> uint32_t {
-            const uint64_t key = (static_cast<uint64_t>(a) << 32) | b;
-            auto [it, inserted] = vmap[s].try_emplace(key, static_cast<uint32_t>(vmap[s].size()));
-            return it->second;
-        };
-
-        get_or_add(0, 0, 0);
-
-        Trellis result;
-
-        for (size_t s = 0; s < num_segments; ++s) {
-            for (const auto& e1 : E[s]) {
-                for (const auto& e2 : other.E[s]) {
-                    result.add_edge(s, get_or_add(s, e1.from_id, e2.from_id), get_or_add(s + 1, e1.to_id, e2.to_id),
-                                    e1.value + e2.value);
-                }
-            }
-        }
-
-        return result;
-    }
-
-    size_t get_maximum_depth() const noexcept {
-        size_t max = 0;
-        for (const auto& seg : V)
-            if (seg.size() > max) max = seg.size();
-        return max;
-    }
-
-    template <typename cost_t>
-        requires std::integral<cost_t> || std::floating_point<cost_t>
-    struct Viterbi_Workspace {
-        static constexpr bool is_soft = std::is_floating_point_v<cost_t>;
-        static constexpr cost_t init = is_soft ? std::numeric_limits<cost_t>::infinity()
-                                               : std::numeric_limits<cost_t>::max();
-
-        explicit Viterbi_Workspace(const Trellis& tr) {
-            const size_t M = tr.get_maximum_depth();
-            path_costs_prev.resize(M);
-            path_costs_curr.resize(M);
-            tie_counts.resize(M);
-            backptrs.reserve(tr.V.size());
-            for (size_t s = 0; s < tr.V.size(); ++s) backptrs.emplace_back(tr.V[s].size(), nullptr);
-            edge_costs.reserve(tr.E.size());
-            for (size_t s = 0; s < tr.E.size(); ++s) edge_costs.emplace_back(tr.E[s].size());
-        }
-
-        void calculate_edge_costs(const Trellis& tr, const Vector<T>& r)
-            requires std::integral<cost_t>
-        {
-            if (r.get_n() != tr.E.size())
-                throw std::invalid_argument("Vector length must match number of trellis segments!");
-            for (size_t s = 0; s < tr.E.size(); ++s)
-                for (size_t j = 0; j < tr.E[s].size(); ++j)
-#ifdef CECCO_ERASURE_SUPPORT
-                    edge_costs[s][j] =
-                        r[s].is_erased() ? cost_t{0} : ((tr.E[s][j].value != r[s]) ? cost_t{1} : cost_t{0});
-#else
-                    edge_costs[s][j] = (tr.E[s][j].value != r[s]) ? cost_t{1} : cost_t{0};
-#endif
-        }
-
-        void calculate_edge_costs(const Trellis& tr, const Vector<double>& llrs)
-            requires std::floating_point<cost_t> && std::is_same_v<T, Fp<2>>
-        {
-            if (llrs.get_n() != tr.E.size())
-                throw std::invalid_argument("Vector length must match number of trellis segments!");
-            for (size_t s = 0; s < tr.E.size(); ++s)
-                for (size_t j = 0; j < tr.E[s].size(); ++j)
-                    edge_costs[s][j] = (tr.E[s][j].value == T(0)) ? cost_t{0} : llrs[s];
-        }
-
-        std::vector<cost_t> path_costs_prev;
-        std::vector<cost_t> path_costs_curr;
-        std::vector<std::vector<const details::Edge<T>*>> backptrs;
-        std::vector<uint16_t> tie_counts;
-        std::vector<std::vector<cost_t>> edge_costs;
-        std::optional<std::variant<Vector<T>, Vector<double>>> v;
-    };
-
-    struct BCJR_Workspace {
-        static constexpr bool is_soft = true;
-
-        explicit BCJR_Workspace(const Trellis& tr) {
-            alpha.reserve(tr.V.size());
-            beta.reserve(tr.V.size());
-            for (size_t s = 0; s < tr.V.size(); ++s) {
-                alpha.emplace_back(tr.V[s].size(), -std::numeric_limits<double>::infinity());
-                beta.emplace_back(tr.V[s].size(), -std::numeric_limits<double>::infinity());
-            }
-            edge_costs.reserve(tr.E.size());
-            for (size_t s = 0; s < tr.E.size(); ++s) edge_costs.emplace_back(tr.E[s].size());
-        }
-
-        void calculate_edge_costs(const Trellis& tr, const Vector<double>& llrs)
-            requires std::is_same_v<T, Fp<2>>
-        {
-            if (llrs.get_n() != tr.E.size())
-                throw std::invalid_argument("Vector length must match number of trellis segments!");
-            for (size_t s = 0; s < tr.E.size(); ++s)
-                for (size_t j = 0; j < tr.E[s].size(); ++j)
-                    edge_costs[s][j] = (tr.E[s][j].value != T(0)) ? llrs[s] : 0.0;
-        }
-
-        std::vector<std::vector<double>> alpha;
-        std::vector<std::vector<double>> beta;
-        std::vector<std::vector<double>> edge_costs;
-        std::optional<std::variant<Vector<T>, Vector<double>>> v;
-    };
-
-    template <typename WS>
-    std::ostream& print(std::ostream& os, const WS* ws) const {
-        if (E.empty()) return os;
-        for (size_t i = 0; i < E.size(); ++i) {
-            if (E[i].empty()) return os;
-            for (size_t j = 0; j < E[i].size(); ++j) {
-                os << "(" << E[i][j].from_id << "--" << E[i][j].value;
-                if (ws) os << "[" << ws->edge_costs[i][j] << "]";
-                os << "--" << E[i][j].to_id << ")";
-                if (j < E[i].size() - 1) os << ", ";
-            }
-            if (i != E.size() - 1) os << std::endl;
-        }
-        return os;
-    }
-
-    std::ostream& print(std::ostream& os) const { return print<Viterbi_Workspace<uint16_t>>(os, nullptr); }
-
-    friend std::ostream& operator<<(std::ostream& os, const Trellis& Tr) { return Tr.print(os); }
-
-    template <typename WS>
-    void tikz_header(std::ostream& file) const {
-        const double arrow_scale = std::min(1.4 / E.size() * 9.0, 1.4);
-        const double vertex_size = std::min(5.0 / E.size() * 9.0, 5.0);
-
-        file << R"(% required in preamble:
-% \usepackage{amsfonts}
-% \usepackage{bm}
-% \usepackage{tikz}
-% \usetikzlibrary{arrows.meta, backgrounds, calc, positioning}
-
-\tikzset{>={Stealth[scale=)" << arrow_scale << R"(]}}
-\tikzstyle{trellisvertex}=[circle, draw=black, outer sep=0pt, inner sep=0pt, minimum size=)"
-             << vertex_size << R"(pt, left color=gray!80, right color=gray!20])";
-
-        if constexpr (WS::is_soft) {
-            file << R"(
-\tikzstyle{trellisvertexprev}=[trellisvertex, inner sep=1pt, left color=blue!80, right color=blue!20, text width=4ex, align=center]
-\tikzstyle{trellisvertexcurr}=[trellisvertex, inner sep=1pt, left color=green!80, right color=green!20, text width=4ex, align=center])";
-        } else {
-            file << R"(
-\tikzstyle{trellisvertexprev}=[trellisvertex, inner sep=2pt, left color=blue!80, right color=blue!20]
-\tikzstyle{trellisvertexcurr}=[trellisvertex, inner sep=2pt, left color=green!80, right color=green!20])";
-        }
-
-        file << R"(
-\tikzstyle{trellisarrow}=[draw, ->, fill=black]
-\tikzstyle{trellisarrowone}=[trellisarrow, fill=red, draw=red]
-\tikzstyle{trellisarrowzero}=[trellisarrow, densely dashed, fill=black, draw=black]
-\tikzstyle{trellisedgelabel}=[below, sloped]
-\tikzstyle{trellispath}=[double distance=.075cm, thick, line join=round, cap=round])";
-    }
-
-    template <typename WS>
-    void tikz_picture(std::ostream& file, const WS* ws, size_t frontier) const
-        requires FiniteFieldType<T> && (T::get_size() <= 64)
-    {
-        file << "\n\n\\begin{tikzpicture}[x=\\linewidth/" << E.size() << ", y=1cm]";
-
-        for (size_t s = 0; s < V.size(); ++s) {
-            for (size_t i = 0; i < V[s].size(); ++i) {
-                const char* style = "trellisvertex";
-                bool labeled = false;
-                if (ws) {
-                    if constexpr (std::is_same_v<WS, BCJR_Workspace>) {
-                        style = "trellisvertexprev";
-                        labeled = true;
-                    } else {
-                        if (s == frontier) {
-                            style = "trellisvertexcurr";
-                            labeled = true;
-                        } else if (frontier > 0 && s == frontier - 1) {
-                            style = "trellisvertexprev";
-                            labeled = true;
-                        }
-                    }
-                }
-                file << "\n    \\node[" << style << "] (" << s << "_" << V[s][i].id
-                     << ") at (" << s << ", " << -static_cast<int>(V[s][i].id) << ") {\\tiny$";
-                if (labeled) {
-                    if constexpr (WS::is_soft) {
-                        file << std::fixed << std::setprecision(2);
-                        if constexpr (std::is_same_v<WS, BCJR_Workspace>) {
-                            file << ws->alpha[s][i] << "\\mid " << ws->beta[s][i];
-                        } else {
-                            file << ((s == frontier) ? ws->path_costs_prev[i] : ws->path_costs_curr[i]);
-                        }
-                    } else {
-                        file << ((s == frontier) ? ws->path_costs_prev[i] : ws->path_costs_curr[i]);
-                    }
-                }
-                file << "$};";
-            }
-        }
-
-        for (size_t s = 0; s < E.size(); ++s) {
-            for (size_t j = 0; j < E[s].size(); ++j) {
-                const auto& e = E[s][j];
-                const auto label = e.value.get_label();
-                if (label == 0) {
-                    file << "\n    \\path[trellisarrowzero]";
-                } else if (label == T::get_size() - 1) {
-                    file << "\n    \\path[trellisarrowone]";
-                } else {
-                    const size_t a = 63 - 63 * static_cast<double>(label) / (T::get_size() - 1);
-                    const uint8_t r = details::colormap[a][0];
-                    const uint8_t g = details::colormap[a][1];
-                    const uint8_t b = details::colormap[a][2];
-                    file << "\n    \\definecolor{color}{RGB}{" << static_cast<int>(r) << ", "
-                         << static_cast<int>(g) << ", " << static_cast<int>(b)
-                         << "}\\path[trellisarrow, draw=color, fill=color]";
-                }
-                file << " (" << s << "_" << e.from_id << ")";
-                if (ws) {
-                    file << " edge[trellisedgelabel] node[black] {\\tiny$";
-                    if constexpr (WS::is_soft) file << std::fixed << std::setprecision(2);
-                    file << ws->edge_costs[s][j] << "$}";
-                } else {
-                    file << " --";
-                }
-                file << " (" << s + 1 << "_" << e.to_id << ");";
-            }
-        }
-
-        file << "\n    \\begin{scope}[on background layer]";
-        const size_t maxdepth = get_maximum_depth();
-        for (size_t s = 0; s < V.size(); ++s) {
-            file << "\n        \\draw [dotted, shorten >=-5mm] (" << s << "_0) to ("
-                 << s << ", " << -static_cast<int>(maxdepth) + 1 << ");";
-        }
-
-        if constexpr (!std::is_same_v<WS, BCJR_Workspace>) {
-            if (ws && frontier > 0) {
-                std::vector<size_t> path;
-                path.reserve(frontier + 1);
-                for (size_t i = 0; i < V[frontier].size(); ++i) {
-                    path.clear();
-                    size_t v = i;
-                    path.push_back(v);
-                    for (size_t s = frontier; s > 0; --s) {
-                        v = ws->backptrs[s][v]->from_id;
-                        path.push_back(v);
-                    }
-                    file << "\n        \\draw[trellispath, green, double=green!15] ("
-                         << frontier - 1 << "_" << path[1] << ") -- ("
-                         << frontier << "_" << path[0] << ");";
-                    if (path.size() > 2) {
-                        file << "\n        \\draw[trellispath, blue, double=blue!15]";
-                        for (size_t k = 1; k < path.size(); ++k) {
-                            file << " (" << frontier - k << "_" << path[k] << ")";
-                            if (k + 1 < path.size()) file << " --";
-                        }
-                        file << ";";
-                    }
-                }
-            }
-        }
-
-        file << "\n    \\end{scope}"
-             << "\n    \\node[node distance=.0cm, below left=of 0_0] {$\\mathfrak{s}$};"
-             << "\n    \\node[node distance=.0cm, below right=of " << E.size() << "_0] {$\\mathfrak{t}$};";
-
-        if constexpr (requires { ws->v; }) {
-            if (ws && ws->v.has_value()) {
-                file << "\n    \\node[anchor=east] at ($(0_0)+(0,.5)$) {\\small$\\bm{v}=$};";
-                for (size_t s = 0; s < E.size(); ++s) {
-                    file << "\n    \\node at ($(" << s << "_0)!0.5!(" << s + 1
-                         << "_0)+(0,.5)$) {\\small$";
-                    if (s == 0) file << "(";
-                    std::visit([&](const auto& w) { file << w[s]; }, *(ws->v));
-                    file << (s + 1 == E.size() ? ")" : ",") << "$};";
-                }
-            }
-        }
-
-        file << "\n\\end{tikzpicture}\n";
-    }
-
-    template <typename WS>
-    void export_as_tikz(const std::string& filename, const WS* ws) const
-        requires FiniteFieldType<T> && (T::get_size() <= 64)
-    {
-        std::ofstream file;
-        file.open(filename);
-        tikz_header<WS>(file);
-        tikz_picture(file, ws, V.size() - 1);
-        file.close();
-    }
-
-    void export_as_tikz(const std::string& filename) const
-        requires FiniteFieldType<T> && (T::get_size() <= 64)
-    {
-        export_as_tikz<Viterbi_Workspace<uint16_t>>(filename, nullptr);
-    }
-
-    template <FiniteFieldType U>
-        requires SubfieldOf<U, T>
-    Trellis<U> merge_segments() const {
-        constexpr size_t m = details::degree_over_prime_v<U> / details::degree_over_prime_v<T>;
-        const size_t n = E.size();
-        const size_t full_groups = n / m;
-
-        Trellis<U> result;
-        size_t seg = 0;
-
-        for (size_t g = 0; g < full_groups; ++g) {
-            std::vector<std::vector<const details::Edge<T>*>> paths;
-
-            for (const auto& e : E[g * m]) paths.push_back({&e});
-
-            for (size_t step = 1; step < m; ++step) {
-                std::vector<std::vector<const details::Edge<T>*>> next;
-                for (const auto& path : paths)
-                    for (const auto& e : E[g * m + step])
-                        if (e.from_id == path.back()->to_id) {
-                            auto ext = path;
-                            ext.push_back(&e);
-                            next.push_back(std::move(ext));
-                        }
-                paths = std::move(next);
-            }
-
-            for (const auto& path : paths) {
-                Vector<T> v(m);
-                for (size_t i = 0; i < m; ++i) v.set_component(i, path[i]->value);
-                result.add_edge(seg, path.front()->from_id, path.back()->to_id, U(v));
-            }
-            ++seg;
-        }
-
-        for (size_t s = full_groups * m; s < n; ++s) {
-            for (const auto& e : E[s]) {
-                Vector<T> v(m, T(0));
-                v.set_component(0, e.value);
-                result.add_edge(seg, e.from_id, e.to_id, U(v));
-            }
-            ++seg;
-        }
-
-        return result;
-    }
-
-    std::vector<std::vector<details::Vertex<T>>> V;
-    std::vector<std::vector<details::Edge<T>>> E;
-};
 
 template <ComponentType T>
 class Code {
@@ -1002,31 +393,19 @@ class LinearCode : public Code<T> {
           MI(other.MI),
           infoset(other.infoset),
           dmin(other.dmin),
-          dmin_flag(),
           weight_enumerator(other.weight_enumerator),
-          weight_enumerator_flag(),
           codewords(other.codewords),
-          codewords_flag(),
           standard_array(other.standard_array),
-          standard_array_flag(),
           tainted(other.tainted),
-          tainted_flag(),
           tainted_burst(other.tainted_burst),
-          tainted_burst_flag(),
           Meggitt_table(other.Meggitt_table),
-          Meggitt_table_flag(),
 #ifdef CECCO_ERASURE_SUPPORT
           punctured_codes_BD(other.punctured_codes_BD),
-          punctured_codes_BD_flag(),
           punctured_codes_ML(other.punctured_codes_ML),
-          punctured_codes_ML_flag(),
 #endif
           polynomial(other.polynomial),
-          polynomial_flag(),
           gamma(other.gamma),
-          gamma_flag(),
-          minimal_trellis(other.minimal_trellis),
-          minimal_trellis_flag() {
+          minimal_trellis(other.minimal_trellis) {
     }
 
     LinearCode(LinearCode&& other)
@@ -1036,32 +415,20 @@ class LinearCode : public Code<T> {
           HT(std::move(other.HT)),
           MI(std::move(other.MI)),
           infoset(std::move(other.infoset)),
-          dmin(std::move(other.dmin)),  // move computed value
-          dmin_flag(),                  // fresh flag
+          dmin(std::move(other.dmin)),
           weight_enumerator(std::move(other.weight_enumerator)),
-          weight_enumerator_flag(),
           codewords(std::move(other.codewords)),
-          codewords_flag(),
           standard_array(std::move(other.standard_array)),
-          standard_array_flag(),
           tainted(std::move(other.tainted)),
-          tainted_flag(),
           tainted_burst(std::move(other.tainted_burst)),
-          tainted_burst_flag(),
           Meggitt_table(std::move(other.Meggitt_table)),
-          Meggitt_table_flag(),
 #ifdef CECCO_ERASURE_SUPPORT
           punctured_codes_BD(std::move(other.punctured_codes_BD)),
-          punctured_codes_BD_flag(),
           punctured_codes_ML(std::move(other.punctured_codes_ML)),
-          punctured_codes_ML_flag(),
 #endif
           polynomial(std::move(other.polynomial)),
-          polynomial_flag(),
           gamma(std::move(other.gamma)),
-          gamma_flag(),
-          minimal_trellis(std::move(other.minimal_trellis)),
-          minimal_trellis_flag() {
+          minimal_trellis(std::move(other.minimal_trellis)) {
     }
 
     LinearCode& operator=(const LinearCode& other) {
@@ -1073,43 +440,19 @@ class LinearCode : public Code<T> {
             MI = other.MI;
             infoset = other.infoset;
             dmin = other.dmin;
-            dmin_flag.~once_flag();
-            new (&dmin_flag) std::once_flag();
             weight_enumerator = other.weight_enumerator;
-            weight_enumerator_flag.~once_flag();
-            new (&weight_enumerator_flag) std::once_flag();
             codewords = other.codewords;
-            codewords_flag.~once_flag();
-            new (&codewords_flag) std::once_flag();
             standard_array = other.standard_array;
-            standard_array_flag.~once_flag();
-            new (&standard_array_flag) std::once_flag();
             tainted = other.tainted;
-            tainted_flag.~once_flag();
-            new (&tainted_flag) std::once_flag();
             tainted_burst = other.tainted_burst;
-            tainted_burst_flag.~once_flag();
-            new (&tainted_burst_flag) std::once_flag();
             Meggitt_table = other.Meggitt_table;
-            Meggitt_table_flag.~once_flag();
-            new (&Meggitt_table_flag) std::once_flag();
 #ifdef CECCO_ERASURE_SUPPORT
             punctured_codes_BD = other.punctured_codes_BD;
-            punctured_codes_BD_flag.~once_flag();
-            new (&punctured_codes_BD_flag) std::once_flag();
             punctured_codes_ML = other.punctured_codes_ML;
-            punctured_codes_ML_flag.~once_flag();
-            new (&punctured_codes_ML_flag) std::once_flag();
 #endif
             polynomial = other.polynomial;
-            polynomial_flag.~once_flag();
-            new (&polynomial_flag) std::once_flag();
             gamma = other.gamma;
-            gamma_flag.~once_flag();
-            new (&gamma_flag) std::once_flag();
             minimal_trellis = other.minimal_trellis;
-            minimal_trellis_flag.~once_flag();
-            new (&minimal_trellis_flag) std::once_flag();
         }
         return *this;
     }
@@ -1123,43 +466,19 @@ class LinearCode : public Code<T> {
             MI = std::move(other.MI);
             infoset = std::move(other.infoset);
             dmin = std::move(other.dmin);
-            dmin_flag.~once_flag();
-            new (&dmin_flag) std::once_flag();
             weight_enumerator = std::move(other.weight_enumerator);
-            weight_enumerator_flag.~once_flag();
-            new (&weight_enumerator_flag) std::once_flag();
             codewords = std::move(other.codewords);
-            codewords_flag.~once_flag();
-            new (&codewords_flag) std::once_flag();
             standard_array = std::move(other.standard_array);
-            standard_array_flag.~once_flag();
-            new (&standard_array_flag) std::once_flag();
             tainted = std::move(other.tainted);
-            tainted_flag.~once_flag();
-            new (&tainted_flag) std::once_flag();
             tainted_burst = std::move(other.tainted_burst);
-            tainted_burst_flag.~once_flag();
-            new (&tainted_burst_flag) std::once_flag();
             Meggitt_table = std::move(other.Meggitt_table);
-            Meggitt_table_flag.~once_flag();
-            new (&Meggitt_table_flag) std::once_flag();
 #ifdef CECCO_ERASURE_SUPPORT
             punctured_codes_BD = std::move(other.punctured_codes_BD);
-            punctured_codes_BD_flag.~once_flag();
-            new (&punctured_codes_BD_flag) std::once_flag();
             punctured_codes_ML = std::move(other.punctured_codes_ML);
-            punctured_codes_ML_flag.~once_flag();
-            new (&punctured_codes_ML_flag) std::once_flag();
 #endif
             polynomial = std::move(other.polynomial);
-            polynomial_flag.~once_flag();
-            new (&polynomial_flag) std::once_flag();
             gamma = std::move(other.gamma);
-            gamma_flag.~once_flag();
-            new (&gamma_flag) std::once_flag();
             minimal_trellis = std::move(other.minimal_trellis);
-            minimal_trellis_flag.~once_flag();
-            new (&minimal_trellis_flag) std::once_flag();
         }
         return *this;
     }
@@ -1178,7 +497,7 @@ class LinearCode : public Code<T> {
     Matrix<T> get_H() const { return transpose(HT); }
 
     virtual size_t get_dmin() const {
-        std::call_once(dmin_flag, [this] {
+        dmin.call_once([this] {
             if (dmin.has_value()) return;
             if (k == 0) throw std::logic_error("Cannot calculate dmin of a dimension zero code!");
 
@@ -1250,7 +569,7 @@ class LinearCode : public Code<T> {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Cannot calculate weight enumerator of code over infinite field!");
         } else {
-            std::call_once(weight_enumerator_flag, [this] {
+            weight_enumerator.call_once([this] {
                 constexpr size_t q = T::get_size();
                 if (weight_enumerator.has_value()) return;
                 if (k == 0) {
@@ -1311,9 +630,9 @@ class LinearCode : public Code<T> {
             return res;
     }
 
-    long double Bhattacharyya_bound(long double gamma) const
-    {
-        if constexpr(!std::is_same_v<T, Fp<2>>) throw std::logic_error("Bhattacharyya bound can only be calculated for binary codes!");
+    long double Bhattacharyya_bound(long double gamma) const {
+        if constexpr (!std::is_same_v<T, Fp<2>>)
+            throw std::logic_error("Bhattacharyya bound can only be calculated for binary codes!");
         const auto& A = get_weight_enumerator();
         const size_t dmin = get_dmin();
 
@@ -1356,7 +675,7 @@ class LinearCode : public Code<T> {
     const std::vector<Vector<T>>& get_standard_array() const
         requires FiniteFieldType<T>
     {
-        std::call_once(standard_array_flag, [this] {
+        standard_array.call_once([this] {
             if (standard_array.has_value()) return;
 
             std::clog << "--> Calculating standard array" << std::endl;
@@ -1380,7 +699,6 @@ class LinearCode : public Code<T> {
             std::vector<size_t> leader_cyclic_burst_length(standard_array.value().size(),
                                                            std::numeric_limits<size_t>::max());
             std::vector<size_t> leader_tie_count(standard_array.value().size(), 0);
-            std::mt19937 rng(std::random_device{}());
             std::uniform_real_distribution<double> uniform(0.0, 1.0);
 
             for (size_t wt = 0; wt <= this->n; ++wt) {
@@ -1416,7 +734,7 @@ class LinearCode : public Code<T> {
                             if (wt == leader_wH[i]) {
                                 tainted.value()[i] = true;
                                 ++leader_tie_count[i];
-                                if (uniform(rng) < 1.0 / leader_tie_count[i]) {
+                                if (uniform(gen()) < 1.0 / leader_tie_count[i]) {
                                     standard_array.value()[i] = v;
                                     leader_cyclic_burst_length[i] = cyclic_burst_length(v);
                                 }
@@ -1458,7 +776,7 @@ class LinearCode : public Code<T> {
     const std::unordered_map<size_t, Vector<T>>& get_Meggitt_table() const
         requires FiniteFieldType<T>
     {
-        std::call_once(Meggitt_table_flag, [this] {
+        Meggitt_table.call_once([this] {
             if (Meggitt_table.has_value()) return;
 
             if (k == 0) throw std::invalid_argument("Meggitt table only available for codes with k>0!");
@@ -1758,7 +1076,7 @@ class LinearCode : public Code<T> {
     bool is_self_dual() const { return 2 * k == this->n && is_weakly_self_dual() && is_dual_containing(); }
 
     bool is_polynomial() const {
-        std::call_once(polynomial_flag, [this] {
+        polynomial.call_once([this] {
             if (polynomial.has_value()) return;
 
             if (k == 0) {
@@ -1813,7 +1131,7 @@ class LinearCode : public Code<T> {
                     get_weight_enumerator();
                     os << ", dmin = ";
                     try {
-                        os  << get_dmin();
+                        os << get_dmin();
                     } catch (const std::logic_error& e) {
                         os << "undefined";
                     }
@@ -2012,7 +1330,7 @@ class LinearCode : public Code<T> {
     const Trellis<T>& get_minimal_trellis() const
         requires FiniteFieldType<T>
     {
-        std::call_once(minimal_trellis_flag, [this] {
+        minimal_trellis.call_once([this] {
             if (minimal_trellis.has_value()) return;
             const size_t q = T::get_size();
             const size_t n = this->n;
@@ -2021,7 +1339,7 @@ class LinearCode : public Code<T> {
             std::clog << "--> Calculating minimal trellis for code with " << sqm<InfInt>(q, k) << " codewords"
                       << std::endl;
 
-            auto row_trellis = [q, n, &Gp](size_t i) {
+            auto row_trellis = [n, &Gp](size_t i) {
                 size_t s = 0, e = 0;
 
                 for (size_t j = 0; j < n; ++j) {
@@ -2270,7 +1588,7 @@ class LinearCode : public Code<T> {
             double best = std::numeric_limits<double>::max();
 
             if (this->get_size() <= cache_limit) {
-                std::call_once(codewords_flag, [this] {
+                codewords.call_once([this] {
                     if (codewords.has_value()) return;
                     codewords.emplace(this->get_G().span());
                 });
@@ -2517,40 +1835,27 @@ class LinearCode : public Code<T> {
     Matrix<T> HT;
     Matrix<T> MI;
     std::vector<size_t> infoset{};
-    mutable std::optional<size_t> dmin;
-    mutable std::once_flag dmin_flag;
-    mutable std::optional<Polynomial<InfInt>> weight_enumerator;
-    mutable std::once_flag weight_enumerator_flag;
-    mutable std::optional<std::vector<Vector<T>>> codewords;
-    mutable std::once_flag codewords_flag;
-    mutable std::optional<std::vector<Vector<T>>> standard_array;
-    mutable std::once_flag standard_array_flag;
-    mutable std::optional<std::vector<bool>> tainted;
-    mutable std::once_flag tainted_flag;
-    mutable std::optional<std::vector<bool>> tainted_burst;
-    mutable std::once_flag tainted_burst_flag;
-    mutable std::optional<std::unordered_map<size_t, Vector<T>>> Meggitt_table;
-    mutable std::once_flag Meggitt_table_flag;
+    mutable details::OnceCache<size_t> dmin;
+    mutable details::OnceCache<Polynomial<InfInt>> weight_enumerator;
+    mutable details::OnceCache<std::vector<Vector<T>>> codewords;
+    mutable details::OnceCache<std::vector<Vector<T>>> standard_array;
+    mutable details::OnceCache<std::vector<bool>> tainted;
+    mutable details::OnceCache<std::vector<bool>> tainted_burst;
+    mutable details::OnceCache<std::unordered_map<size_t, Vector<T>>> Meggitt_table;
 #ifdef CECCO_ERASURE_SUPPORT
-    mutable std::optional<std::vector<std::optional<LinearCode<T>>>> punctured_codes_BD;
-    mutable std::once_flag punctured_codes_BD_flag;
-    mutable std::optional<std::vector<std::optional<LinearCode<T>>>> punctured_codes_ML;
-    mutable std::once_flag punctured_codes_ML_flag;
+    mutable details::OnceCache<std::vector<std::optional<LinearCode<T>>>> punctured_codes_BD;
+    mutable details::OnceCache<std::vector<std::optional<LinearCode<T>>>> punctured_codes_ML;
 #endif
-    mutable std::optional<bool> polynomial;
-    mutable std::once_flag polynomial_flag;
-    mutable std::optional<Polynomial<T>> gamma;
-    mutable std::once_flag gamma_flag;
-    mutable std::optional<Trellis<T>> minimal_trellis;
-    mutable std::once_flag minimal_trellis_flag;
+    mutable details::OnceCache<bool> polynomial;
+    mutable details::OnceCache<Polynomial<T>> gamma;
+    mutable details::OnceCache<Trellis<T>> minimal_trellis;
 
    private:
     template <typename cost_t>
     Vector<T> viterbi_forward_pass_and_traceback(const Trellis<T>& Tr,
                                                  typename Trellis<T>::template Viterbi_Workspace<cost_t>& ws,
                                                  const std::string& filename = "") const {
-        thread_local std::mt19937 rng(std::random_device{}());
-        thread_local std::uniform_real_distribution<double> uniform(0.0, 1.0);
+        std::uniform_real_distribution<double> uniform(0.0, 1.0);
 
         const size_t n = this->n;
         using ws_t = typename Trellis<T>::template Viterbi_Workspace<cost_t>;
@@ -2578,7 +1883,7 @@ class LinearCode : public Code<T> {
                     ws.tie_counts[e.to_id] = 1;
                 } else if (cost == ws.path_costs_curr[e.to_id]) {
                     ++ws.tie_counts[e.to_id];
-                    if (uniform(rng) < 1.0 / ws.tie_counts[e.to_id]) ws.backptrs[s + 1][e.to_id] = &e;
+                    if (uniform(gen()) < 1.0 / ws.tie_counts[e.to_id]) ws.backptrs[s + 1][e.to_id] = &e;
                 }
             }
             std::swap(ws.path_costs_prev, ws.path_costs_curr);
@@ -2600,7 +1905,7 @@ class LinearCode : public Code<T> {
                 sink_ties = 1;
             } else if (c == best) {
                 ++sink_ties;
-                if (uniform(rng) < 1.0 / sink_ties) v = u;
+                if (uniform(gen()) < 1.0 / sink_ties) v = u;
             }
         }
 
@@ -2664,7 +1969,7 @@ class LinearCode : public Code<T> {
 
 #ifdef CECCO_ERASURE_SUPPORT
     void init_punctured_codes_BD() const {
-        std::call_once(punctured_codes_BD_flag, [this] {
+        punctured_codes_BD.call_once([this] {
             if (punctured_codes_BD.has_value()) return;
             std::clog << "--> Preparing punctured codes for BD error/erasure decoding" << std::endl;
             size_t count = 0;
@@ -2685,7 +1990,7 @@ class LinearCode : public Code<T> {
     }
 
     void init_punctured_codes_ML() const {
-        std::call_once(punctured_codes_ML_flag, [this] {
+        punctured_codes_ML.call_once([this] {
             if (punctured_codes_ML.has_value()) return;
             std::clog << "--> Preparing punctured codes for ML error/erasure decoding" << std::endl;
             size_t bd_count = 0;
@@ -3589,18 +2894,14 @@ class GRSCode : public LinearCode<T> {
           a(other.a),
           d(other.d),
           G_canonical(other.G_canonical),
-          G_canonical_flag(),
-          HT_canonical(other.HT_canonical),
-          HT_canonical_flag() {}
+          HT_canonical(other.HT_canonical) {}
 
     GRSCode(GRSCode&& other)
         : LinearCode<T>(std::move(other)),
           a(std::move(other.a)),
           d(std::move(other.d)),
           G_canonical(std::move(other.G_canonical)),
-          G_canonical_flag(),
-          HT_canonical(std::move(other.HT_canonical)),
-          HT_canonical_flag() {}
+          HT_canonical(std::move(other.HT_canonical)) {}
 
     GRSCode& operator=(const GRSCode& other) {
         if (this != &other) {
@@ -3608,11 +2909,7 @@ class GRSCode : public LinearCode<T> {
             a = other.a;
             d = other.d;
             G_canonical = other.G_canonical;
-            G_canonical_flag.~once_flag();
-            new (&G_canonical_flag) std::once_flag();
             HT_canonical = other.HT_canonical;
-            HT_canonical_flag.~once_flag();
-            new (&HT_canonical_flag) std::once_flag();
         }
         return *this;
     }
@@ -3623,11 +2920,7 @@ class GRSCode : public LinearCode<T> {
             a = std::move(other.a);
             d = std::move(other.d);
             G_canonical = std::move(other.G_canonical);
-            G_canonical_flag.~once_flag();
-            new (&G_canonical_flag) std::once_flag();
             HT_canonical = std::move(other.HT_canonical);
-            HT_canonical_flag.~once_flag();
-            new (&HT_canonical_flag) std::once_flag();
         }
         return *this;
     }
@@ -3758,7 +3051,7 @@ class GRSCode : public LinearCode<T> {
             throw decoding_failure("GRS code WBA error/erasure decoder failed (true error beyond BD radius)!");
 
         const auto u_est = pad_back(Vector<T>(quotient), k);
-        std::call_once(G_canonical_flag, [this] {
+        G_canonical.call_once([this] {
             if (G_canonical.has_value()) return;
             G_canonical.emplace(VandermondeMatrix<T>(a, this->k) * DiagonalMatrix<T>(d));
         });
@@ -3780,7 +3073,7 @@ class GRSCode : public LinearCode<T> {
         Vector<T> rp = r;
         for (size_t i = 0; i < tau; ++i) rp.set_component(X[i], T(0));
 
-        std::call_once(HT_canonical_flag, [this, n, redundancy] {
+        HT_canonical.call_once([this, n, redundancy] {
             if (HT_canonical.has_value()) return;
 
             auto dells = VandermondeMatrix<T>(a, n).invert().get_col(n - 1);
@@ -3876,10 +3169,8 @@ class GRSCode : public LinearCode<T> {
 
     Vector<T> a;
     Vector<T> d;
-    mutable std::optional<Matrix<T>> G_canonical;
-    mutable std::once_flag G_canonical_flag;
-    mutable std::optional<Matrix<T>> HT_canonical;
-    mutable std::once_flag HT_canonical_flag;
+    mutable details::OnceCache<Matrix<T>> G_canonical;
+    mutable details::OnceCache<Matrix<T>> HT_canonical;
 };
 
 template <FiniteFieldType T>
@@ -4023,7 +3314,8 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
             if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0)
-            os << BOLD("Cordaro-Wagner code") " with properties: { r = " << r << ", m = " << static_cast<int>(m) << " }";
+            os << BOLD("Cordaro-Wagner code") " with properties: { r = " << r << ", m = " << static_cast<int>(m)
+               << " }";
     }
 
     Vector<Fp<2>> dec_BD(const Vector<Fp<2>>& r) const override {
@@ -4766,21 +4058,23 @@ class GoppaCode : public AlternantCode<GRSCode<SUPER>> {
    private:
     Polynomial<SUPER> g;
     bool squarefree;
-    mutable std::optional<std::vector<Polynomial<SUPER>>> Patterson_inv_cache;
+    mutable details::OnceCache<std::vector<Polynomial<SUPER>>> Patterson_inv_cache;
 
     void calculate_Patterson_inv_cache() const {
-        if (Patterson_inv_cache) return;
-        const size_t n = this->get_n();
-        const auto& a = this->get_a();
-        std::vector<Polynomial<SUPER>> inv(n);
-        for (size_t i = 0; i < n; ++i) {
-            Polynomial<SUPER> u;
-            const auto d = GCD(Polynomial<SUPER>({a[i], SUPER(1)}), g, &u);
-            if (d.is_zero() || d.degree() != 0)
-                throw std::invalid_argument("Goppa locator a[" + std::to_string(i) + "] is a root of g");
-            inv[i] = ((SUPER(1) / d[0]) * u) % g;
-        }
-        Patterson_inv_cache = std::move(inv);
+        Patterson_inv_cache.call_once([this] {
+            if (Patterson_inv_cache.has_value()) return;
+            const size_t n = this->get_n();
+            const auto& a = this->get_a();
+            std::vector<Polynomial<SUPER>> inv(n);
+            for (size_t i = 0; i < n; ++i) {
+                Polynomial<SUPER> u;
+                const auto d = GCD(Polynomial<SUPER>({a[i], SUPER(1)}), g, &u);
+                if (d.is_zero() || d.degree() != 0)
+                    throw std::invalid_argument("Goppa locator a[" + std::to_string(i) + "] is a root of g");
+                inv[i] = ((SUPER(1) / d[0]) * u) % g;
+            }
+            Patterson_inv_cache.emplace(std::move(inv));
+        });
     }
 
     // docu note: these are G multipliers (in literature typically: H multipliers)

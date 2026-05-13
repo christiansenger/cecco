@@ -310,7 +310,7 @@ inline InfInt::InfInt(unsigned long long l) : pos(true) {
     } while (l > 0);
 }
 
-inline InfInt::InfInt(const InfInt& l) : pos(l.pos), val(l.val) {
+inline InfInt::InfInt(const InfInt& l) : val(l.val), pos(l.pos) {
     // PROFINY_SCOPE
 }
 

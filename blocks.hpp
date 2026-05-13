@@ -33,15 +33,26 @@
 #ifndef BLOCKS_HPP
 #define BLOCKS_HPP
 
-// #include <cmath> // transitive through fields.hpp
-// #include <complex> // transitive through fields.hpp
-// #include <random> // transitive through fields.hpp
 #include <numbers>
 
 #include "fields.hpp"
 #include "vectors.hpp"
-// #include "field_concepts_traits.hpp" // transitive through vectors.hpp
-// #include "matrices.hpp" // transitive through vectors.hpp
+
+/*
+// transitive
+#include <algorithm>
+#include <cmath>
+#include <complex>
+#include <ios>
+#include <random>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <utility>
+
+#include "field_concepts_traits.hpp"
+#include "matrices.hpp"
+*/
 
 namespace CECCO {
 
@@ -84,7 +95,7 @@ class BlockProcessor : private NonCopyable {
      * @param in Input vector
      * @return Vector of processed outputs
      */
-    Vector<OutputType> operator()(const Vector<InputType>& in) noexcept {
+    Vector<OutputType> operator()(const Vector<InputType>& in) {
         Vector<OutputType> res(in.get_n());
         for (size_t i = 0; i < in.get_n(); ++i) res.set_component(i, derived()(in[i]));
         return res;
@@ -95,7 +106,7 @@ class BlockProcessor : private NonCopyable {
      * @param in Input vector (moved)
      * @return Vector of processed outputs
      */
-    Vector<OutputType> operator()(Vector<InputType>&& in) noexcept {
+    Vector<OutputType> operator()(Vector<InputType>&& in) {
         const size_t n = in.get_n();
         Vector<OutputType> res(n);
         for (size_t i = 0; i < n; ++i) res.set_component(i, derived()(std::move(in[i])));
@@ -107,7 +118,7 @@ class BlockProcessor : private NonCopyable {
      * @param in Input matrix
      * @return Matrix of processed outputs
      */
-    Matrix<OutputType> operator()(const Matrix<InputType>& in) noexcept {
+    Matrix<OutputType> operator()(const Matrix<InputType>& in) {
         Matrix<OutputType> res(in.get_m(), in.get_n());
         for (size_t i = 0; i < res.get_m(); ++i) {
             for (size_t j = 0; j < res.get_n(); ++j) res.set_component(i, j, derived()(in(i, j)));
@@ -120,7 +131,7 @@ class BlockProcessor : private NonCopyable {
      * @param in Input matrix (moved)
      * @return Matrix of processed outputs (reuses input storage when InputType == OutputType)
      */
-    Matrix<OutputType> operator()(Matrix<InputType>&& in) noexcept {
+    Matrix<OutputType> operator()(Matrix<InputType>&& in) {
         if constexpr (std::is_same_v<InputType, OutputType>) {
             // Same type: process in-place and reuse storage
             for (size_t i = 0; i < in.get_m(); ++i) {
@@ -228,7 +239,7 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
      * @param in Input symbol
      * @return Output symbol (possibly erased when @ref CECCO_ERASURE_SUPPORT is defined)
      */
-    T operator()(const T& in) noexcept;
+    T operator()(const T& in);
 
     /** @brief Observed symbol error probability pe. */
     double get_pe() const noexcept { return error_dist.p(); }
@@ -289,7 +300,7 @@ SDMEC<T>::SDMEC(double pe, double px) {
 }
 
 template <FieldType T>
-T SDMEC<T>::operator()(const T& in) noexcept {
+T SDMEC<T>::operator()(const T& in) {
     if (error_dist.p() == 0.0 && erasure_dist.p() == 0.0) return in;
     T res(in);
     if (error_trials == error_failures_before_hit) {
@@ -405,7 +416,7 @@ class BAC : public details::SameTypeProcessor<BAC, Fp<2>> {
      * @param in Input bit
      * @return Output: 0 is preserved; 1 flips to 0 with probability p
      */
-    Fp<2> operator()(const Fp<2>& in) noexcept {
+    Fp<2> operator()(const Fp<2>& in) {
         if (in == Fp<2>(0)) return in;
         return bsc(in);
     }
@@ -564,7 +575,7 @@ class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
      * @param in Input symbol
      * @return Symbol with independent Gaussian noise added to each real component
      */
-    std::complex<double> operator()(const std::complex<double>& in) noexcept {
+    std::complex<double> operator()(const std::complex<double>& in) {
         std::complex<double> res(in.real() + dist(gen()), in.imag() + dist(gen()));
         return res;
     }
@@ -637,7 +648,7 @@ class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<doub
      * @param in Input bit
      * @return NRZ symbol corrupted by AWGN
      */
-    std::complex<double> operator()(const Fp<2>& in) noexcept { return transmission(encoder(in)); }
+    std::complex<double> operator()(const Fp<2>& in) { return transmission(encoder(in)); }
 
     /** @brief Internal NRZ mapper (for constructing matching demappers/LLR calculators). */
     const NRZMapper& get_encoder() const noexcept { return encoder; }
@@ -855,19 +866,19 @@ class DEMUX : private details::NonCopyable {
      * @param in Extension field element
      * @return Length-[E:S] vector of S coefficients
      */
-    constexpr Vector<S> operator()(const E& in) noexcept { return in.template as_vector<S>(); }
+    constexpr Vector<S> operator()(const E& in) { return in.template as_vector<S>(); }
 
     /**
      * @brief Expand a vector of elements into a subfield-coefficient matrix
      * @param in Vector of n extension field elements
      * @return [E:S] × n matrix; column j holds the coefficients of `in[j]`
      */
-    Matrix<S> operator()(const Vector<E>& in) noexcept;
+    Matrix<S> operator()(const Vector<E>& in);
 };
 
 template <FiniteFieldType E, FiniteFieldType S>
     requires(SubfieldOf<E, S>)
-Matrix<S> DEMUX<E, S>::operator()(const Vector<E>& in) noexcept {
+Matrix<S> DEMUX<E, S>::operator()(const Vector<E>& in) {
     if (in.get_n() == 0) return Matrix<S>(0, 0);
 
     auto temp = in[0].template as_vector<S>();
@@ -906,19 +917,19 @@ class MUX : private details::NonCopyable {
      * @param in Length-[E:S] coefficient vector
      * @return Reconstructed extension field element
      */
-    constexpr E operator()(const Vector<S>& in) noexcept { return E(in); }
+    constexpr E operator()(const Vector<S>& in) { return E(in); }
 
     /**
      * @brief Reconstruct a vector of elements from a subfield-coefficient matrix
      * @param in [E:S] × n matrix of S coefficients
      * @return Length-n vector of E elements (column j of `in` becomes element j)
      */
-    Vector<E> operator()(const Matrix<S>& in) noexcept;
+    Vector<E> operator()(const Matrix<S>& in);
 };
 
 template <FiniteFieldType S, FiniteFieldType E>
     requires(ExtensionOf<S, E>)
-Vector<E> MUX<S, E>::operator()(const Matrix<S>& in) noexcept {
+Vector<E> MUX<S, E>::operator()(const Matrix<S>& in) {
     Vector<E> v(in.get_n());
     for (size_t i = 0; i < in.get_n(); ++i) v.set_component(i, E(in.get_col(i)));
 

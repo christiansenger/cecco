@@ -42,7 +42,6 @@
 #ifndef MATRICES_HPP
 #define MATRICES_HPP
 
-#include <algorithm>
 #include <cassert>
 #include <fstream>
 #include <iomanip>
@@ -51,12 +50,29 @@
 #include <set>
 #include <sstream>
 #include <unordered_map>
-// #include <string> // transitive through field_concepts_traits.hpp
-// #include <vector> // transitive through helpers.hpp
 
 #include "field_concepts_traits.hpp"
-// #include "helpers.hpp" // transitive through field_concepts_traits.hpp
-// #include "InfInt.hpp" // transitive through field_concepts_traits.hpp
+
+/*
+// transitive
+#include <algorithm>
+#include <complex>
+#include <concepts>
+#include <cstdint>
+#include <functional>
+#include <initializer_list>
+#include <iterator>
+#include <limits>
+#include <random>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include "InfInt.hpp"
+#include "helpers.hpp"
+*/
 
 namespace CECCO {
 
@@ -121,7 +137,7 @@ constexpr Matrix<T> ToeplitzMatrix(const Vector<T>& v, size_t m, size_t n);
 template <ComponentType T>
 constexpr Matrix<T> VandermondeMatrix(const Vector<T>& v, size_t m);
 template <ComponentType T>
-std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept;
+std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs);
 
 /**
  * @brief Dense m × n matrix over a @ref CECCO::ComponentType
@@ -161,8 +177,8 @@ class Matrix {
     friend constexpr Matrix<T> ToeplitzMatrix<>(const Vector<T>& v, size_t m, size_t n);
     friend constexpr Matrix<T> VandermondeMatrix<>(const Vector<T>& v, size_t m);
     template <ReliablyComparableType U>
-    friend constexpr bool operator==(const Matrix<U>& lhs, const Matrix<U>& rhs) noexcept;
-    friend std::ostream& operator<< <>(std::ostream& os, const Matrix& rhs) noexcept;
+    friend constexpr bool operator==(const Matrix<U>& lhs, const Matrix<U>& rhs);
+    friend std::ostream& operator<< <>(std::ostream& os, const Matrix& rhs);
     template <ComponentType>
     friend class Matrix;
 
@@ -172,7 +188,7 @@ class Matrix {
      */
 
     /// @brief Default constructor: empty matrix
-    constexpr Matrix() noexcept : data(0) {}
+    constexpr Matrix() noexcept = default;
 
     /// @brief m × n zero matrix (tag @ref details::Zero)
     constexpr Matrix(size_t m, size_t n) : data(m * n), m(m), n(n), type(details::Zero) {}
@@ -265,14 +281,14 @@ class Matrix {
      */
 
     /// @brief Unary `+` (lvalue): returns a copy
-    constexpr Matrix operator+() const& noexcept { return *this; }
+    constexpr Matrix operator+() const& { return *this; }
     /// @brief Unary `+` (rvalue): returns the rvalue itself
     constexpr Matrix operator+() && noexcept { return std::move(*this); }
 
     /// @brief Unary `−` (lvalue): returns a new matrix with each component negated
-    constexpr Matrix operator-() const& noexcept;
+    constexpr Matrix operator-() const&;
     /// @brief Unary `−` (rvalue): negates components in place
-    constexpr Matrix operator-() && noexcept;
+    constexpr Matrix operator-() &&;
 
     /** @} */
 
@@ -368,7 +384,7 @@ class Matrix {
      * On a positive result the tag is updated to @ref details::Zero, so subsequent calls and
      * other tag-aware fast paths short-circuit.
      */
-    constexpr bool is_zero() noexcept {
+    constexpr bool is_zero() {
         if (type == details::Zero) return true;
         const bool b = std::ranges::all_of(data, [](const T& v) { return v == T(0); });
         if (b) type = details::Zero;
@@ -380,7 +396,7 @@ class Matrix {
      *
      * @return true iff every component equals T(0)
      */
-    constexpr bool is_zero() const noexcept {
+    constexpr bool is_zero() const {
         if (type == details::Zero) return true;
         return std::ranges::all_of(data, [](const T& v) { return v == T(0); });
     }
@@ -926,7 +942,7 @@ class Matrix {
      *
      * @note Tag becomes @ref details::Zero if s == T(0), otherwise @ref details::Generic.
      */
-    constexpr Matrix<T>& fill(const T& s) noexcept;
+    constexpr Matrix<T>& fill(const T& s);
 
     /**
      * @brief Transpose in place
@@ -1049,8 +1065,8 @@ class Matrix {
      * @param BS Block size for cache tiling
      */
     template <bool this_transposed, bool rhs_transposed>
-    static void multiply_kernel(const T* __restrict__ this_data, const T* __restrict__ rhs_data,
-                                T* __restrict__ res_data, size_t M, size_t K, size_t N, size_t BS) {
+    static void multiply_kernel(const T* this_data, const T* rhs_data, T* res_data, size_t M, size_t K, size_t N,
+                                size_t BS) {
         for (size_t ii = 0; ii < M; ii += BS) {
             const size_t imax = std::min(ii + BS, M);
             for (size_t kk = 0; kk < K; kk += BS) {
@@ -1087,12 +1103,12 @@ class Matrix {
      * @param f Scaling factor
      */
     template <bool transposed>
-    static void eliminate_row_kernel(T* __restrict__ data, size_t m, size_t n, size_t target_row, size_t pivot_row,
+    static void eliminate_row_kernel(T* data, size_t m, size_t n, size_t target_row, size_t pivot_row,
                                      size_t start_col, const T& f) {
         if constexpr (!transposed) {
             // Row-major access
-            T* __restrict__ target_data = data + target_row * n;
-            const T* __restrict__ pivot_data = data + pivot_row * n;
+            T* target_data = data + target_row * n;
+            const T* pivot_data = data + pivot_row * n;
             for (size_t j = start_col; j < n; ++j) {
                 target_data[j] -= f * pivot_data[j];
             }
@@ -1115,7 +1131,7 @@ class Matrix {
      * @return Number of rows processed (new h value)
      */
     template <bool transposed>
-    static size_t ref_elimination_kernel(T* __restrict__ data, size_t m, size_t n, size_t h, size_t k) {
+    static size_t ref_elimination_kernel(T* data, size_t m, size_t n, size_t h, size_t k) {
         while (h < m && k < n) {
             // find pivot
             size_t p = m;  // Default: no pivot found
@@ -1172,7 +1188,7 @@ class Matrix {
      * @param r Matrix rank (number of pivots to process)
      */
     template <bool transposed>
-    void rref_backward_elimination_kernel(T* __restrict__ data, size_t m, size_t n, size_t r) {
+    void rref_backward_elimination_kernel(T* data, size_t m, size_t n, size_t r) {
         for (size_t i = 0; i < r; ++i) {
             const size_t pivot_row = r - 1 - i;  // Process from last to first
 
@@ -1376,7 +1392,7 @@ constexpr Matrix<T>& Matrix<T>::operator=(const Matrix<S>& other) {
 }
 
 template <ComponentType T>
-constexpr Matrix<T> Matrix<T>::operator-() const& noexcept {
+constexpr Matrix<T> Matrix<T>::operator-() const& {
     auto res = *this;
     auto rank_backup = res.cache.template get<Rank>();
     if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
@@ -1398,7 +1414,7 @@ constexpr Matrix<T> Matrix<T>::operator-() const& noexcept {
 }
 
 template <ComponentType T>
-constexpr Matrix<T> Matrix<T>::operator-() && noexcept {
+constexpr Matrix<T> Matrix<T>::operator-() && {
     auto rank_backup = cache.template get<Rank>();
     if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
         std::ranges::for_each(data, [](T& x) { x = -x; });
@@ -1495,11 +1511,11 @@ Matrix<T>& Matrix<T>::operator*=(const Matrix& rhs) {
         const size_t N = rhs.get_n();
         Matrix<T> res(M, N, T(0));
 
-        const T* __restrict__ this_data = this->data.data();
-        const T* __restrict__ rhs_data = rhs.data.data();
-        T* __restrict__ res_data = res.data.data();
+        const T* this_data = this->data.data();
+        const T* rhs_data = rhs.data.data();
+        T* res_data = res.data.data();
 
-        // Tune this block/tile size for archicture. 48, 64, 96, 128 are ressonable.
+        // Tune this block/tile size for architecture. 48, 64, 96, 128 are reasonable.
         constexpr size_t BS = 64;
 
         // Branch ONCE on transpose flags - dispatch to optimized kernels with zero duplication
@@ -2328,7 +2344,7 @@ Matrix<T>& Matrix<T>::reverse_columns() {
 }
 
 template <ComponentType T>
-constexpr Matrix<T>& Matrix<T>::fill(const T& s) noexcept {
+constexpr Matrix<T>& Matrix<T>::fill(const T& s) {
     std::fill(data.begin(), data.end(), s);
     if (s == T(0))
         type = details::Zero;
@@ -2776,14 +2792,14 @@ Matrix<T> randomize(const Matrix<T>& M) {
 }
 
 template <ComponentType T>
-Matrix<T> randomize(Matrix<T>&& M) noexcept {
+Matrix<T> randomize(Matrix<T>&& M) {
     Matrix<T> res(std::move(M));
     res.randomize();
     return res;
 }
 
 template <ReliablyComparableType T>
-constexpr size_t wH(const Matrix<T>& M) noexcept {
+constexpr size_t wH(const Matrix<T>& M) {
     return M.wH();
 }
 
@@ -3226,7 +3242,7 @@ Matrix<T> reverse_rows(const Matrix<T>& M) {
 }
 
 template <ComponentType T>
-Matrix<T> reverse_rows(Matrix<T>&& M) noexcept {
+Matrix<T> reverse_rows(Matrix<T>&& M) {
     Matrix<T> res(std::move(M));
     res.reverse_rows();
     return res;
@@ -3240,7 +3256,7 @@ Matrix<T> reverse_columns(const Matrix<T>& M) {
 }
 
 template <ComponentType T>
-Matrix<T> reverse_columns(Matrix<T>&& M) noexcept {
+Matrix<T> reverse_columns(Matrix<T>&& M) {
     Matrix<T> res(std::move(M));
     res.reverse_columns();
     return res;
@@ -3254,21 +3270,21 @@ constexpr Matrix<T> fill(const Matrix<T>& m, const T& value) {
 }
 
 template <ComponentType T>
-constexpr Matrix<T> fill(Matrix<T>&& m, const T& value) noexcept {
+constexpr Matrix<T> fill(Matrix<T>&& m, const T& value) {
     Matrix<T> res(std::move(m));
     res.fill(value);
     return res;
 }
 
 template <ComponentType T>
-constexpr Matrix<T> transpose(const Matrix<T>& M) noexcept {
+constexpr Matrix<T> transpose(const Matrix<T>& M) {
     Matrix<T> res(M);
     res.transpose();
     return res;
 }
 
 template <ComponentType T>
-constexpr Matrix<T> transpose(Matrix<T>&& M) noexcept {
+constexpr Matrix<T> transpose(Matrix<T>&& M) {
     Matrix<T> res(std::move(M));
     res.transpose();
     return res;
@@ -3311,7 +3327,7 @@ Matrix<T> inverse(Matrix<T>&& M) {
  * their first row and column).
  */
 template <ReliablyComparableType T>
-constexpr bool operator==(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
+constexpr bool operator==(const Matrix<T>& lhs, const Matrix<T>& rhs) {
     if (lhs.m != rhs.m || lhs.n != rhs.n) return false;
 
     if (lhs.m == 0) {
@@ -3357,7 +3373,7 @@ constexpr bool operator==(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
  * @return true iff dimensions or any component differ
  */
 template <ReliablyComparableType T>
-constexpr bool operator!=(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
+constexpr bool operator!=(const Matrix<T>& lhs, const Matrix<T>& rhs) {
     return !(lhs == rhs);
 }
 
@@ -3369,7 +3385,7 @@ constexpr bool operator!=(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
  * An empty matrix is printed as "(empty matrix)".
  */
 template <ComponentType T>
-std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept {
+std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) {
     if (rhs.m == 0 || rhs.n == 0) {
         os << "  (empty matrix)";
         return os;

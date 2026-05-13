@@ -1,6 +1,6 @@
 /*
  * @copyright
- * Copyright (c) 2025, Christian Senger <senger@inue.uni-stuttgart.de>
+ * Copyright (c) 2026, Christian Senger <senger@inue.uni-stuttgart.de>
  *
  * Licensed for noncommercial use only, including academic teaching, research, and personal non-profit purposes.
  * Commercial use is prohibited without a separate commercial license. See the [LICENSE](../../LICENSE) file in the
@@ -23,13 +23,18 @@ namespace CECCO {
 namespace details {}
 }  // namespace CECCO
 
+#include "blocks.hpp"
 #include "codes.hpp"
-// #include "field_concepts_traits.hpp" // transitive through codes.hpp
-//  #include "helpers.hpp" // transitive through codes.hpp
-//  #include "fields.hpp" // transitive through codes.hpp
-//  #include "blocks.hpp" // transitive through codes.hpp
-//  #include "vectors.hpp" // transitive through codes.hpp
-//  #include "polynomials.hpp" // transitive through codes.hpp
-//  #include "matrices.hpp" // transitive through codes.hpp
+/*
+// transitive
+#include "code_bounds.hpp"
+#include "field_concepts_traits.hpp"
+#include "fields.hpp"
+#include "helpers.hpp"
+#include "matrices.hpp"
+#include "polynomials.hpp"
+#include "trellises.hpp"
+#include "vectors.hpp"
+*/
 
 #endif

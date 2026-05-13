@@ -14,34 +14,30 @@
  *
  * @section Description
  *
- * This header file provides essential utility functions and mathematical helpers. It supports:
- *
- * - **Thread-safe random number generation**: Configurable deterministic/hardware seeding with
- *   per-thread isolation using the singleton RNG class
- * - **Mathematical functions**: Extended Euclidean algorithm, modular inverse, factorial,
- *   binomial coefficients, and primality testing
- * - **Square-and-multiply** for exponentiation
- * - **Double-and-add** for multiplication
- * - **High-performance caching**: Template-based Cache class with compile-time type safety
- *   and O(1) access via a `std::tuple` of `std::optional` slots
- * - **Utility functions**: Find maxima in vectors, constexpr floor function, divisibility testing
+ * This header collects small utilities used by the algebraic types: random number generation,
+ * integer arithmetic, square-and-multiply exponentiation, double-and-add multiplication,
+ * caching, maxima, constexpr floor, and divisibility tests.
  */
 
 #ifndef HELPERS_HPP
 #define HELPERS_HPP
 
-#include <array>
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <functional>
-#include <map>
+#include <limits>
+#include <mutex>
+#include <new>
 #include <optional>
 #include <random>
+#include <stdexcept>
+#include <string>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "InfInt.hpp"
@@ -49,24 +45,13 @@
 namespace CECCO {
 
 /**
- * @brief Thread-safe random number generator with configurable seeding
+ * @brief Thread-local random number generator with shared seeding policy
  *
- * Singleton class providing thread-local std::mt19937 generators with centralized
- * seed management. Supports both deterministic seeding (for testing/reproducibility)
- * and hardware-based seeding (for cryptographic applications).
+ * Provides one `std::mt19937` engine per thread. `seed()` selects deterministic seeding;
+ * `use_hardware_seed()` returns to seeding from `std::random_device`. A seed change is observed
+ * on the next call to @ref get in each thread.
  *
- * @section Thread_Model
- * - Each thread gets its own std::mt19937 generator (thread_local storage)
- * - Atomic seed management ensures consistent seeding across all threads
- * - Lock-free design using std::atomic operations and thread-local storage
- *
- * @section Seeding_Behavior
- * - **Deterministic mode**: All threads use seed XOR thread_id for reproducibility
- * - **Hardware mode**: Each thread uses independent hardware entropy via std::random_device
- * - **Reseeding**: Threads automatically reseed when global seed changes
- *
- * @note This class cannot be instantiated directly (all members are static, no constructors are generated). Use the
- * static interface.
+ * @note Use the static interface; the class has no object state.
  */
 class RNG {
    public:
@@ -74,9 +59,8 @@ class RNG {
      * @brief Get thread-local random number generator
      * @return Reference to thread-local std::mt19937 generator
      *
-     * Returns a reference to this thread's std::mt19937 generator. The generator
-     * is initialized on first access and automatically reseeded when the global
-     * seed configuration changes.
+     * Initializes the engine on first access. If the global seed generation changed since
+     * the previous access in this thread, reseeds before returning.
      */
     static std::mt19937& get() {
         static thread_local std::mt19937 generator{get_initial_seed()};
@@ -88,9 +72,7 @@ class RNG {
      * @brief Set deterministic seed for all threads
      * @param seed Base seed value (combined with thread ID)
      *
-     * Configures all thread generators to use a deterministic seed based on
-     * the provided value XOR each thread's ID. This ensures reproducible
-     * results across runs while maintaining thread isolation.
+     * Selects deterministic seeding. Each thread uses @p seed XOR its thread ID hash.
      */
     static void seed(uint32_t seed) {
         use_deterministic_seed.store(true);
@@ -101,8 +83,7 @@ class RNG {
     /**
      * @brief Enable hardware-based random seeding
      *
-     * Configures all thread generators to use independent hardware entropy
-     * via std::random_device. Each thread gets its own entropy source.
+     * Selects seeding from `std::random_device`.
      */
     static void use_hardware_seed() {
         use_deterministic_seed.store(false);
@@ -138,32 +119,20 @@ class RNG {
 };
 
 /**
- * @brief Thread-safe convenience function for random number generation
+ * @brief Current thread's random number generator
  * @return Reference to thread-local random number generator
  *
- * Returns a reference to the current thread's std::mt19937 generator. Provides a simple interface while maintaining
- * full thread safety.
- *
- * @note Equivalent to RNG::get() but with a shorter name for convenience
+ * Equivalent to @ref RNG::get.
  */
 inline std::mt19937& gen() { return RNG::get(); }
 
 /**
- * @brief Find all indices of maximum elements in a vector
+ * @brief Indices of all maximum elements
  * @tparam T Element type (must support operator< for comparison)
- * @param v Input vector to search
- * @return Vector of indices where maximum elements occur (empty if input is empty)
+ * @param v Input vector
+ * @return Indices i with `v[i] == max(v)`; empty if @p v is empty
  *
- * Returns a vector containing the indices of all elements that have the maximum value.
- * If multiple elements share the maximum value, all their indices are returned.
- *
- * @note Time complexity: O(n) with two passes over the data
- * @note Space complexity: O(k) where k is the number of maximum elements
- *
- * @code{.cpp}
- * std::vector<int> data = {1, 3, 2, 3, 1};
- * auto indices = find_maxima(data);  // Returns {1, 3} (indices of value 3)
- * @endcode
+ * Uses two passes over @p v.
  */
 template <class T>
 std::vector<size_t> find_maxima(const std::vector<T>& v) {
@@ -177,18 +146,12 @@ std::vector<size_t> find_maxima(const std::vector<T>& v) {
 }
 
 /**
- * @brief Primality test using trial division
+ * @brief Primality test by trial division
  * @tparam T Unsigned integer type
  * @param a Number to test for primality
  * @return true if a is prime, false otherwise
  *
- * Tests primality using optimized trial division. Only tests odd divisors
- * up to √a for efficiency. Returns false for a ≤ 1 and even numbers > 2.
- *
- * @code{.cpp}
- * bool p1 = is_prime(17);  // Returns true
- * bool p2 = is_prime(15);  // Returns false (3 * 5 == 15)
- * @endcode
+ * Tests odd divisors up to √a. Returns false for a ≤ 1 and even a > 2.
  */
 template <class T>
 constexpr bool is_prime(T a) noexcept {
@@ -201,7 +164,7 @@ constexpr bool is_prime(T a) noexcept {
 }
 
 /**
- * @brief Extended Euclidean algorithm for computing GCD and Bézout coefficients
+ * @brief Greatest common divisor and optional Bézout coefficients
  * @tparam T Signed integral type
  * @param a First integer
  * @param b Second integer
@@ -209,14 +172,7 @@ constexpr bool is_prime(T a) noexcept {
  * @param t Pointer to store Bézout coefficient for b (optional)
  * @return Greatest common divisor of a and b
  *
- * Computes gcd(a,b) using the Euclidean algorithm. If s and t are provided,
- * also computes Bézout coefficients such that: a*s + b*t = gcd(a,b)
- *
- * @code{.cpp}
- * auto gcd = GCD(48, 18);        // Returns 6
- * int s, t;
- * auto gcd = GCD(48, 18, &s, &t); // Returns 6, sets s=1, t=-2 (48*1 + 18*(-2) = 6)
- * @endcode
+ * If @p s and @p t are non-null, stores coefficients satisfying `a*s + b*t = gcd(a,b)`.
  */
 template <class T>
 constexpr T GCD(T a, T b, T* s = nullptr, T* t = nullptr) noexcept {
@@ -251,18 +207,13 @@ constexpr T GCD(T a, T b, T* s = nullptr, T* t = nullptr) noexcept {
 }
 
 /**
- * @brief Modular multiplicative inverse using extended Euclidean algorithm
+ * @brief Multiplicative inverse modulo a prime
  * @tparam p Prime modulus (must be prime for correct results)
- * @tparam T Signed integer type supporting arithmetic operations
+ * @tparam T Signed integer type
  * @param a Element to invert
  * @return Modular inverse a^(-1) mod p
  *
- * Computes the multiplicative inverse of a modulo p by leveraging the extended
- * Euclidean algorithm. Returns x such that (a * x) ≡ 1 (mod p).
- *
- * @code{.cpp}
- * auto inv = modinv<7>(3);   // Returns 5 (since 3*5 ≡ 1 mod 7)
- * @endcode
+ * Uses the extended Euclidean algorithm.
  */
 template <uint16_t p, class T>
 constexpr T modinv(T a) noexcept {
@@ -274,19 +225,10 @@ constexpr T modinv(T a) noexcept {
 }
 
 /**
- * @brief Factorial function a!
- * @tparam T Integer type supporting arithmetic operations
- * @param n Non-negative integer
- * @return Factorial a! = a * (a-1) * ... * 2 * 1
- *
- * Computes the factorial of a using iterative multiplication.
- * Returns 1 for a = 0 and a = 1 (by mathematical convention).
- *
- * @code{.cpp}
- * auto fact5 = fac<int>(5);  // Returns 120
- * auto fact0 = fac<int>(0);  // Returns 1
- * auto big_fact = fac<InfInt>(100);  // Arbitrary precision factorial
- * @endcode
+ * @brief Factorial a!
+ * @tparam T Integer type
+ * @param a Non-negative integer
+ * @return `a! = a * (a-1) * ... * 2 * 1`
  */
 template <class T>
 T fac(T a) noexcept {
@@ -299,21 +241,13 @@ T fac(T a) noexcept {
 }
 
 /**
- * @brief Binomial coefficient C(n,k) = n choose k
- * @tparam T Integer type supporting arithmetic operations
+ * @brief Binomial coefficient C(n,k)
+ * @tparam T Integer type
  * @param n Total number of items
  * @param k Number of items to choose
- * @return Binomial coefficient C(n,k) = n! / (k! * (n-k)!)
+ * @return `C(n,k) = n! / (k! * (n-k)!)`
  *
- * Computes binomial coefficients using the multiplicative formula to avoid
- * computing large factorials. Uses symmetry C(n, k) = C(n, n-k) for efficiency.
- *
- * @note InfInt specialization available for arbitrary precision
- *
- * @code{.cpp}
- * auto coeff = bin(10, 3);              // Returns 120
- * auto large_coeff = bin<InfInt>(100, 50); // Arbitrary precision
- * @endcode
+ * Uses the multiplicative formula and the symmetry `C(n,k) = C(n,n-k)`.
  */
 template <class T>
 T bin(const T& n, T k) noexcept {
@@ -326,16 +260,12 @@ T bin(const T& n, T k) noexcept {
 }
 
 /**
- * @brief Binomial coefficient specialization for arbitrary precision integers
+ * @brief Binomial coefficient specialization for @ref InfInt
  * @param n Total number of items
  * @param k Number of items to choose
- * @return Binomial coefficient C(n,k) using arbitrary precision arithmetic
+ * @return `C(n,k)` as an @ref InfInt
  *
- * Specialization of bin() for InfInt that can handle arbitrarily large values without overflow. Uses
- * numerator/denominator approach for improved performance (does not perform expensive divisions in each iteration).
- *
- * @note InfInt operations are significantly slower than native integer types
- * @note Suitable for combinatorics problems requiring exact large integer results
+ * Builds numerator and denominator separately, then performs one division.
  */
 template <>
 inline InfInt bin(const InfInt& n, InfInt k) noexcept {
@@ -353,23 +283,15 @@ inline InfInt bin(const InfInt& n, InfInt k) noexcept {
 }
 
 /**
- * @brief Fast exponentiation using square-and-multiply algorithm
- * @tparam T Numeric type supporting multiplication
+ * @brief Exponentiation by square-and-multiply
+ * @tparam T Type supporting multiplication and, for negative exponents, division
  * @param b Base value
- * @param e Exponent (can be negative for types supporting division)
- * @return b^e computed efficiently
+ * @param e Exponent
+ * @return `b^e`
  *
- * Computes b^e using the binary exponentiation algorithm with O(log e) complexity.
- * For negative exponents, computes (1/b)^|e| if T supports division.
+ * For negative exponents, computes `(1/b)^|e|`.
  *
- * @note For negative exponents, T must support division (1/b)
- * @note Returns T(1) for e = 0 regardless of base value
- *
- * @code{.cpp}
- * auto result = sqm(2, 10);            // Returns 1024 (2^10)
- * auto big_pow = sqm<InfInt>(3, 100);  // Large exponentiation
- * auto inv_pow = sqm(2.0, -3);         // Returns 0.125 (2^-3)
- * @endcode
+ * @note Returns `T(1)` for e = 0.
  */
 template <class T>
 constexpr T sqm(T b, int e) {
@@ -394,22 +316,15 @@ constexpr T sqm(T b, int e) {
 }
 
 /**
- * @brief Fast scalar multiplication using double-and-add algorithm
- * @tparam T Numeric type supporting addition
- * @param b Base value (multiplicand)
- * @param m Multiplier (can be negative)
- * @return b * m computed efficiently using repeated doubling
+ * @brief Scalar multiplication by double-and-add
+ * @tparam T Type supporting addition and unary minus
+ * @param b Multiplicand
+ * @param m Integer multiplier
+ * @return `b * m`
  *
- * Computes b * m using the binary multiplication algorithm with O(log |m|) complexity.
- * For negative multipliers, computes (-b) * |m|.
+ * For negative multipliers, computes `(-b) * |m|`.
  *
- * @note Returns T(0) for m = 0 regardless of base value
- *
- * @code{.cpp}
- * auto result = daa(7, 3);                  // Returns 21 (7*3)
- * auto large_mult = daa<InfInt>(123, 456);  // Large multiplication
- * auto neg_mult = daa(5, -4);               // Returns -20 (5*(-4))
- * @endcode
+ * @note Returns `T(0)` for m = 0.
  */
 template <class T>
 constexpr T daa(T b, int m) {
@@ -436,19 +351,13 @@ constexpr T daa(T b, int m) {
 namespace details {
 
 /**
- * @brief Constexpr-compatible floor function
+ * @brief Constexpr floor function
  * @param x Floating-point value
  * @return Floor of x (largest integer ≤ x)
  *
- * Constexpr-compatible alternative to std::floor for compile-time evaluation. Handles both positive and negative
- * numbers correctly.
+ * Alternative to `std::floor` for constant evaluation.
  *
- * @note Returns double (not integer) to match std::floor behavior
- *
- * @code{.cpp}
- * constexpr auto f1 = floor_constexpr(3.7);   // Returns 3.0
- * constexpr auto f2 = floor_constexpr(-2.3);  // Returns -3.0
- * @endcode
+ * @note Returns `double`, matching `std::floor`.
  */
 constexpr double floor_constexpr(double x) {
     long int i = static_cast<long int>(x);
@@ -456,21 +365,13 @@ constexpr double floor_constexpr(double x) {
 }
 
 /**
- * @brief Cache entry type specification for compile-time type-safe caching
- * @tparam ID Unique compile-time identifier for this cache entry
- * @tparam T Value type to be cached for this ID
+ * @brief Cache entry specification
+ * @tparam ID Entry identifier
+ * @tparam T Stored value type
  *
- * Template structure used to associate compile-time IDs with their corresponding
- * types in the Cache template. Each entry maps an ID to a specific type.
+ * Associates an entry ID with its value type for @ref Cache.
  *
- * @note Used in conjunction with Cache<ENTRIES...> for type-safe heterogeneous caching
- * @note ID must be unique within a given Cache instance
- *
- * @code{.cpp}
- * using VectorEntry = CacheEntry<0, std::vector<int>>;
- * using DoubleEntry = CacheEntry<1, double>;
- * Cache<VectorEntry, DoubleEntry> cache;
- * @endcode
+ * @note IDs must be unique within one @ref Cache instance.
  */
 template <auto ID, typename T>
 struct CacheEntry {
@@ -479,14 +380,13 @@ struct CacheEntry {
 };
 
 /**
- * @brief Heterogeneous cache with compile-time type safety, indexed by entry ID
+ * @brief Heterogeneous cache indexed by entry ID
  *
- * @tparam ENTRIES Pack of @ref CacheEntry types specifying ID-to-type mappings
+ * @tparam ENTRIES Pack of @ref CacheEntry types
  *
  * Each ID gets its own `std::optional<T>` slot in a `std::tuple`, so different IDs may share
  * the same value type without ambiguity. Lookup is by compile-time ID; an unknown ID is a
- * compile-time error (no matching specialisation of `index_finder`). Sparse IDs cost no
- * extra memory — only the listed entries are stored.
+ * compile-time error.
  *
  * @warning Not thread-safe for concurrent writes. Use external synchronisation if multiple
  * threads may call `set()`, `invalidate()`, or `operator()` simultaneously.
@@ -582,6 +482,108 @@ class Cache {
     const type_for<ID>& get_or_compute(auto&& calculate_func) const {
         return operator()<ID>(std::forward<decltype(calculate_func)>(calculate_func));
     }
+};
+
+/**
+ * @brief Thread-safe single-value cache
+ * @tparam T Value type stored in the cache
+ *
+ * Stores one optional value together with a `std::once_flag`. Use `call_once()` to guard
+ * lazy initialization when multiple threads may read the same object. Copying or moving a
+ * cache copies or moves the stored value, if any, and creates a fresh once flag.
+ *
+ * @warning Concurrent reads through `call_once()` are thread-safe. Assignment, `emplace()`, and
+ * manual value changes are not synchronization points and must not race with other operations.
+ *
+ * @section Usage_Example
+ *
+ * @code{.cpp}
+ * mutable OnceCache<size_t> weight;
+ *
+ * weight.call_once([this] {
+ *     if (weight.has_value()) return;
+ *     weight.emplace(calculate_weight());
+ * });
+ *
+ * return weight.value();
+ * @endcode
+ */
+template <class T>
+class OnceCache {
+   public:
+    OnceCache() = default;
+
+    OnceCache(const OnceCache& other) {
+        if (other.has_value()) data.emplace(other.value());
+    }
+
+    OnceCache(OnceCache&& other) {
+        if (other.has_value()) data.emplace(std::move(other.value()));
+    }
+
+    OnceCache& operator=(const OnceCache& other) {
+        if (this != &other) {
+            reset_for_assignment();
+            if (other.has_value()) data.emplace(other.value());
+        }
+        return *this;
+    }
+
+    OnceCache& operator=(OnceCache&& other) {
+        if (this != &other) {
+            reset_for_assignment();
+            if (other.has_value()) data.emplace(std::move(other.value()));
+        }
+        return *this;
+    }
+
+    OnceCache& operator=(const T& value) {
+        data = value;
+        return *this;
+    }
+
+    OnceCache& operator=(T&& value) {
+        data = std::move(value);
+        return *this;
+    }
+
+    template <class F>
+    void call_once(F&& f) const {
+        std::call_once(flag, std::forward<F>(f));
+    }
+
+    template <class... Args>
+    T& emplace(Args&&... args) const {
+        return data.emplace(std::forward<Args>(args)...);
+    }
+
+    bool has_value() const noexcept { return data.has_value(); }
+
+    explicit operator bool() const noexcept { return has_value(); }
+
+    T& value() { return data.value(); }
+
+    const T& value() const { return data.value(); }
+
+    T& operator*() { return *data; }
+
+    const T& operator*() const { return *data; }
+
+    T* operator->() { return &*data; }
+
+    const T* operator->() const { return &*data; }
+
+    void reset() const { data.reset(); }
+
+   private:
+    void reset_for_assignment() {
+        data.reset();
+        flag.~once_flag();
+        new (&flag) std::once_flag();
+    }
+
+    mutable std::optional<T> data;
+    mutable std::once_flag flag;
 };
 
 inline std::string basename(const char* path) {
