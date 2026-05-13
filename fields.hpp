@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.10
+ * @version 2.3.11
  * @date 2026
  *
  * @copyright
@@ -15,142 +15,80 @@
  *
  * @section Description
  *
- * This header file provides a complete implementation of field arithmetic. It supports:
+ * Finite-field arithmetic. The library provides:
  *
- * - **Prime fields**: ℤ_p for prime p (using Fp&lt;p&gt;)
- * - **Finite extension fields**: 𝔽_{p^m} constructed via irreducible modulus polynomials (using Ext<B, modulus>)
- *   for any prime p with configurable lookup table generation modes (runtime or compile-time generated via optional
- * template parameter mode)
- * - **Field towers/graphs**: Nested extensions like 𝔽_2 ⊂ 𝔽_4 ⊂ 𝔽_16 ⊂ 𝔽_256 (also with "gaps"), more complicated
- * graphs consisting of multiple field towers with intersections are supported
- * - **Isomorphic field representations**: Multiple equivalent representations via Iso<MAIN, OTHERS...>
- * - **Cross-field constructors**: Safe conversions (isomorphic casts, up- and downcasts) using @ref
- * details::largest_common_subfield_t for optimal compatibility
- * - **Rational numbers**: ℚ with arbitrary precision arithmetic (determined by template parameter T) using Rationals<T>
+ * - prime fields 𝔽_p ≅ ℤ/pℤ via @ref CECCO::Fp;
+ * - extension fields 𝔽_{q^m} ≅ B[x]/(f(x)) over a base field B and an irreducible monic modulus
+ *   f(x), via @ref CECCO::Ext, with selectable LUT generation mode (runtime or compile-time);
+ * - merged field towers via @ref CECCO::Iso, which exposes one logical field from several
+ *   isomorphic representations and connects otherwise-disjoint construction towers;
+ * - cross-field constructors that pick the bridge field with @ref CECCO::details::largest_common_subfield_t;
+ * - rational numbers ℚ with selectable precision via @ref CECCO::Rationals.
  *
- * @warning A field tower in the sense of this library is a sequence of finite fields that are constructed from each
- * other as a sequence of extensions. If for example 𝔽_16 is constructed directly from 𝔽_2, then 𝔽_4 is not an element
- * of the tower (while it certainly is in the mathematical sense). If however we also create 𝔽_16 as an extension of 𝔽_4
- * and 𝔽_4 as an extension of 𝔽_2 then we can merge the two towers into one by creating an isomorphic 𝔽_16 (Iso) out of
- * the two constructed 𝔽_16. The isomorphic 𝔽_16 then acts as the intersection between the two field towers.
- *
- * A **finite field** 𝔽_q with q = p^m elements (p prime, m ≥ 1) is constructed as:
- * - **Prime field**: 𝔽_p ≅ ℤ_p = {0, 1, ..., p-1} with arithmetic mod p (using Fp&lt;p&gt;)
- * - **Extension field**: 𝔽_{q^m} ≅ 𝔽_q[x]/(f(x)) where q=p^m and f(x) is the irreducible (over 𝔽_q) and monic modulus
- * polynomial of degree m (using Ext<B, modulus>, where B = Fp&lt;p&gt;)
+ * A *field tower* in this library is a sequence of constructed extensions. Mathematical
+ * intermediate fields that were never constructed are not part of the tower. Two towers ending
+ * at isomorphic fields can be glued together by wrapping the two endpoints in an `Iso`.
  *
  * @section Usage_Example
  *
  * @code{.cpp}
- * // Prime fields
- * using F2 = Fp<2>;
- * using F3 = Fp<3>;
+ * using F2     = Fp<2>;
+ * using F3     = Fp<3>;
+ * using F4     = Ext<F2, {1, 1, 1}, LutMode::CompileTime>;  // 𝔽₂[x]/(x² + x + 1)
+ * using F9     = Ext<F3, {2, 2, 1}, LutMode::CompileTime>;
+ * using F16_a  = Ext<F2, {1, 0, 0, 1, 1}>;                  // RunTime LUTs (default)
+ * using F16_b  = Ext<F4, {2, 1, 1}>;
+ * using F16    = Iso<F16_a, F16_b>;                         // merge the two F16 towers
+ * using F256_a = Ext<F2, {1, 1, 0, 1, 0, 0, 0, 1, 1}>;
+ * using F256_b = Ext<F4, {2, 2, 2, 0, 1}>;
+ * using F256_c = Ext<F16, {6, 13, 1}>;
+ * using F256   = Iso<F256_a, F256_b, F256_c>;
  *
- * // Finite extensions of prime fields (using irreducible polynomials)
- * using F4 = Ext<F2, {1, 1, 1}, LutMode::CompileTime>;  // F2[x]/(1 + x + x²) - CompileTime LUTs
- * using F8 = Ext<F2, {1, 1, 0, 1}>;
- * using F16_a = Ext<F2, {1, 0, 0, 1, 1}>;
- * using F256_a = Ext<F2, {1, 1, 0, 1, 0, 0, 0, 1, 1}>;  // Runtime LUTs for large fields (default LUT mode)
- * using F9 = Ext<F3, {2, 2, 1}, LutMode::CompileTime>;  // F3[x]/(2 + 2x + x²)
- * using F27 = Ext<F3, {1, 0, 2, 1}, LutMode::Runtime>;  // F3[x]/(1 + 2x + x³) - Runtime LUTs (explicit)
+ * F9 a(5), b(7);
+ * auto c = a * b + F9(1);                       // arithmetic
+ * size_t ord = a.get_multiplicative_order();
+ * Vector<F3> v = a.as_vector<F3>();             // coordinate vector over F3
  *
- * // Finite extensions of extension field (using irreducible polynomials)
- * using F16_b = Ext<F4, {2, 1, 1}>;         // Alternative representation of F16 as extension of F4
- * using F256_b = Ext<F4, {2, 2, 2, 0, 1}>;  // F256 as extension of F4
- * using F256_c = Ext<F16, {6, 13, 1}>;      // F256 as extension of F16
- *
- * // Isomorphic field representations
- * using F16 = Iso<F16_a, F16_b>;             // Isomorphic field with multiple representations (merges...
- *                                            // ... the field towers F2 ⊂ F16_a and F2 ⊂ F4 ⊂ F16_b)...
- * using F256 = Iso<F256_a, F256_b, F256_c>;  // ... directly using F16_a, ... F256_a, ... etc. discouraged,...
- *                                            // ... use F16 and F256 instead for maximal compatibility
- *
- * // Cross-field conversions
- * F9 a(5), b(7);                                // Element generation
- * auto c = a * b + F9(1);                       // Field arithmetic, automatic type of result variable
- * size_t order = a.get_multiplicative_order();  // Element order
- * Vector<F3> v = a.as_vector<F3>();             // Vector representation over F3
- *
- * F16 d(1);   // Element generation
- * F256 e(d);  // Safe upcast: F16 ⊆ F256
- * F8 f(e);    // Cross-tower cast via largest common subfield, here: F2 (can throw)
+ * F16 d(1);
+ * F256 e(d);                                    // upcast: F16 ⊆ F256
  * @endcode
  *
  * @section Performance_Features
  *
- * - **Lookup tables (LUTs)**: Used for all finite extension fields with configurable generation modes:
- *      + `LutMode::Runtime` (default): LUTs computed on first access with lazy initialization for faster compilation
- (use for large fields, with more than 150 or so elements)
- *      + `LutMode::CompileTime`: All LUTs computed at compile-time via constexpr for zero initialization overhead (use
- for small fields or zero "startup time")
- * - **Compression**: For extension fields with q ≥ CECCO_COMPRESS_LUTS_FROM_Q (default: 65), + and * operations use
- compressed LUTs
- * reducing memory by ~50%
- * - **Move semantics**: Temporaries are moved for optimal performance
- * - **Type Safety**: C++20 concepts prevent invalid operations
- *      + `CECCO::FieldType`: Basic field interface requirements
- *      + `CECCO::FiniteFieldType`: Additional finite field interface requirements (size, characteristic ≠ 0)
- * - **Type-based Dispatch**: Compile-time polymorphism using CRTP (Curiously Recurring Template Pattern), no virtual
- function tables
+ * - LUT modes per @ref CECCO::Ext instantiation: `LutMode::RunTime` (default; faster
+ *   compilation, lazy first-access initialisation) or `LutMode::CompileTime` (zero startup,
+ *   tables baked into the binary). Mix freely within a tower.
+ * - For extension fields with q ≥ @ref CECCO_COMPRESS_LUTS_FROM_Q, the addition and
+ *   multiplication tables are stored compressed (upper triangle only), saving ~50 % memory.
+ * - Pure CRTP — no virtual dispatch; concepts (@ref CECCO::FieldType, @ref CECCO::FiniteFieldType)
+ *   enforce the interface at compile time.
  *
- * @subsection LUT_Mode_Selection
-    *
- * **RunTime Mode** (default):
- * + Faster compilation, especially for large fields (more than 150 or so elements)
- * - Lazy initialization overhead on first field operations
- * - Potential runtime memory allocation
- *
- * **CompileTime Mode** :
- * + Zero runtime initialization cost
- * + Immediate field operations after construction, LUTs are already in binary
- * - (Significantly) increased compilation time and compilation memory requirements for large fields
- *
- * @note Compile-time LUT generation can exceed compiler step / recursion limits for larger fields. Raise with
- * `-fconstexpr-depth=4294967295 -fconstexpr-steps=4294967295` (clang++) or `-fconstexpr-ops-limit=4294967295` (g++).
- * Recommendation: use CompileTime mode for small fields (up to ~150 elements); otherwise prefer RunTime mode.
+ * @note CompileTime mode can exceed compiler recursion / step limits for larger fields. If
+ * needed, raise with `-fconstexpr-depth=4294967295 -fconstexpr-steps=4294967295` (clang) or
+ * `-fconstexpr-ops-limit=4294967295` (g++). Rule of thumb: CompileTime up to ~150 elements,
+ * RunTime above.
  *
  * @section Irreducible_Polynomial_Construction
  *
- * Irreducible polynomials for extension field construction can be found using the library itself or using computational
- * algebra systems. This library requires **monic** irreducible modulus polynomials with most significant coefficient on
- * the right.
+ * @ref CECCO::Ext requires the modulus to be a monic irreducible polynomial of degree ≥ 2,
+ * coefficients given low-to-high (constant term first). To find one inside the library:
  *
- * Using the library:
  * @code{.cpp}
- * using B = Fp<3>;                  // Specify base field (any Fp, Ext or Iso)
- * size_t m = 4;                     // Specify extension degree
- * auto p = find_irreducible<B>(m);  // Find (random) monic polynomial of degree m with coefficients from B and...
- *                                   // ... irreducible over B
- * std::cout << p << std::endl;      // Output polynomial form
- * auto v = Vector(p);
- * std::cout << v << std::endl;      // Output vector form (to be used as modulus in the Ext constructor, replace (->{
- *                                    // and )->})
+ * using B = Fp<3>;
+ * auto p = find_irreducible<B>(4);  // monic, degree 4, irreducible over B
+ * auto v = Vector(p);               // vector form, ready to paste as modulus into Ext<B, …>
  * @endcode
  *
- * Using computer algebra system (here: Magma ,http://magma.maths.usyd.edu.au/calc/)
- * @code{.cpp}
- * p:=2; m:=6; F:=GaloisField(p);    // get deterministic Conway polynomial
- * P<x>:=PolynomialRing(F);
- * px:=IrreduciblePolynomial(F, m);
- * Reverse(Coefficients(px));
- * @endcode
- *
+ * Externally (Magma):
  * @code
- * q:=9; m:=2; F:=GaloisField(q); P<x>:=PolynomialRing(F); // get random polynomial
- * repeat
- *     px:=elt<P|1>;
- *     for i in [0..m] do
- *         px+:=Random(F)*x^i;
- *     end for;
- * until Degree(px) eq m and IsIrreducible(px);
- * px:=Normalize(px);
+ * p := 2; m := 6; F := GaloisField(p);
+ * P<x> := PolynomialRing(F);
+ * px := IrreduciblePolynomial(F, m);
  * Reverse(Coefficients(px));
  * @endcode
  *
- * @see @ref vectors.hpp for vectors and associated operations
- * @see @ref matrices.hpp for matrices and linear algebra
- * @see @ref polynomials.hpp for polynomial arithmetic and operations
- * @see @ref field_concepts_traits.hpp for type constraints and field relationships (C++20 concepts)
+ * @see @ref field_concepts_traits.hpp for the concepts and traits (FieldType, SubfieldOf, …)
+ * @see @ref vectors.hpp, @ref matrices.hpp, @ref polynomials.hpp
  */
 
 #ifndef FIELDS_HPP
@@ -158,8 +96,9 @@
 
 /**
  * @def CECCO_ERASURE_SUPPORT
- * @brief When defined, any field element can be erased, that is, set to an invalid value. Should only be defined if
- * erasures are actually needed since it can have a negative effect on performance.
+ * @brief Enables `erase()` / `unerase()` / `is_erased()` on every field type
+ *
+ * Define only if needed (error-correction with erasures); enabling it costs some performance.
  */
 #ifdef DOXYGEN
 #define CECCO_ERASURE_SUPPORT
@@ -167,16 +106,22 @@
 
 /**
  * @def CECCO_USE_LUTS_FOR_FP
- * @brief When defined, prime fields use lookup tables instead of modular arithmetic. This is normally not a good idea
- * and leads to bad performance, so don't define the macro.
+ * @brief Force prime fields to use lookup tables instead of modular arithmetic
+ *
+ * Almost always slower than direct mod-p arithmetic — leave undefined unless you have a reason.
  */
 #ifdef DOXYGEN
 #define CECCO_USE_LUTS_FOR_FP
 #endif
 
-/// @def CECCO_COMPRESS_LUTS_FROM_Q
-/// @brief For fields with  CECCO_COMPRESS_LUTS_FROM_Q or more elements, compress 2D lookup tables to save ~50% memory
-/// by exploiting commutativity (store only upper triangle). Optimal value depends on cache size.
+/**
+ * @def CECCO_COMPRESS_LUTS_FROM_Q
+ * @brief Compression threshold for 2D lookup tables in extension fields
+ *
+ * For fields with at least this many elements, the addition and multiplication tables store
+ * only the upper triangle (exploiting commutativity), saving ~50 % memory. Optimal value
+ * depends on cache size.
+ */
 #define CECCO_COMPRESS_LUTS_FROM_Q 256
 
 #include <any>
@@ -214,342 +159,136 @@ namespace CECCO {
 
 namespace details {
 /**
- * @class Base
- * @brief CRTP protection base class to prevent operator overload conflicts
+ * @brief Tag base for the CRTP-protection idiom
  *
- * This class serves as a "tag" base to protect the Curiously Recurring Template Pattern (CRTP)
- * operator overloads from being applied to unintended types. For example: If x and y are two ints
- * then x + y is not supposed to call the field addition operator. Base cannot be instantiated directly,
- * ensuring that only derived field types can use the protected constructor.
- *
- * @note This follows the "CRTP protection idiom" to prevent template operators from matching
- *       unrelated types that might accidentally satisfy template requirements.
+ * Inherited by every CECCO field type so that the templated @ref CECCO::operator+ and friends
+ * (which dispatch on @ref CECCO::FieldType) cannot accidentally match unrelated operands like
+ * `int + int`. The protected constructor blocks direct instantiation.
  */
 class Base {
    protected:
-    /**
-     * @brief Protected constructor prevents direct instantiation
-     *
-     * Only derived field classes can construct Base, ensuring proper CRTP usage.
-     */
     Base() = default;
 };
 
 /**
- * @class Field
- * @brief CRTP base class defining the field interface and documenting the mathematical interface
+ * @brief CRTP base documenting the interface every field type must provide
  *
- * @tparam T The derived field type (CRTP parameter)
+ * @tparam T Derived field type (CRTP parameter)
  *
- * This class serves as documentation and organizational structure for field types using the
- * Curiously Recurring Template Pattern (CRTP). It defines the complete mathematical interface
- * that field types should implement, but uses **compile-time enforcement** via concepts rather
- * than virtual functions.
+ * Most members are `= delete`, present solely to advertise the interface — derived types
+ * shadow them with their own definitions. The free arithmetic operators in this file template
+ * on @ref CECCO::FieldType and dispatch directly to `T`'s compound assignments; there is no
+ * virtual dispatch.
  *
- * This design uses **pure CRTP**:
- * @code{.cpp}
- * template<FieldType T>
- * T operator+(T lhs, const T& rhs) {
- *     lhs += rhs;  // Direct call to T::operator+= (no virtual dispatch)
- *     return lhs;
- * }
- * @endcode
+ * Derived types must supply: assignment from `T`, `T&&`, and `int`; `operator==`; unary `-`;
+ * the four compound assignments `+=`, `−=`, `*=`, `/=`; `randomize()` /
+ * `randomize_force_change()`; the property queries `is_zero()`, `has_positive_sign()`,
+ * `get_multiplicative_order()`, `get_additive_order()`. When @ref CECCO_ERASURE_SUPPORT is
+ * defined, also `erase()` / `unerase()` / `is_erased()`.
  *
- * @note This provides **zero-cost abstraction** - no virtual function overhead while
- *       maintaining full type safety and mathematical correctness.
- * The field interface is enforced at **compile-time** through:
- * - **@ref FieldType concept**: Ensures required methods exist with correct signatures
- * - **Static assertions**: Verify mathematical properties and constraints
- * - **Template instantiation**: Fails if required operations are missing
+ * Provided here (not deleted): `operator!=` (delegates to `==`) and the two unary `operator+`
+ * overloads (identity).
  */
 template <class T>
 class Field : public details::Base {
    protected:
-    /**
-     * @brief Protected destructor (CRTP design - no polymorphic destruction needed)
-     *
-     * The destructor is protected to prevent direct deletion through Field<T>*,
-     * which aligns with the CRTP design where objects are always of the concrete
-     * derived type T.
-     */
     ~Field() noexcept = default;
 
    public:
-    /**
-     * @name Assignment Operators
-     * @{
-     */
+    /// @name Assignment Operators
+    /// @{
 
-    /**
-     * @brief Assign from integer
-     * @param l Integer value to assign
-     * @return Reference to this object after assignment
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief Assign from `int` — derived must implement
     T& operator=(int l) = delete;
-
-    /**
-     * @brief Copy assignment operator
-     * @param rhs Right-hand side field element to copy
-     * @return Reference to this object after assignment
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief Copy assignment — derived must implement
     T& operator=(const T& rhs) noexcept = delete;
-
-    /**
-     * @brief Move assignment operator
-     * @param rhs Right-hand side field element to move from
-     * @return Reference to this object after assignment
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief Move assignment — derived must implement
     T& operator=(T&& rhs) noexcept = delete;
 
-    /** @} */
+    /// @}
+    /// @name Comparison
+    /// @{
 
-    /**
-     * @name Comparison Operators
-     * @{
-     */
-
-    /**
-     * @brief Inequality comparison
-     * @param rhs Right-hand side field element
-     * @return true if elements are not equal, false otherwise
-     *
-     * @note Implementation provided
-     */
+    /// @brief Inequality, defined as `!(*this == rhs)`
     constexpr bool operator!=(const T& rhs) const noexcept { return !(static_cast<const T&>(*this) == rhs); }
 
-    /** @} */
+    /// @}
+    /// @name Unary Operations
+    /// @{
 
-    /**
-     * @name Unary Operations
-     * @{
-     */
-
-    /**
-     * @brief Unary plus (identity operation) for lvalue references
-     * @return Copy of this element (mathematically: +a = a)
-     *
-     * @note Implementation provided: Identity operation returns copy of this element
-     */
+    /// @brief Unary `+` on an lvalue: returns a copy
     constexpr T operator+() const& noexcept { return static_cast<const T&>(*this); }
-
-    /**
-     * @brief Unary plus (identity operation) for rvalue references
-     * @return Rvalue reference to this element (avoids unnecessary copy)
-     *
-     * @note Implementation provided: Optimized version for temporary objects
-     */
+    /// @brief Unary `+` on an rvalue: returns the rvalue itself
     constexpr T&& operator+() && noexcept { return static_cast<T&&>(*this); }
 
-    /**
-     * @brief Additive inverse for lvalue references
-     * @return Additive inverse of this element (mathematically: -a where a + (-a) = 0)
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief Additive inverse on an lvalue — derived must implement
     T operator-() const& noexcept = delete;
-
-    /**
-     * @brief Additive inverse for rvalue references (in-place)
-     * @return Reference to this element after negation
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief Additive inverse on an rvalue (in place) — derived must implement
     T& operator-() && noexcept = delete;
 
-    /** @} */
+    /// @}
+    /// @name Compound Assignment
+    /// @{
 
-    /**
-     * @name Compound Assignment Operators
-     * @{
-     */
-
-    /**
-     * @brief Addition assignment (field addition)
-     * @param rhs Right-hand side addend
-     * @return Reference to this element after addition
-     * @note Implements field addition: this = this + rhs
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief `*this += rhs` — derived must implement
     T& operator+=(const T& rhs) noexcept = delete;
-
-    /**
-     * @brief Subtraction assignment (field subtraction)
-     * @param rhs Right-hand side subtrahend
-     * @return Reference to this element after subtraction
-     * @note Implements field subtraction: this = this - rhs = this + (-rhs)
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief `*this -= rhs` — derived must implement
     T& operator-=(const T& rhs) noexcept = delete;
-
-    /**
-     * @brief Multiplication assignment (field multiplication)
-     * @param rhs Right-hand side multiplier
-     * @return Reference to this element after multiplication
-     * @note Implements field multiplication: this = this * rhs
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief `*this *= rhs` — derived must implement
     T& operator*=(const T& rhs) noexcept = delete;
-
-    /**
-     * @brief Division assignment (field division)
-     * @param rhs Right-hand side divisor
-     * @return Reference to this element after division
-     * @throws std::invalid_argument if rhs is zero (division by zero)
-     * @note Implements field division: this = this / rhs = this * rhs⁻¹
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief `*this /= rhs`; throws `std::invalid_argument` if rhs is zero — derived must implement
     T& operator/=(const T& rhs) = delete;
 
-    /** @} */
+    /// @}
+    /// @name Randomization
+    /// @{
 
-    /**
-     * @name Randomization
-     * @{
-     */
-
-    /**
-     * @brief Set this element to a random value from the field
-     * @return Reference to this element after randomization
-     *
-     * Uses the global random number generator to select a uniformly random
-     * element from the field. May result in the same value.
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief Uniform random element of the field — derived must implement; may return the same value
     Field& randomize() = delete;
-
-    /**
-     * @brief Set this element to a random value different from current
-     * @return Reference to this element after randomization
-     *
-     * Like @ref randomize, but guarantees the new value differs from the current value.
-     * Useful for generating distinct random elements.
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief Like @ref randomize but guaranteed to differ from the current value — derived must implement
     Field& randomize_force_change() = delete;
 
-    /** @} */
+    /// @}
+    /// @name Properties
+    /// @{
 
-    /**
-     * @name Properties
-     * @{
-     */
-
-    /**
-     * @brief Get the multiplicative order of this element
-     * @return Smallest positive integer k such that this^k = 1
-     * @throws std::invalid_argument if this element is zero (has no multiplicative order)
-     *
-     * The multiplicative order is the order of this element in the multiplicative
-     * group (𝔽\c\{0}, *). For finite fields, this divides |𝔽\c\{0}| = |𝔽| - 1.
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief Smallest k > 0 with `this^k == 1`; throws `std::invalid_argument` if `*this` is zero
     size_t get_multiplicative_order() const = delete;
-
-    /**
-     * @brief Get the additive order of this element
-     * @return Smallest positive integer k such that k*this = 0
-     *
-     * The additive order is the order of this element in the additive group (𝔽, +).
-     * For finite fields of characteristic p, this is p for non-zero elements and 1 for zero.
-     * For ℚ, this is 1 for zero and 0 (infinite) for non-zero elements.
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief Smallest k > 0 with `k * *this == 0`; for finite fields of characteristic p this is p (or 1 for zero); for ℚ it is 1 for zero and 0 (infinite) otherwise
     size_t get_additive_order() const = delete;
-
-    /**
-     * @brief Check if this element has a positive sign
-     * @return true if element is considered "positive", false otherwise
-     *
-     * @note For finite fields, this always returns true (no ordering).
-     *       For ℚ, this returns true if the rational number is positive.
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief True if the element is "positive" (always true for finite fields; sign of numerator for ℚ)
     bool has_positive_sign() const noexcept = delete;
-
-    /**
-     * @brief Check if this element is the additive identity (zero)
-     * @return true if this element equals the zero element of the field
-     *
-     * Tests whether this element is the additive identity (0) of the field,
-     * satisfying: ∀a ∈ 𝔽: a + 0 = 0 + a = a
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief True if `*this` is the additive identity
     bool is_zero() const noexcept = delete;
 
 #ifdef CECCO_ERASURE_SUPPORT
-    /**
-     * @brief Erases this element, i.e., sets it to an "outside of field" marker
-     * @return Reference to this element after erasing
-     *
-     * This is mainly used in error control coding, where an erasure means total ambiguity about the actual value of a
-     * field element.
-     *
-     * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased field
-     * elements is the responsibility of the user!
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief Mark this element as erased (out-of-field marker for erasure decoding)
+    /// @warning Erased elements must not participate in field arithmetic; correct use is the caller's responsibility
     Field& erase() noexcept = delete;
-
-    /**
-     * @brief Un-erases this element, i.e., sets it to an actual field element (the additive neutral 0)
-     * @return Reference to this element after un-erasing
-     *
-     * This is mainly used in error control coding, where an erasure means total ambiguity about the actual value of a
-     * field element.
-     *
-     * @warning After a field element is un-erased it can be used normally.
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief Clear the erasure flag, resetting to additive identity
     Field& unerase() noexcept = delete;
-
-    /**
-     * @brief Checks whether this element is erased
-     * @return true if this element is erased, false otherwise (meaning it actually is a field element)
-     *
-     * This is mainly used in error control coding, where an erasure means total ambiguity about the actual value of a
-     * field element.
-     *
-     * @note Implementation required: Must be provided by derived field types
-     */
+    /// @brief Test whether this element is currently erased
     bool is_erased() const noexcept = delete;
 #endif
-    /** @} */
+    /// @}
 };
 
 }  // namespace details
 
 /**
  * @name Field Arithmetic Operators
- * @brief CRTP-based operators providing field arithmetic for all field types
+ * @brief Free CRTP operators (`+`, `−`, `*`, `/`, `^`) for any @ref CECCO::FieldType
  *
- * These template operators use CRTP to provide consistent arithmetic operations
- * across all field types. They delegate to the compound assignment operators
- * implemented by each field class. The FieldType concept ensures they only apply
- * to valid field types.
+ * Each operator constructs a result by calling `T`'s compound assignment, with rvalue overloads
+ * that move from a temporary instead of copying. Scalar multiplication takes the integer on
+ * either side. Division throws `std::invalid_argument` if the right operand is zero.
+ * `operator^` exponentiates by square-and-multiply via @ref CECCO::sqm.
+ *
+ * @warning `operator^` does **not** follow C++ precedence for `^`: in `b * a ^ p` the parser
+ * evaluates `(b * a) ^ p`. Parenthesise as `b * (a ^ p)`, or call @ref CECCO::sqm directly.
  * @{
  */
 
-/**
- * @brief Field addition operator
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Left operand (const reference)
- * @param rhs Right operand (const reference)
- * @return Sum lhs + rhs in the field
- */
 template <FieldType T>
 constexpr T operator+(const T& lhs, const T& rhs) noexcept {
     T res(lhs);
@@ -557,13 +296,6 @@ constexpr T operator+(const T& lhs, const T& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field addition operator (rvalue + lvalue)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Left operand (rvalue reference, moved)
- * @param rhs Right operand (const reference)
- * @return Sum lhs + rhs in the field
- */
 template <FieldType T>
 constexpr T operator+(T&& lhs, const T& rhs) noexcept {
     T res(std::move(lhs));
@@ -571,13 +303,6 @@ constexpr T operator+(T&& lhs, const T& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field addition operator (lvalue + rvalue)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Left operand (const reference)
- * @param rhs Right operand (rvalue reference, moved)
- * @return Sum lhs + rhs in the field
- */
 template <FieldType T>
 constexpr T operator+(const T& lhs, T&& rhs) noexcept {
     T res(std::move(rhs));
@@ -585,13 +310,6 @@ constexpr T operator+(const T& lhs, T&& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field addition operator (rvalue + rvalue)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Left operand (rvalue reference, moved)
- * @param rhs Right operand (rvalue reference)
- * @return Sum lhs + rhs in the field
- */
 template <FieldType T>
 constexpr T operator+(T&& lhs, T&& rhs) noexcept {
     T res(std::move(lhs));
@@ -599,13 +317,6 @@ constexpr T operator+(T&& lhs, T&& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field subtraction operator
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Left operand (const reference)
- * @param rhs Right operand (const reference)
- * @return Difference lhs - rhs in the field
- */
 template <FieldType T>
 constexpr T operator-(const T& lhs, const T& rhs) noexcept {
     T res(lhs);
@@ -613,13 +324,6 @@ constexpr T operator-(const T& lhs, const T& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field subtraction operator (lvalue - rvalue)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Left operand (rvalue reference, moved)
- * @param rhs Right operand (const reference)
- * @return Difference lhs - rhs in the field
- */
 template <FieldType T>
 constexpr T operator-(T&& lhs, const T& rhs) noexcept {
     T res(std::move(lhs));
@@ -627,13 +331,6 @@ constexpr T operator-(T&& lhs, const T& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field subtraction operator (lvalue - rvalue)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Left operand (const reference)
- * @param rhs Right operand (rvalue reference, moved)
- * @return Difference lhs - rhs in the field
- */
 template <FieldType T>
 constexpr T operator-(const T& lhs, T&& rhs) noexcept {
     T res(-std::move(rhs));
@@ -641,13 +338,6 @@ constexpr T operator-(const T& lhs, T&& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field subtraction operator (rvalue - rvalue)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Left operand (rvalue reference, moved)
- * @param rhs Right operand (rvalue reference)
- * @return Difference lhs - rhs in the field
- */
 template <FieldType T>
 constexpr T operator-(T&& lhs, T&& rhs) noexcept {
     T res(std::move(lhs));
@@ -655,13 +345,6 @@ constexpr T operator-(T&& lhs, T&& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field multiplication operator
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Left operand (const reference)
- * @param rhs Right operand (const reference)
- * @return Product lhs * rhs in the field
- */
 template <FieldType T>
 constexpr T operator*(const T& lhs, const T& rhs) noexcept {
     T res(lhs);
@@ -669,13 +352,6 @@ constexpr T operator*(const T& lhs, const T& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field multiplication operator (lvalue * rvalue)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Left operand (rvalue reference, moved)
- * @param rhs Right operand (const reference)
- * @return Product lhs * rhs in the field
- */
 template <FieldType T>
 constexpr T operator*(T&& lhs, const T& rhs) noexcept {
     T res(std::move(lhs));
@@ -683,13 +359,6 @@ constexpr T operator*(T&& lhs, const T& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field multiplication operator (lvalue * rvalue)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Left operand (const)
- * @param rhs Right operand (rvalue reference, moved)
- * @return Product lhs * rhs in the field
- */
 template <FieldType T>
 constexpr T operator*(const T& lhs, T&& rhs) noexcept {
     T res(std::move(rhs));
@@ -697,13 +366,6 @@ constexpr T operator*(const T& lhs, T&& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field multiplication operator (rvalue * rvalue)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Left operand (rvalue reference, moved)
- * @param rhs Right operand (rvalue reference)
- * @return Product lhs * rhs in the field
- */
 template <FieldType T>
 constexpr T operator*(T&& lhs, T&& rhs) noexcept {
     T res(std::move(lhs));
@@ -711,13 +373,6 @@ constexpr T operator*(T&& lhs, T&& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field multiplication by scalar (field * integer)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Field element
- * @param rhs Integer scalar
- * @return Product lhs * rhs (repeated addition)
- */
 template <FieldType T>
 constexpr T operator*(const T& lhs, uint16_t rhs) noexcept {
     T res(lhs);
@@ -725,13 +380,6 @@ constexpr T operator*(const T& lhs, uint16_t rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field multiplication by scalar (integer * field)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Integer scalar
- * @param rhs Field element
- * @return Product lhs * rhs (repeated addition)
- */
 template <FieldType T>
 constexpr T operator*(uint16_t lhs, const T& rhs) noexcept {
     T res(rhs);
@@ -739,13 +387,6 @@ constexpr T operator*(uint16_t lhs, const T& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field multiplication by scalar (field * integer, rvalue)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Field element (rvalue reference, moved)
- * @param rhs Integer scalar
- * @return Product lhs * rhs (repeated addition)
- */
 template <FieldType T>
 constexpr T operator*(T&& lhs, int rhs) noexcept {
     T res(std::move(lhs));
@@ -753,13 +394,6 @@ constexpr T operator*(T&& lhs, int rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field multiplication by scalar (integer * field, rvalue)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Integer scalar
- * @param rhs Field element (rvalue reference, moved)
- * @return Product lhs * rhs (repeated addition)
- */
 template <FieldType T>
 constexpr T operator*(int lhs, T&& rhs) noexcept {
     T res(std::move(rhs));
@@ -767,14 +401,6 @@ constexpr T operator*(int lhs, T&& rhs) noexcept {
     return res;
 }
 
-/**
- * @brief Field division operator
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Dividend (const reference)
- * @param rhs Divisor (must be non-zero)
- * @return Quotient lhs / rhs = lhs * rhs⁻¹
- * @throws std::invalid_argument if rhs is zero
- */
 template <FieldType T>
 T operator/(const T& lhs, const T& rhs) {
     T res(lhs);
@@ -782,14 +408,6 @@ T operator/(const T& lhs, const T& rhs) {
     return res;
 }
 
-/**
- * @brief Field division operator
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param lhs Dividend (rvalue reference, moved)
- * @param rhs Divisor (must be non-zero)
- * @return Quotient lhs / rhs = lhs * rhs⁻¹
- * @throws std::invalid_argument if rhs is zero
- */
 template <FieldType T>
 T operator/(T&& lhs, const T& rhs) {
     T res(std::move(lhs));
@@ -797,37 +415,11 @@ T operator/(T&& lhs, const T& rhs) {
     return res;
 }
 
-/**
- * @brief Field exponentiation operator (USE WITH CAUTION)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param base Base element
- * @param exponent Integer exponent
- * @return base^exponent computed via square-and-multiply
- *
- * @warning This operator violates usual precedence rules!
- *          Expression `b*a^p` evaluates as `(b*a)^p` instead of `b*(a^p)`.
- *          Use explicit parentheses: `b*(a^p)` for clarity.
- *
- * @note Prefer explicit sqm<T>(base, exponent) to avoid precedence confusion.
- */
 template <FieldType T>
 constexpr T operator^(const T& base, int exponent) noexcept {
     return sqm<T>(base, exponent);
 }
 
-/**
- * @brief Field exponentiation operator for rvalue base (USE WITH CAUTION)
- * @tparam T Field type (must satisfy @ref CECCO::FieldType concept)
- * @param base Base element (rvalue reference, moved)
- * @param exponent Integer exponent
- * @return base^exponent computed via square-and-multiply
- *
- * @warning This operator violates usual precedence rules!
- *          Expression `b*a^p` evaluates as `(b*a)^p` instead of `b*(a^p)`.
- *          Use explicit parentheses: `b*(a^p)` for clarity.
- *
- * @note Prefer explicit sqm<T>(base, exponent) to avoid precedence confusion.
- */
 template <FieldType T>
 constexpr T operator^(T&& base, int exponent) noexcept {
     return sqm<T>(std::move(base), exponent);
@@ -840,85 +432,49 @@ inline constexpr std::string_view ERASURE_MARKER = "X";
 #endif
 
 /**
- * @class Rationals
- * @brief The field of rational numbers ℚ with selectable precision arithmetic for numerator and denominator
+ * @brief Field of rational numbers ℚ = { p/q : p, q ∈ ℤ, q ≠ 0 } with selectable precision
  *
- * @tparam T Signed integer type for numerator and denominator (default: InfInt)
+ * @tparam T Numerator/denominator type satisfying @ref CECCO::SignedIntType (default `InfInt`)
  *
- * Implements the infinite field of rational numbers ℚ = {p/q : p,q ∈ ℤ, q ≠ 0}.
- * This is the prototypical field of **characteristic 0**, meaning no positive integer n
- * satisfies n * 1 = 0.
+ * Characteristic 0. Values are kept in lowest terms with positive denominator at all times,
+ * so equality is `numerator_a * denominator_b == numerator_b * denominator_a`. Construction
+ * with a zero denominator throws `std::invalid_argument`.
  *
- * @section Implementation_Notes
- *
- * - **Automatic Simplification**: All rationals always stored in lowest terms (gcd(p,q) = 1)
- * - **Sign Normalization**: Negative sign always in numerator (denominator > 0)
- * - **Arbitrary Precision**: Use T = InfInt for arbitrary precision at (significant) performance cost
- * - **Division by Zero**: Throws std::invalid_argument for zero denominators
+ * Pick `T = InfInt` for true ℚ — a fixed-width `T` (e.g. `int`, `long long`) caps numerator
+ * and denominator and silently overflows past that range.
  *
  * @section Usage_Example
  *
  * @code{.cpp}
- * Rationals<> a(3, 4);         // 3/4
- * Rationals<> b(5, 6);         // 5/6
- * Rationals<> c = a + b;       // 19/12 (automatically simplified)
- * Rationals<> d = a / b;       // 9/10
- *
- * std::cout << c;                       // Prints "19/12"
- * std::cout << c.get_characteristic();  // Prints 0
+ * Rationals<> a(3, 4);
+ * Rationals<> b(5, 6);
+ * auto c = a + b;          // 19/12 (auto-simplified)
+ * auto d = a / b;          // 9/10
+ * std::cout << c;          // "19/12"
  * @endcode
- *
- * @warning For applications requiring exact arithmetic, use Rationals<InfInt>
- *          to avoid integer overflow in numerator/denominator calculations. Only in that case Rationals actually
- * realizes ℚ!
  */
 template <SignedIntType T = InfInt>  // use InfInt for infinite precision... and bad performance
 class Rationals : public details::Field<Rationals<T>> {
    public:
     /**
-     * @brief Construct rational number from numerator and (nonzero) denominator
-     * @param n Numerator (default: 0)
-     * @param d Denominator (default: 1)
-     * @throws std::invalid_argument if d == 0
+     * @brief Construct n / d, simplified to lowest terms with positive denominator
      *
-     * Constructs the rational number n/d and automatically simplifies to lowest terms.
-     * The sign is normalized so that the denominator is always positive.
+     * @param n Numerator (default 0)
+     * @param d Denominator (default 1)
+     * @throws std::invalid_argument if d == 0
      */
     Rationals(int n = 0, int d = 1);
 
-    /**
-     * @brief Copy constructor
-     */
     Rationals(const Rationals& other) noexcept = default;
-
-    /**
-     * @brief Move constructor
-     */
     Rationals(Rationals&& other) noexcept = default;
 
-    /* assignment operators */
-
-    /**
-     * @brief Assign integer value as rational number
-     * @param l Integer value to assign
-     * @return Reference to this rational number
-     *
-     * Sets the rational to l/1 (numerator = l, denominator = 1).
-     * No simplification needed as denominator is always 1
-     */
+    /// @brief Assign the integer @p l as `l / 1`
     constexpr Rationals& operator=(int l) noexcept;
 
-    /**
-     * @brief Copy assignment operator
-     */
     constexpr Rationals& operator=(const Rationals& rhs) noexcept = default;
-
-    /**
-     * @brief Move assignment operator
-     */
     Rationals& operator=(Rationals&& rhs) noexcept = default;
 
-    /* comparison */
+    /// @brief Cross-multiplication equality
     constexpr bool operator==(const Rationals<T>& rhs) const noexcept {
 #ifdef CECCO_ERASURE_SUPPORT
         if (is_erased() != rhs.is_erased()) return false;
@@ -926,190 +482,77 @@ class Rationals : public details::Field<Rationals<T>> {
         return numerator * rhs.get_denominator() == rhs.get_numerator() * denominator;
     }
 
-    /* operations */
-
-    /**
-     * @brief Additive inverse for lvalue references
-     * @return Additive inverse of this rational (copy with negated numerator)
-     *
-     * Returns -this, the additive inverse such that this + (-this) = 0.
-     * Creates a new rational with negated numerator.
-     */
+    /// @brief Additive inverse (lvalue overload returns a copy with negated numerator)
     constexpr Rationals operator-() const& noexcept;
-
-    /**
-     * @brief Additive inverse for rvalue references
-     * @return Reference to this rational after in-place negation
-     *
-     * Optimized version for temporary objects: negates numerator in-place
-     * and returns reference to avoid unnecessary copy.
-     */
+    /// @brief Additive inverse (rvalue overload negates in place)
     constexpr Rationals& operator-() && noexcept;
 
-    /* operational assignments */
-
-    /**
-     * @brief Add rational number to this rational
-     * @param rhs Right-hand side rational to add
-     * @return Reference to this rational after addition
-     *
-     * Performs in-place addition: this = this + rhs
-     * Result is automatically simplified to lowest terms.
-     */
+    /// @brief `*this += rhs`, result kept in lowest terms
     constexpr Rationals& operator+=(const Rationals& rhs) noexcept;
-
-    /**
-     * @brief Subtract rational number from this rational
-     * @param rhs Right-hand side rational to subtract
-     * @return Reference to this rational after subtraction
-     *
-     * Performs in-place subtraction: this = this - rhs
-     * Result is automatically simplified to lowest terms.
-     */
+    /// @brief `*this -= rhs`, result kept in lowest terms
     constexpr Rationals& operator-=(const Rationals& rhs) noexcept;
-
-    /**
-     * @brief Multiply this rational by another rational
-     * @param rhs Right-hand side rational to multiply by
-     * @return Reference to this rational after multiplication
-     *
-     * Performs in-place multiplication: this = this * rhs
-     * Result is automatically simplified to lowest terms.
-     */
+    /// @brief `*this *= rhs`, result kept in lowest terms
     constexpr Rationals& operator*=(const Rationals& rhs) noexcept;
-
-    /**
-     * @brief Divide this rational by another rational
-     * @param rhs Right-hand side rational to divide by
-     * @return Reference to this rational after division
-     * @throws std::invalid_argument if rhs is zero (division by zero)
-     *
-     * Performs in-place division: this = this / rhs
-     * Result is automatically simplified to lowest terms.
-     */
+    /// @brief `*this /= rhs`; throws `std::invalid_argument` if rhs is zero
     Rationals& operator/=(const Rationals& rhs);
 
-    /* randomization */
-
-    /**
-     * @brief Set this rational to a random value
-     * @return Reference to this element after randomization
-     *
-     * Generates a random rational number by setting random numerator and denominator
-     * within appropriate bounds, then simplifies to lowest terms.
-     */
+    /// @brief Random rational (bounded numerator and denominator), simplified
     Rationals& randomize() noexcept;
-
-    /**
-     * @brief Set this rational to a random value different from current
-     * @return Reference to this element after randomization
-     *
-     * Generates a random rational number that is guaranteed to be different
-     * from the current value. Useful for testing and sampling algorithms.
-     */
+    /// @brief Like @ref randomize but guaranteed to differ from the current value
     Rationals& randomize_force_change() noexcept;
 
     /**
-     * @brief Get multiplicative order of this rational
-     * @return 1 if this rational equals 1, 0 (infinite) otherwise
-     * @throws std::invalid_argument if this rational is zero
+     * @brief Multiplicative order
      *
-     * In ℚ, only 1 and -1 have finite multiplicative order (both order 1 and 2 respectively).
-     * All other non-zero rationals have infinite multiplicative order.
+     * @return 1 for `1/1`, 2 for `−1/1`, 0 (interpreted as infinite) for everything else
+     * @throws std::invalid_argument if `*this` is zero
      */
     size_t get_multiplicative_order() const;
 
-    /**
-     * @brief Get additive order of this rational
-     * @return 1 if this rational is zero, 0 (infinite) otherwise
-     *
-     * In ℚ, only 0 has finite additive order (order 1). All non-zero rationals
-     * have infinite additive order since ℚ has characteristic 0.
-     */
+    /// @brief Additive order: 1 for zero, 0 (infinite) otherwise (characteristic 0)
     size_t get_additive_order() const noexcept;
 
-    /**
-     * @brief Get human-readable field description
-     * @return String "rational number"
-     */
+    /// @brief Human-readable description: `"rational number"`
     static const std::string get_info() noexcept {
         static const std::string info = "rational number";
         return info;
     }
 
-    /**
-     * @brief Get field characteristic
-     * @return 0 (characteristic of ℚ)
-     *
-     * The characteristic of ℚ is 0, meaning no positive integer n satisfies n * 1 = 0.
-     */
+    /// @brief Characteristic of ℚ: 0
     static constexpr size_t get_characteristic() noexcept { return 0; }
 
-    /* properties */
-
-    /**
-     * @brief Check if element has positive sign
-     * @return True if numerator and denominator have the same sign
-     */
+    /// @brief Sign predicate (true iff numerator and denominator share their sign)
     constexpr bool has_positive_sign() const noexcept {
         return (numerator >= 0 && denominator > 0) || (numerator <= 0 && denominator < 0);
     }
 
-    /**
-     * @brief Check if this element is zero
-     * @return true if this is the additive identity (0/1)
-     */
+    /// @brief True iff numerator is zero
     constexpr bool is_zero() const noexcept { return numerator == 0; }
 
 #ifdef CECCO_ERASURE_SUPPORT
     /**
-     * @brief Erases this element, i.e., sets it to an "outside of field" marker
-     * @return Reference to this element after erasing
+     * @brief Mark this element as erased
      *
-     * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased field
-     * elements is the responsibility of the user!
+     * @warning Erased elements must not participate in field arithmetic; correct use is the
+     * caller's responsibility (cf. @ref CECCO_ERASURE_SUPPORT).
      */
     constexpr Rationals& erase() noexcept;
-
-    /**
-     * @brief Un-erases this element, i.e., sets it to an actual field element (the additive neutral 0/1)
-     * @return Reference to this element after un-erasing
-     */
+    /// @brief Clear the erasure flag, resetting to additive identity 0/1
     constexpr Rationals& unerase() noexcept;
-
-    /**
-     * @brief Checks whether this element is erased
-     * @return true if this element is erased, false otherwise (meaning it actually is a field element)
-     */
+    /// @brief Test whether this element is currently erased (encoded as denominator == 0)
     constexpr bool is_erased() const noexcept { return denominator == 0; }
 #endif
 
-    /**
-     * @brief Get the numerator of this rational
-     * @return Numerator value
-     */
+    /// @brief Numerator (sign carrier)
     constexpr const T& get_numerator() const noexcept { return numerator; }
-
-    /**
-     * @brief Get the denominator of this rational
-     * @return Denominator value (always positive)
-     */
+    /// @brief Denominator (always positive after simplification)
     constexpr const T& get_denominator() const noexcept { return denominator; }
 
    private:
-    T numerator;    ///< Numerator (can be negative)
-    T denominator;  ///< Denominator (always positive after simplification)
+    T numerator;
+    T denominator;
 
-    /**
-     * @brief Reduce this rational to lowest terms
-     *
-     * If numerator is zero then divides by the denominator in order to obtain 0/1 (additive neutral).
-     *
-     * Otherwise divides both numerator and denominator by their greatest common divisor
-     * and ensures the denominator is positive. Called automatically by constructors
-     * and arithmetic operations (so any rational is in lowest terms at all times).
-     */
+    /// @brief Reduce to lowest terms with positive denominator; called automatically
     constexpr void simplify() noexcept;
 };
 
@@ -1289,14 +732,9 @@ constexpr void Rationals<T>::simplify() noexcept {
 }
 
 /**
- * @brief Output stream operator for nicely printing rational numbers
- * @tparam T Integer type for numerator/denominator
- * @param os Output stream
- * @param e Rational number to output
- * @return Reference to the output stream
+ * @brief Print as `"numerator/denominator"` (or just `"numerator"` when denominator is 1)
  *
- * Formats rational numbers as "numerator/denominator" or just "numerator"
- * when denominator is 1. Uses single stream insertion for std::setw() compatibility.
+ * Single stream insertion for `std::setw` compatibility.
  */
 template <SignedIntType T>
 std::ostream& operator<<(std::ostream& os, const Rationals<T>& e) noexcept {
@@ -1324,16 +762,11 @@ using label_t = typename std::conditional_t<sqm(p, m) < 255, uint8_t, uint16_t>;
 namespace details {
 
 /**
- * @brief Convert polynomial coefficients to integer label
- * @tparam q Base field size, coefficient field
- * @tparam m Extension degree, degree of polynomial
- * @tparam SIZE Array size (must be ≥ m)
- * @param coeffs Polynomial coefficients (constant term first)
- * @return Integer label representing the polynomial
+ * @brief Encode polynomial coefficients (low-to-high) as a base-q integer label
  *
- * Converts polynomial coefficients to a unique integer label using
- * positional notation in base q. Used for mapping between polynomial
- * and label representations in extension fields.
+ * @tparam q Base field size
+ * @tparam m Extension degree (number of coefficients used)
+ * @tparam SIZE Length of @p coeffs (must be ≥ m)
  */
 template <uint16_t q, uint8_t m, size_t SIZE>
 static size_t constexpr integer_from_coeffs(const std::array<size_t, SIZE>& coeffs) noexcept {
@@ -1348,12 +781,10 @@ static size_t constexpr integer_from_coeffs(const std::array<size_t, SIZE>& coef
 }
 
 /**
- * @brief One-dimensional lookup table for field operations
- * @tparam LabelType Integer type for field element labels
- * @tparam FieldSize Number of elements in the field
+ * @brief 1D lookup table for unary field operations (negation, inversion, order)
  *
- * Stores unary operation results, such as additive/multiplicative inverses
- * and element orders.
+ * @tparam LabelType Label integer type
+ * @tparam FieldSize Number of field elements
  */
 template <typename LabelType, size_t FieldSize>
 struct Lut1D {
@@ -1362,29 +793,18 @@ struct Lut1D {
 };
 
 /**
- * @brief Two-dimensional lookup table with compression (depending on CECCO_COMPRESS_LUTS_FROM_Q) for commutative
- * operations
- * @tparam LabelType Integer type for field element labels
- * @tparam FieldSize Number of elements in the field
+ * @brief 2D lookup table for commutative binary operations, optionally compressed
  *
- * Stores binary operation results with memory compression for large fields (depending on
- * CECCO_COMPRESS_LUTS_FROM_Q): For compression it exploits commutativity (op(a,b) = op(b,a)) to reduce memory usage
- * by ~50% when FieldSize ≥ CECCO_COMPRESS_LUTS_FROM_Q.
+ * @tparam LabelType Label integer type
+ * @tparam FieldSize Number of field elements
  *
- * @section Compression_Strategy
- *
- * For large fields, only stores the upper triangle of the operation table:
- * - Small fields (< CECCO_COMPRESS_LUTS_FROM_Q): Full FieldSize * FieldSize table
- * - Large fields (≥ CECCO_COMPRESS_LUTS_FROM_Q): Compressed table with smart indexing
+ * For `FieldSize` ≥ @ref CECCO_COMPRESS_LUTS_FROM_Q, only the upper triangle is stored
+ * (saving ~50 % memory); the access operators normalise the index pair so callers don't
+ * see the difference.
  */
 template <typename LabelType, size_t FieldSize>
 struct Lut2D {
-    /**
-     * @brief Access operator result with automatic compression handling, used to set up LUT
-     * @param i First operand label
-     * @param j Second operand label
-     * @return Mutable reference to operation result
-     */
+    /// @brief Mutable access (used during table construction)
     constexpr LabelType& operator()(size_t i, size_t j) {
         if (i > j) return operator()(j, i);
         if constexpr (FieldSize < CECCO_COMPRESS_LUTS_FROM_Q) {
@@ -1398,12 +818,7 @@ struct Lut2D {
         }
     }
 
-    /**
-     * @brief Const access operator result with automatic compression handling, used to access LUT
-     * @param i First operand label
-     * @param j Second operand label
-     * @return Operation result
-     */
+    /// @brief Const access (used during field operations)
     constexpr LabelType operator()(size_t i, size_t j) const noexcept {
         if (i > j) return operator()(j, i);
         if constexpr (FieldSize < CECCO_COMPRESS_LUTS_FROM_Q) {
@@ -1417,41 +832,28 @@ struct Lut2D {
         }
     }
 
-    /// @brief Compressed storage array (size depends on field size and compression threshold
-    /// CECCO_COMPRESS_LUTS_FROM_Q)
+    /// @brief Backing storage; full square below the compression threshold, upper triangle above
     std::array < std::array<LabelType, FieldSize>,
         FieldSize<CECCO_COMPRESS_LUTS_FROM_Q ? FieldSize : static_cast<size_t>(floor_constexpr(FieldSize / 2.0) + 1)>
             values{};
 };
 
 /**
- * @brief Coefficient lookup table template
- * @tparam LabelType Integer type for coefficient field element labels
- * @tparam ExtensionDegree Degree of the field extension
- * @tparam FieldSize Number of elements in the field
+ * @brief Lookup table mapping each extension-field label to its base-field coefficient vector
  *
- * Maps extension field element labels to their polynomial coefficient representations
- * over the base field.
+ * @tparam LabelType Coefficient label type
+ * @tparam ExtensionDegree Number of coefficients per element (m)
+ * @tparam FieldSize Number of field elements
  */
 template <typename LabelType, size_t ExtensionDegree, size_t FieldSize>
 struct Lut2Dcoeff {
     std::array<std::array<LabelType, ExtensionDegree>, FieldSize> values{};
 };
 
-/// @brief Computes multiplicative orders for all field elements
+/// @brief Build the table of multiplicative orders for all elements of 𝔽_Q
 ///
-/// The multiplicative order of an element a in a finite field is the smallest positive integer k
-/// such that a^k = 1. This function generates a 1D lookup table where lut_mul_ord[a] contains the
-/// multiplicative order of element a in the multiplicative group 𝔽_Q \ {0}.
-///
-/// @tparam LabelType The field element label type
-/// @tparam FieldSize The size of the finite field Q = q^m
-/// @param mul_lut Reference to the 2D multiplication lookup table
-/// @return A Lut1D lookup table where index i maps to the multiplicative order of field element i
-///
-/// @note Used internally by Fp and Ext field classes to precompute multiplicative orders
-/// @note The multiplicative order divides Q-1 for finite field 𝔽_Q
-/// @note Element 0 has multiplicative order 0 by convention (since 0 ∉ 𝔽_Q \ {0})
+/// Each entry is the smallest k > 0 with `a^k == 1`; element 0 carries the sentinel order 0.
+/// All orders divide Q − 1.
 template <typename LabelType, LabelType FieldSize>
 constexpr auto compute_multiplicative_orders(const Lut2D<LabelType, FieldSize>& mul_lut) {
     Lut1D<LabelType, FieldSize> lut_mul_ord;
@@ -1472,19 +874,10 @@ constexpr auto compute_multiplicative_orders(const Lut2D<LabelType, FieldSize>& 
     return lut_mul_ord;
 }
 
-/// @brief Computes multiplicative inverses using direct modular arithmetic
+/// @brief Build multiplicative-inverse table for 𝔽_p via extended Euclidean algorithm
 ///
-/// This function computes multiplicative inverses for all non-zero field elements using the
-/// extended Euclidean algorithm (via modinv function). For element a ≠ 0, it finds a^(-1)
-/// such that a * a^(-1) ≡ 1 (mod p) for prime fields 𝔽_p.
-///
-/// @tparam LabelType The field element label type (e.g., uint8_t, uint16_t)
-/// @tparam FieldSize The size of the finite field (must be prime for this method)
-/// @return A Lut1D lookup table where lut_inv[a] = a^(-1) for a ≠ 0, and lut_inv[0] = 0
-///
-/// @note Used by Fp (prime field) classes for efficient multiplicative inverse computation
-/// @note More efficient than search-based method for prime fields where direct computation is possible
-/// @note For extension fields, use compute_multiplicative_inverses_search instead
+/// Sentinel: `lut_inv[0] == 0`. Prime-field path; for extension fields use
+/// @ref compute_multiplicative_inverses_search.
 template <typename LabelType, LabelType FieldSize>
 constexpr auto compute_multiplicative_inverses_direct()
     requires(is_prime<LabelType>(FieldSize))
@@ -1502,20 +895,10 @@ constexpr auto compute_multiplicative_inverses_direct()
     return lut_inv;
 }
 
-/// @brief Computes multiplicative inverses using exhaustive search
+/// @brief Build multiplicative-inverse table by searching the multiplication LUT
 ///
-/// This function computes multiplicative inverses by searching through the multiplication table
-/// to find pairs (a,b) such that a * b = 1. For each element a ≠ 0, it finds the unique element
-/// b such that a * b ≡ 1 in the finite field.
-///
-/// @tparam LabelType The field element label type (e.g., uint8_t, uint16_t)
-/// @tparam FieldSize The size of the finite field Q = q^m
-/// @param mul_lut Reference to the 2D multiplication lookup table
-/// @return A Lut1D lookup table where lut_inv[a] = a^(-1) for a ≠ 0, and lut_inv[0] = 0
-///
-/// @note Used by Ext (extension field) classes where direct modular arithmetic is not applicable
-/// @note More general than direct method - works for any finite field structure
-/// @note Exploits symmetry: if a * b = 1, then both lut_inv[a] = b and lut_inv[b] = a
+/// Used for extension fields, where extended Euclidean over the prime is not applicable.
+/// Exploits the symmetry `a · b = 1 ⇒ b · a = 1` to fill two entries per match.
 template <typename LabelType, LabelType FieldSize>
 constexpr auto compute_multiplicative_inverses_search(const Lut2D<LabelType, FieldSize>& mul_lut) {
     Lut1D<LabelType, FieldSize> lut_inv;
@@ -1535,19 +918,10 @@ constexpr auto compute_multiplicative_inverses_search(const Lut2D<LabelType, Fie
     return lut_inv;
 }
 
-/// @brief Computes additive inverses using direct arithmetic
+/// @brief Build additive-inverse (negation) table for 𝔽_p
 ///
-/// This function computes additive inverses (negation) for all field elements using direct
-/// modular arithmetic. For element a, it finds -a such that a + (-a) ≡ 0 (mod p) in prime
-/// fields 𝔽_p, where -a = p - a for a ≠ 0.
-///
-/// @tparam LabelType The field element label type (e.g., uint8_t, uint16_t)
-/// @tparam FieldSize The size of the finite field (must be prime for this method)
-/// @return A Lut1D lookup table where lut_neg[a] = -a (additive inverse of a)
-///
-/// @note Used by Fp (prime field) classes for efficient additive inverse computation
-/// @note In 𝔽_p: -0 = 0 and -a = p - a for a ∈ {1, 2, ..., p-1}
-/// @note More efficient than search-based method for prime fields
+/// Direct formula: −0 = 0, −a = p − a otherwise. Prime-field path; extension fields use
+/// @ref compute_additive_inverses_search.
 template <typename LabelType, LabelType FieldSize>
 constexpr auto compute_additive_inverses_direct()
     requires(is_prime<LabelType>(FieldSize))
@@ -1558,20 +932,9 @@ constexpr auto compute_additive_inverses_direct()
     return lut_neg;
 }
 
-/// @brief Computes additive inverses using exhaustive search
+/// @brief Build additive-inverse table by searching the addition LUT
 ///
-/// This function computes additive inverses by searching through the addition table to find
-/// pairs (a,b) such that a + b = 0. For each element a, it finds the unique element b such
-/// that a + b ≡ 0 in the finite field.
-///
-/// @tparam LabelType The field element label type (e.g., uint8_t, uint16_t)
-/// @tparam FieldSize The size of the finite field Q = q^m
-/// @param add_lut Reference to the 2D addition lookup table
-/// @return A Lut1D lookup table where lut_neg[a] = -a (additive inverse of a)
-///
-/// @note Used by Ext (extension field) classes where direct modular arithmetic is not applicable
-/// @note More general than direct method - works for any finite field structure
-/// @note Exploits symmetry: if a + b = 0, then both lut_neg[a] = b and lut_neg[b] = a
+/// Used for extension fields. Symmetry `a + b = 0 ⇒ b + a = 0` fills two entries per match.
 template <typename LabelType, LabelType FieldSize>
 constexpr auto compute_additive_inverses_search(const Lut2D<LabelType, FieldSize>& add_lut) {
     Lut1D<LabelType, FieldSize> lut_neg;
@@ -1589,18 +952,10 @@ constexpr auto compute_additive_inverses_search(const Lut2D<LabelType, FieldSize
     return lut_neg;
 }
 
-/// @brief Computes addition table for prime fields using modular arithmetic
+/// @brief Build the addition table for 𝔽_p: `lut_add(a, b) = (a + b) mod p`
 ///
-/// This function generates a 2D lookup table for addition in prime fields 𝔽_p, where each entry
-/// lut_add(a,b) = (a + b) mod p. The table exploits commutativity (a + b = b + a) for efficiency.
-///
-/// @tparam LabelType The field element label type (e.g., uint8_t, uint16_t)
-/// @tparam FieldSize The size of the prime field p (must be prime)
-/// @return A Lut2D lookup table where lut_add(a,b) = (a + b) mod p
-///
-/// @note Used by Fp (prime field) classes for precomputing addition operations
-/// @note Only works for prime field sizes - enforced by requires clause
-/// @note For extension fields, use compute_polynomial_addition_table instead
+/// Stores the upper triangle only (commutativity). Extension-field analogue:
+/// @ref compute_polynomial_addition_table.
 template <typename LabelType, LabelType FieldSize>
 constexpr auto compute_modular_addition_table()
     requires(is_prime<LabelType>(FieldSize))
@@ -1614,15 +969,10 @@ constexpr auto compute_modular_addition_table()
     return lut_add;
 }
 
-/// @brief Smallest primitive root of F^* via direct power enumeration using F's own arithmetic
+/// @brief Smallest primitive root of F* by direct power enumeration
 ///
-/// For each candidate g in {2, ..., p-1}, walks g, g^2, ..., g^(p-2). g is a primitive root iff
-/// none of these powers equals 1 (since the multiplicative order divides p-1).
-///
-/// @tparam F Prime-field type providing constexpr operator*=, operator==, F(int) and label_t
-/// @return Label of the smallest primitive root mod p
-///
-/// @note Evaluated at compile time using F's constexpr multiplication operator.
+/// For each candidate g ∈ {2, …, p−1} walks g, g², …, g^{p−2}; g is primitive iff none of those
+/// equals 1. Evaluated at compile time via F's constexpr `operator*=`.
 template <typename F>
 constexpr typename F::label_t compute_primitive_root() {
     constexpr auto p = F::get_p();
@@ -1644,24 +994,10 @@ constexpr typename F::label_t compute_primitive_root() {
     return typename F::label_t{0};  // unreachable for prime p
 }
 
-/// @brief Computes addition table for extension fields using polynomial arithmetic
+/// @brief Build the addition table for 𝔽_{q^m} via coefficient-wise base-field addition
 ///
-/// This function generates a 2D lookup table for addition in extension fields 𝔽_{q^m}, where
-/// elements are represented as polynomials over the base field 𝔽_q. Addition is performed
-/// coefficient-wise: (a₀ + a₁x + ... + aₘ₋₁x^{m-1}) + (b₀ + b₁x + ... + bₘ₋₁x^{m-1}) =
-/// (a₀+b₀) + (a₁+b₁)x + ... + (aₘ₋₁+bₘ₋₁)x^{m-1}.
-///
-/// @tparam LabelType The field element label type (e.g., uint8_t, uint16_t)
-/// @tparam FieldSize The size of the extension field q^m
-/// @tparam LutCoeffType The coefficient lookup table type
-/// @tparam ExtensionDegree The extension degree m
-/// @tparam BaseFieldType The base field type 𝔽_q
-/// @param lut_coeff Coefficient lookup table mapping field elements to polynomial coefficients
-/// @return A Lut2D lookup table where lut_add(a,b) represents polynomial addition a + b
-///
-/// @note Used by Ext (extension field) classes for precomputing addition operations
-/// @note Polynomial addition is performed coefficient-wise in the base field
-/// @note Works for any extension field structure
+/// Each element is a polynomial over 𝔽_q; addition reduces to base-field addition on the
+/// coefficient vectors taken from @p lut_coeff.
 template <typename LabelType, LabelType FieldSize, typename LutCoeffType, uint8_t ExtensionDegree,
           typename BaseFieldType>
 constexpr auto compute_polynomial_addition_table(const LutCoeffType& lut_coeff) {
@@ -1688,20 +1024,12 @@ constexpr auto compute_polynomial_addition_table(const LutCoeffType& lut_coeff) 
     return lut_add;
 }
 
-/// @brief Calculates the multiplicative order of a field element
+/// @brief Multiplicative order of @p element by repeated multiplication
 ///
-/// The multiplicative order of an element a in a finite field is the smallest positive integer k
-/// such that a^k = 1. This function computes the order by repeated multiplication until reaching
-/// the multiplicative identity element.
+/// @throws std::invalid_argument if @p element is zero
 ///
-/// @tparam FieldType The finite field type (must support multiplication and equality)
-/// @param element The field element whose multiplicative order to compute (must be non-zero)
-/// @return The multiplicative order of the given element
-/// @throws std::invalid_argument if element is zero (no multiplicative order exists)
-///
-/// @note Used for runtime computation of individual element orders
-/// @note More efficient batch (pre-)computation is provided by compute_multiplicative_orders
-/// @note The multiplicative order always divides Q-1 for finite field 𝔽_Q
+/// Single-element runtime path; batch precomputation lives in @ref compute_multiplicative_orders.
+/// Order always divides Q − 1.
 template <typename FieldType>
 size_t calculate_multiplicative_order(const FieldType& element) {
     if (element == FieldType(0))
@@ -1719,16 +1047,7 @@ size_t calculate_multiplicative_order(const FieldType& element) {
     }
 }
 
-/// @brief Finds a generator (primitive element) of the multiplicative group of 𝔽_Q \ {0}
-///
-/// Searches the multiplicative order table for the first element with order Q-1.
-///
-/// @tparam LabelType The field element label type (e.g., uint8_t, uint16_t)
-/// @tparam FieldSize The size of the finite field Q
-/// @param lut_mul_ord 1D lookup table containing multiplicative orders of all field elements
-/// @return A generator element with multiplicative order Q-1, or 0 if none found (impossible)
-///
-/// @note Used by finite field classes to identify primitive elements for various algorithms
+/// @brief First element with multiplicative order Q − 1 (a generator of 𝔽_Q*)
 template <typename LabelType, LabelType FieldSize>
 constexpr LabelType find_generator(const Lut1D<LabelType, FieldSize>& lut_mul_ord) {
     for (LabelType i = 1; i < FieldSize; ++i)
@@ -1737,19 +1056,10 @@ constexpr LabelType find_generator(const Lut1D<LabelType, FieldSize>& lut_mul_or
     return LabelType{0};  // cannot happen
 }
 
-/// @brief Computes multiplication table for prime fields using modular arithmetic
+/// @brief Build the multiplication table for 𝔽_p: `lut_mul(a, b) = (a · b) mod p`
 ///
-/// This function generates a 2D lookup table for multiplication in prime fields 𝔽_p, where each
-/// entry lut_mul(a,b) = (a * b) mod p. The table exploits commutativity (a * b = b * a) and
-/// stores only the upper triangular portion for memory efficiency.
-///
-/// @tparam LabelType The field element label type (e.g., uint8_t, uint16_t)
-/// @tparam FieldSize The size of the prime field p (must be prime)
-/// @return A Lut2D lookup table where lut_mul(a,b) = (a * b) mod p
-///
-/// @note Used by Fp (prime field) classes for precomputing multiplication operations
-/// @note Only works for prime field sizes - enforced by requires clause
-/// @note For extension fields, use compute_polynomial_multiplication_table instead
+/// Stores the upper triangle only (commutativity). Extension-field analogue:
+/// @ref compute_polynomial_multiplication_table.
 template <typename LabelType, LabelType FieldSize>
 constexpr auto compute_modular_multiplication_table()
     requires(is_prime<LabelType>(FieldSize))
@@ -1766,26 +1076,13 @@ constexpr auto compute_modular_multiplication_table()
     return lut_mul;
 }
 
-/// @brief Computes multiplication table for extension fields using base field polynomial arithmetic modulo a monic
-/// irreducible Modulus
+/// @brief Build the multiplication table for 𝔽_{q^m}: polynomial multiply, then reduce mod f(x)
 ///
-/// This function generates a 2D lookup table for multiplication in extension fields 𝔽_{q^m},
-/// where elements are polynomials over the base field 𝔽_q. Multiplication is performed as
-/// polynomial multiplication followed by reduction modulo the irreducible polynomial Modulus.
-/// The process: (a₀ + a₁x + ... + aₘ₋₁x^{m-1}) * (b₀ + b₁x + ... + bₘ₋₁x^{m-1}) mod f(x).
+/// `f(x) = Modulus` must be monic and irreducible over 𝔽_q. Reducibility is detected during
+/// table construction (a non-zero label that maps to 0 is impossible in a field) and surfaces as
+/// `std::invalid_argument`.
 ///
-/// @tparam LabelType The field element label type (e.g., uint8_t, uint16_t)
-/// @tparam FieldSize The size of the extension field q^m
-/// @tparam LutCoeffType The coefficient lookup table type
-/// @tparam ExtensionDegree The extension degree m
-/// @tparam BaseFieldType The base field type 𝔽_q
-/// @tparam Modulus The irreducible polynomial used for field construction
-/// @param lut_coeff Coefficient lookup table mapping field elements to polynomial coefficients
-/// @return A Lut2D lookup table where lut_mul(a,b) represents polynomial multiplication a * b mod f(x)
-///
-/// @note Used by Ext (extension field) classes for precomputing multiplication operations
-/// @note The modulus must be monic and irreducible over the base field
-/// @throws std::invalid_argument if the modulus is not monic and irreducible (detected during computation)
+/// @throws std::invalid_argument if @p Modulus is not irreducible over the base field
 template <typename LabelType, LabelType FieldSize, typename LutCoeffType, uint8_t ExtensionDegree,
           typename BaseFieldType, auto& Modulus>
 constexpr auto compute_polynomial_multiplication_table(const LutCoeffType& lut_coeff) {
@@ -1874,45 +1171,30 @@ constexpr auto compute_polynomial_multiplication_table(const LutCoeffType& lut_c
 }
 
 /**
- * @brief LutHolder wrapper for functions that require no provider tables
+ * @brief Holds a LUT generated by `F()` (no dependencies); selects compile-time or lazy storage
  *
- * @tparam LutType Type of the lookup table to be generated
- * @tparam F Function pointer to the table generation function
- * @tparam mode Compilation mode (CompileTime or RunTime)
+ * @tparam LutType Generated table type
+ * @tparam F Generator function pointer
+ * @tparam mode @ref LutMode::CompileTime or @ref LutMode::RunTime
  *
- * LutHolderNoProvider manages lookup table generation for functions that compute
- * tables independently without requiring other lookup tables as inputs (providers). This is
- * used for fundamental tables like modular arithmetic operations in prime fields.
+ * Used for self-contained tables (e.g. mod-p arithmetic in prime fields).
  */
 template <typename LutType, LutType (*F)(), LutMode mode>
 struct LutHolderNoProvider;
 
-/**
- * @brief Compile-time specialization for independent (no provider) table generation
- *
- * Generates the lookup table at compile time and stores it as a constexpr
- * static member. This provides zero-overhead table access but increases
- * compilation time and binary size for large tables.
- */
+/// @brief CompileTime specialisation: table is a constexpr static member
 template <typename LutType, LutType (*F)()>
 struct LutHolderNoProvider<LutType, F, LutMode::CompileTime> {
-    // If the compiler reports "must be initialized by a constant expression" here, see fields.hpp's
-    // LUT_Mode_Selection note: most likely the constexpr step budget was exhausted; switch to
-    // LutMode::RunTime or raise -fconstexpr-steps / -fconstexpr-ops-limit.
+    // If the compiler reports "must be initialized by a constant expression" here, the constexpr
+    // step budget was likely exhausted: switch to LutMode::RunTime or raise -fconstexpr-steps /
+    // -fconstexpr-ops-limit (see the file-header @note on CompileTime mode).
     static constexpr LutType lut = F();
     static constexpr const LutType& get_lut() { return lut; }
 };
 template <typename LutType, LutType (*F)()>
 constexpr LutType LutHolderNoProvider<LutType, F, LutMode::CompileTime>::lut;
 
-/**
- * @brief Runtime specialization for independent (no provider) table generation
- *
- * Generates the lookup table at runtime using thread-safe lazy initialization.
- * The table is computed only once when first accessed and stored in a static
- * variable. This reduces compilation time at the cost of a
- * one-time runtime computation overhead.
- */
+/// @brief RunTime specialisation: thread-safe lazy initialisation on first access
 template <typename LutType, LutType (*F)()>
 struct LutHolderNoProvider<LutType, F, LutMode::RunTime> {
     static void fill_lut() {
@@ -1925,37 +1207,28 @@ struct LutHolderNoProvider<LutType, F, LutMode::RunTime> {
 };
 
 /**
- * @brief LutHolder wrapper for functions that require dependency tables (providers)
+ * @brief Holds a LUT generated by `F(P)`; `P` provides a dependency table
  *
- * @tparam LutType Type of the lookup table to be generated
- * @tparam ProviderLutType Type of the dependency table required as input
- * @tparam P Function pointer to obtain the dependency table (provider)
- * @tparam F Function pointer to the table generation function
- * @tparam mode Compilation mode (CompileTime or RunTime)
+ * @tparam LutType Generated table type
+ * @tparam ProviderLutType Dependency table type
+ * @tparam P Provider accessor (returns the dependency table)
+ * @tparam F Generator function consuming the provider
+ * @tparam mode @ref LutMode::CompileTime or @ref LutMode::RunTime
  *
- * LutHolder manages lookup table generation for functions that depend on other
- * lookup tables as inputs (providers). This is commonly used for extension field operations
- * that require coefficient tables from their base fields. The holder ensures
- * proper dependency resolution and initialization order.
+ * Used for extension-field tables that consume a coefficient table from the base field.
  */
 template <typename LutType, typename ProviderLutType, const ProviderLutType& (*P)(),
           LutType (*F)(const ProviderLutType& (*)()), LutMode mode>
 struct LutHolder;
 
-/**
- * @brief Compile-time specialization for dependent table generation
- *
- * Generates the target table at compile time using a dependency table (provider).
- * The dependency table is accessed via P() and passed to F() to generate
- * the final table. All computation occurs at compile time.
- */
+/// @brief CompileTime specialisation: table baked into the binary
 template <typename LutType, typename ProviderLutType, const ProviderLutType& (*P)(),
           LutType (*F)(const ProviderLutType& (*)())>
 struct LutHolder<LutType, ProviderLutType, P, F, LutMode::CompileTime> {
-    // If the compiler reports "must be initialized by a constant expression" here, see fields.hpp's
-    // LUT_Mode_Selection note: most likely the constexpr step budget was exhausted; switch to
-    // LutMode::RunTime or raise -fconstexpr-steps / -fconstexpr-ops-limit. A reducible modulus
-    // surfaces here too via the throw in compute_polynomial_multiplication_table.
+    // If the compiler reports "must be initialized by a constant expression" here: either the
+    // constexpr step budget was exhausted (switch to LutMode::RunTime or raise -fconstexpr-steps
+    // / -fconstexpr-ops-limit; see the file-header @note) or a reducible modulus reached the
+    // throw in compute_polynomial_multiplication_table.
     static constexpr LutType lut = F(P);
     static constexpr const LutType& get_lut() { return lut; }
 };
@@ -1963,13 +1236,7 @@ template <typename LutType, typename ProviderLutType, const ProviderLutType& (*P
           LutType (*F)(const ProviderLutType& (*)())>
 constexpr LutType LutHolder<LutType, ProviderLutType, P, F, LutMode::CompileTime>::lut;
 
-/**
- * @brief Runtime specialization for dependent table generation
- *
- * Generates the target table at runtime using thread-safe lazy initialization.
- * The dependency table (provider) is accessed via P() and passed to F() when the target
- * table is first accessed. The target table is cached in a static variable.
- */
+/// @brief RunTime specialisation: thread-safe lazy initialisation, dependency resolved on first access
 template <typename LutType, typename ProviderLutType, const ProviderLutType& (*P)(),
           LutType (*F)(const ProviderLutType& (*)())>
 struct LutHolder<LutType, ProviderLutType, P, F, LutMode::RunTime> {
@@ -1985,143 +1252,62 @@ struct LutHolder<LutType, ProviderLutType, P, F, LutMode::RunTime> {
 }  // namespace details
 
 /**
- * @class Embedding
- * @brief Explicit field embedding (functor) from subfield to superfield with reverse lookup
+ * @brief Functor representing the field embedding φ: SUBFIELD → SUPERFIELD, with reverse lookup
  *
- * @tparam SUBFIELD Source field type (must satisfy FiniteFieldType concept)
- * @tparam SUPERFIELD Target field type (must satisfy FiniteFieldType concept and SubfieldOf<SUPERFIELD, SUBFIELD>)
+ * @tparam SUBFIELD   Subfield (finite-field type)
+ * @tparam SUPERFIELD Superfield (finite-field type, must satisfy `SubfieldOf<SUPERFIELD, SUBFIELD>`)
  *
- * Constructs and represents an explicit field embedding φ: SUBFIELD → SUPERFIELD between
- * a subfield and its containing superfield. The embedding preserves field operations and
- * provides efficient forward mapping and reverse lookup capabilities. Supports both regular
- * field types and Iso types with automatic component field detection for extraction.
+ * The embedding is determined by mapping a generator: with factor = (|SUPERFIELD| − 1) /
+ * (|SUBFIELD| − 1), it sends g_sub^k ↦ g_super^{k · factor}. Identities φ(0) = 0, φ(1) = 1 are
+ * fixed. The full table is computed once per template instantiation and cached.
  *
- * @warning A mathematical SUBFIELD/SUPERFIELD relationship is only necessary, not sufficient. The two fields have
- * to be in the same construction tower, that is, SUBFIELD is used in some way in the construction of SUPERFIELD!
+ * Forward map (`operator()`) is an O(1) array lookup; @ref extract reverses it via linear search
+ * through the cached map. When `SUPERFIELD` is an @ref CECCO::Iso, @ref extract walks the MAIN
+ * representation first, then each of OTHERS, until it finds one that contains `SUBFIELD`.
  *
- * @section Mathematical_Foundation
- *
- * The embedding is constructed using generator power mapping:
- * - Maps the additive and multiplicative identities: φ(0) = 0 and φ(1) = 1
- * - Computes power factor: factor = (|SUPERFIELD| - 1) / (|SUBFIELD| - 1)
- * - Maps subfield generator powers: φ(g_sub^k) = g_super^(k * factor)
- * - Ensures proper subfield inclusion while preserving structure
- *   - φ(a + b) = φ(a) + φ(b) (additivity)
- *   - φ(a * b) = φ(a) * φ(b) (multiplicativity)
- *   - φ(0_sub) = 0_super and φ(1_sub) = 1_super (identity preservation)
- *
- * @section Iso_Type_Support
- *
- * When SUPERFIELD is an Iso type, the extract method automatically handles component field
- * detection by searching through all isomorphic representations:
- * 1. First attempts extraction from the MAIN field if SUBFIELD ⊆ MAIN
- * 2. If unsuccessful, iterates through OTHERS components to find the correct representation
- * 3. Uses the same pattern as cross-field constructors with template lambda and fold expressions
- * 4. Throws exception only if SUBFIELD is not found in any component
- *
- * @section Performance_Features
- *
- * - **Static caching**: Computed once per template instantiation using std::once_flag
- * - **O(1) forward mapping**: Direct array lookup for embedding elements
- * - **O(n) reverse lookup**: Linear search for downcast operations (optimized with std::ranges::find)
- * - **Iso type handling**: O(k * n) where k is number of components checked
- * - **Type safety**: Template constraints ensure valid subfield relationships
+ * @warning Mathematical containment is necessary but not sufficient — `SUBFIELD` must appear in
+ * the construction tower of `SUPERFIELD` (or in one of an `Iso`'s components). Use an `Iso` to
+ * merge towers when needed.
  *
  * @section Usage_Example
  *
  * @code{.cpp}
- * using F2 = Fp<2>;
- * using F4 = Ext<F2, {1, 1, 1}>;
+ * using F2  = Fp<2>;
+ * using F4  = Ext<F2, {1, 1, 1}>;
  * using F16 = Ext<F4, {2, 1, 1}>;
  *
- * // Forward embedding (upcast, always succeeds)
- * Embedding<F4, F16> embed;
+ * Embedding<F4, F16> phi;
  * F4 a(2);
- * F16 b = embed(a);  // Embed F4 element into F16
- *
- * // Reverse extraction (downcast with validation)
- * try {
- *     F16 c(5);
- *     F4 d = embed.extract(c);  // May throw if c not in F4 subfield
- *     // Extraction succeeded
- * } catch (const std::invalid_argument&) {
- *     // c is not in F4 subfield - handle extraction failure
- * }
- *
- * // Iso type extraction (automatic component detection)
- * using F8 = Ext<F2, {1, 0, 1, 1}>;
- * using F64_a = Ext<F8, {6, 2, 1}>;
- * using F64_b = Ext<F2, {1, 0, 0, 1, 0, 0, 1}>;
- * using F64 = Iso<F64_b, F64_a>;  // F8 ⊆ F64_a but not F64_b
- *
- * Embedding<F8, F64> embed;
- * F8 a(2);
- * F64 b(a);                     // Embed F8 into F64 (via constructor)
- * F8 c = iso_embed.extract(b);  // Extract F8 from F64 (finds F64_a component)
- * assert(a == c);               // Round-trip preservation
+ * F16 b = phi(a);             // upcast — always succeeds
+ * F4  c = phi.extract(b);     // throws std::invalid_argument if b ∉ φ(F4)
  * @endcode
- *
- * @see @ref CECCO::SubfieldOf for the concept constraining valid field relationships
- * @see @ref CECCO::FiniteFieldType for underlying field type requirements
- * @see @ref CECCO::Isomorphism for mappings between same-size fields
  */
 template <FiniteFieldType SUBFIELD, FiniteFieldType SUPERFIELD>
     requires SubfieldOf<SUPERFIELD, SUBFIELD>
 class Embedding {
    public:
-    /**
-     * @brief Default constructor - computes embedding using static cache
-     *
-     * Constructs a deterministic embedding φ: SUBFIELD → SUPERFIELD using generator-based mapping.
-     * The computation is performed once per template instantiation and cached statically
-     * for performance using std::once_flag.
-     *
-     * The embedding is constructed by:
-     * 1. Setting identity mappings: φ(0) = 0 and φ(1) = 1 (required for field homomorphism)
-     * 2. Computing power factor based on field sizes: factor = (|SUPERFIELD| - 1) / (|SUBFIELD| - 1)
-     * 3. Mapping generator powers: φ(g_sub^k) = g_super^(k * factor) for all elements
-     */
+    /// @brief Constructs the embedding (cached on first instantiation per template arguments)
     Embedding();
 
-    /**
-     * @brief Applies the embedding φ: SUBFIELD → SUPERFIELD to transform field element
-     * @param sub Source field element from SUBFIELD to be embedded
-     * @return Corresponding field element in SUPERFIELD such that φ(sub) ∈ SUPERFIELD
-     *
-     * Transforms a subfield element to its representation in the superfield while
-     * preserving structure.
-     *
-     * @note This operation cannot fail as every subfield element has a unique representation in the superfield
-     */
+    /// @brief Apply φ: SUBFIELD → SUPERFIELD
     constexpr SUPERFIELD operator()(const SUBFIELD& sub) const noexcept {
         return SUPERFIELD(embedding_map[sub.get_label()]);
     }
 
     /**
-     * @brief Extracts a subfield element from superfield
-     * @param super Superfield element to extract from
-     * @return Corresponding SUBFIELD element
-     * @throws std::invalid_argument if the superfield element is not in the embedded subfield
+     * @brief Reverse φ: find the unique `s ∈ SUBFIELD` with `φ(s) == super`
      *
-     * Performs reverse lookup with exception on failure. For Iso types, automatically
-     * searches through all component fields (MAIN and OTHERS) to find the one containing
-     * SUBFIELD as a subfield, using the same pattern as cross-field constructors.
+     * @throws std::invalid_argument if @p super is not in the image of φ
      *
-     * @note Time complexity:
-     *   - Regular fields: O(|SUBFIELD|) due to linear search through embedding map
-     *   - Iso types: O(k * |SUBFIELD|) where k is the number of components checked
+     * O(|SUBFIELD|) for regular fields; for `Iso` superfields, O(k · |SUBFIELD|) where k is
+     * the number of inspected components.
      */
     constexpr SUBFIELD extract(const SUPERFIELD& super) const;
 
    private:
     std::span<const size_t> embedding_map;
 
-    /**
-     * @brief Computes the embedding mapping vector
-     * @return Vector where embedding_map[i] = φ(SUBFIELD(i)) for i ∈ [0, |SUBFIELD|)
-     *
-     * Internal method that performs the actual embedding computation.
-     */
+    /// @brief Compute the table `embedding_map[i] = φ(SUBFIELD(i))`
     static std::vector<size_t> compute_embedding();
 };
 
@@ -2226,27 +1412,22 @@ std::vector<size_t> Embedding<SUBFIELD, SUPERFIELD>::compute_embedding() {
 namespace details {
 
 /**
- * @brief Helper struct for shared isomorphism storage to avoid cyclic dependencies
- * @tparam A First field type
- * @tparam B Second field type
+ * @brief Shared static storage of the forward and reverse maps for the isomorphism A ↔ B
  *
- * This struct provides shared static storage for both forward (A→B) and reverse (B→A)
- * isomorphisms. It ensures that computation happens only once and both directions
- * can access the precomputed mappings without circular dependencies.
+ * @tparam A First finite field
+ * @tparam B Second finite field (`Isomorphic<A, B>`)
+ *
+ * Lets both `Isomorphism<A, B>` and `Isomorphism<B, A>` share one cached pair of maps,
+ * computed exactly once per template instantiation.
  */
 template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
 struct IsomorphismPair {
     static std::once_flag computed_flag;
-    static std::vector<size_t> forward_iso;  // A -> B mapping
-    static std::vector<size_t> reverse_iso;  // B -> A mapping
+    static std::vector<size_t> forward_iso;  // A -> B
+    static std::vector<size_t> reverse_iso;  // B -> A
 
-    /**
-     * @brief Computes both forward and reverse isomorphisms if not already done
-     *
-     * This function performs the expensive isomorphism computation exactly once
-     * and populates both forward_iso and reverse_iso vectors.
-     */
+    /// @brief Compute and cache both maps on first call (no-op afterwards)
     static void compute_if_needed() {
         std::call_once(computed_flag, []() {
             const size_t size = A::get_size();
@@ -2329,60 +1510,32 @@ std::vector<size_t> details::IsomorphismPair<A, B>::reverse_iso;
 }  // namespace details
 
 /**
- * @class Isomorphism
- * @brief Explicit field isomorphism (functor) between isomorphic finite fields
+ * @brief Functor representing the field isomorphism φ: A → B between two same-size finite fields
  *
- * @tparam A Source field type (must satisfy FiniteFieldType concept)
- * @tparam B Target field type (must satisfy FiniteFieldType concept and Isomorphic<A, B>)
+ * @tparam A Source finite field
+ * @tparam B Target finite field (`Isomorphic<A, B>`)
  *
- * Constructs and represents an explicit field isomorphism φ: A → B between two isomorphic
- * finite fields. The isomorphism preserves field operations: φ(a + b) = φ(a) + φ(b) and
- * φ(ab) = φ(a)φ(b) for all a, b ∈ A. This enables seamless conversion of field elements
- * between different representations of the same abstract finite field (for example the fields stacked together in
- * an Iso).
- *
- * @section Mathematical_Foundation
- *
- * The isomorphism is constructed using a deterministic generator-based approach:
- * - Maps the additive and multiplicative identities: φ(0) = 0 and φ(1) = 1
- * - Maps field generators deterministically: φ(g_A) = g_B where g_A, g_B are generators of A, B
- * - Extends consistently via power mapping: φ(g_A^k) = g_B^k for all valid powers k
- * - Ensures field homomorphism properties: φ(a + b) = φ(a) + φ(b) and φ(ab) = φ(a)φ(b)
- *
- * @section Performance_Features
- *
- * - **Compile-time construction**: Marked constexpr for compile-time isomorphism computation
- * - **Cached computation**: Map is computed once during construction and reused
+ * The isomorphism is built deterministically: a Conway polynomial of the prime field gives
+ * generators α ∈ A and β ∈ B as common roots, and φ is extended linearly via a change-of-basis
+ * matrix over the prime subfield. The resulting table is stored in a single
+ * @ref details::IsomorphismPair shared between `Isomorphism<A, B>` and `Isomorphism<B, A>`.
+ * It is a field homomorphism: φ(a + b) = φ(a) + φ(b), φ(a · b) = φ(a) · φ(b), φ(0) = 0,
+ * φ(1) = 1.
  *
  * @section Usage_Example
  *
  * @code{.cpp}
- * using F2 = Fp<2>;
- * using F4 = Ext<F2, {1, 1, 1}>;
- * using F8 = Ext<F2, {1, 1, 0, 1}>;
+ * using F2    = Fp<2>;
+ * using F4    = Ext<F2, {1, 1, 1}>;
  * using F16_a = Ext<F4, {2, 1, 1}>;
  * using F16_b = Ext<F4, {1, 2, 1}>;
- * using F64_a = Ext<F8, {7, 1, 1}>;
- * using F64_b = Ext<F4, {1, 2, 0, 1}>;
  *
- * Isomorphism<F16_a, F16_b> phi_16;
- * auto phi_16_inv = phi_16.inverse();
+ * Isomorphism<F16_a, F16_b> phi;
  * F16_a a(4);
- * F16_b b = phi_16(a);
- * F16_a c = phi_16_inv(b);
+ * F16_b b = phi(a);
+ * F16_a c = phi.inverse()(b);
  * assert(a == c);
- * assert(F16_a(5) * a == phi_16_inv(phi_16(F16_a(5)) * phi_16(a)));
- *
- * Isomorphism<F64_a, F64_b> phi_64;
- * auto x = F64_a().randomize();
- * F64_b y = phi_64(x);
- * assert(x == phi_64.inverse()(y));
  * @endcode
- *
- * @see @ref CECCO::Isomorphic for the concept constraining valid field pairs
- * @see @ref CECCO::FiniteFieldType for underlying field type requirements
- * @see @ref CECCO::Ext for extension field construction
- * @see @ref CECCO::Fp for prime field implementation
  */
 template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
@@ -2390,73 +1543,20 @@ class Isomorphism {
     using PrimeField = Fp<A::get_p()>;
 
    public:
-    /**
-     * @brief Default constructor - computes isomorphism using local static cache
-     *
-     * Constructs a deterministic isomorphism φ: A → B using generator-based mapping.
-     * The computation is performed once per template instantiation and cached locally
-     * for performance using std::once_flag/lazy initialization.
-     *
-     * The isomorphism is constructed by:
-     * 1. Setting identity mappings: φ(0) = 0 and φ(1) = 1 (required for field homomorphism)
-     * 2. Mapping generators: φ(g_A) = g_B where g_A, g_B are field generators
-     * 3. Extending via powers: φ(g_A^k) = g_B^k for all multiplicative group elements
-     * 4. Ensuring consistent mapping for all field elements
-     */
+    /// @brief Construct (or retrieve from cache) the isomorphism map A → B
     Isomorphism();
 
     /**
-     * @brief Direct constructor from precomputed mapping vector
-     * @param iso Precomputed mapping vector where iso[i] = φ(A(i))
+     * @brief Construct from a precomputed mapping table (`iso[i] = φ(A(i))`)
      *
-     * Constructs isomorphism directly from a mapping vector. This constructor
-     * is primarily used internally and assumes the provided mapping is a valid
-     * field isomorphism (preserves addition and multiplication).
-     *
-     * @warning No validation is performed on the mapping - incorrect mappings
-     *          will result in undefined behavior
+     * @warning No validation — incorrect input gives undefined behaviour. Internal use.
      */
     constexpr Isomorphism(const std::vector<size_t>& iso) : iso(iso) {}
 
-    /**
-     * @brief Applies the isomorphism φ: A → B to transform field element
-     * @param a Source field element from A to be transformed
-     * @return Corresponding field element in B such that φ(a) ∈ B
-     *
-     * Transforms a field element from source field A to target field B while
-     * preserving all field operations. The mapping satisfies:
-     * - φ(a + b) = φ(a) + φ(b) (additivity)
-     * - φ(a * b) = φ(a) * φ(b) (multiplicativity)
-     * - φ(0_A) = 0_B and φ(1_A) = 1_B (identity preservation)
-     */
+    /// @brief Apply φ to @p a
     constexpr B operator()(const A& a) const noexcept { return B(iso[a.get_label()]); }
 
-    /**
-     * @brief Computes the inverse isomorphism φ⁻¹: B → A
-     *
-     * @return Isomorphism<B, A> The inverse isomorphism mapping elements from B back to A
-     *
-     * Constructs the inverse isomorphism by reversing the mapping table. For every element
-     * a ∈ A with φ(a) = b, the inverse satisfies φ⁻¹(b) = a. This ensures that
-     * φ⁻¹(φ(a)) = a and φ(φ⁻¹(b)) = b for all valid elements.
-     *
-     * @section Usage_Example
-     *
-     * @code{.cpp}
-     * using F2 = Fp<2>;
-     * using F4 = Ext<F2, {1, 1, 1}>;
-     * using F16_a = Ext<F4, {2, 1, 1}>;
-     * using F16_b = Ext<F4, {1, 2, 1}>;
-     *
-     * Isomorphism<F16_a, F16_b> phi;
-     * auto phi_inv = phi.inverse();
-     *
-     * F16_1 a(5);
-     * F16_2 b = phi(a);
-     * F16_1 c = phi_inv(b);
-     * assert(a == c);  // Round-trip preservation
-     * @endcode
-     */
+    /// @brief Inverse isomorphism φ⁻¹: B → A
     constexpr Isomorphism<B, A> inverse() const;
 
    private:
@@ -2500,38 +1600,23 @@ constexpr Isomorphism<B, A> Isomorphism<A, B>::inverse() const {
 }
 
 /**
- * @class Fp
  * @brief Prime field 𝔽_p ≅ ℤ/pℤ
  *
- * @tparam p Prime modulus (must be prime, 2 ≤ p ≤ 65521 — the largest prime fitting in uint16_t)
+ * @tparam p Prime modulus, 2 ≤ p ≤ 65521 (largest prime fitting in `uint16_t`)
  *
- * Implements finite fields of prime order p, consisting of integers {0, 1, 2, ..., p-1}
- * with arithmetic performed modulo p. These are the building blocks for all finite fields.
+ * Elements are stored as `label_t` integers in {0, 1, …, p − 1} (width is the smallest unsigned
+ * type that fits p). Arithmetic is direct mod-p by default; define @ref CECCO_USE_LUTS_FOR_FP
+ * to switch to LUTs (rarely advisable). The primality of @p p is enforced by `static_assert`.
  *
  * @section Usage_Example
  *
  * @code{.cpp}
- * // Define common prime fields
- * using F2 = Fp<2>;  // Binary field {0, 1}
- * using F3 = Fp<3>;  // Ternary field {0, 1, 2}
- * using F5 = Fp<5>;  // Quinary field {0, 1, 2, 3, 4}
- *
- * // Basic arithmetic
+ * using F5 = Fp<5>;
  * F5 a(3), b(4);
- * auto c = a + b;  // c = 2 (since 3 + 4 = 7 ≡ 2 (mod 5))
- * auto d = a * b;  // d = 2 (since 3 * 4 = 12 ≡ 2 (mod 5))
- * auto e = a / b;  // e = 2 (since 3 / 4 = 3 * 4⁻¹ = 3 * 4 = 2)
- * F5 f = 3;
- * auto h = f * e;  // e = 1 (since 3 * 2 = 6 = 1)
- *
- * // Element properties
- * size_t order = a.get_multiplicative_order();  // Order of 3 in F5 \ {0}
+ * auto c = a + b;                               // 2 (7 mod 5)
+ * auto d = a / b;                               // 3 · 4⁻¹ = 3 · 4 = 2 in 𝔽₅
+ * size_t ord = a.get_multiplicative_order();    // order of 3 in 𝔽₅*
  * @endcode
- *
- * @section Implementation_Details
- *
- * - **Label Storage**: Elements stored as integers of type label_t<p> (automatically chosen based on field size)
- * - **Type Safety**: Template parameter ensures compile-time prime checking of template parameter p
  */
 template <uint16_t p>
 class Fp : public details::Field<Fp<p>> {
@@ -2540,88 +1625,36 @@ class Fp : public details::Field<Fp<p>> {
    public:
     using label_t = ::CECCO::label_t<p>;
 
-    /* constructors */
-
-    /**
-     * @brief Default constructor - creates zero element
-     *
-     * Initializes this prime field element to 0 (additive identity).
-     */
+    /// @brief Default constructor: 0
     constexpr Fp() noexcept : label(0) {}
 
-    /**
-     * @brief Construct prime field element from integer
-     * @param l Integer value to convert to prime field element
-     *
-     * Creates prime field element by reducing l modulo p.
-     * Automatically handles negative values and values ≥ p.
-     */
+    /// @brief Construct from `int`, reducing modulo p (handles negative values)
     constexpr Fp(int l);
 
-    /**
-     * @brief Copy constructor
-     */
     constexpr Fp(const Fp& other) noexcept = default;
-
-    /**
-     * @brief Move constructor
-     */
     constexpr Fp(Fp&& other) noexcept = default;
 
     /**
-     * @brief Cross-field constructor for extracting (target) prime field elements from (source) extension fields
-     * @tparam S Base field type of the source extension field
-     * @tparam ext_modulus Modulus polynomial of the source extension field
-     * @param other Source extension field element to extract from
-     * @throws std::invalid_argument if extension field element is not in prime field
+     * @brief Extract a prime-field element from an extension field (downcast)
      *
-     * This constructor extracts prime field elements from any extension field over the same
-     * characteristic using the @ref details::largest_common_subfield_t algorithm. Since prime
-     * fields are minimal, the largest common subfield is always the prime field itself.
+     * @tparam S Base of the source extension field
+     * @tparam ext_modulus Modulus of the source extension field
+     * @throws std::invalid_argument if @p other is not in the prime subfield
      *
-     * The algorithm uses cached subfield embeddings for mathematically correct extraction:
-     * 1. **Same characteristic check**: Verifies source and target have same characteristic
-     * 2. **Embedding lookup**: Uses cached embedding map Fp&lt;p&gt; → Ext&lt;S, ext_modulus&gt;
-     * 3. **Reverse search**: Finds extension field element in embedding (throws if not found)
-     * 4. **Index extraction**: Returns prime field element corresponding to found position
-     *
-     * This approach enables extractions from any extension field path over the same prime field.
-     *
-     * @section Usage_Examples
-     *
-     * @code{.cpp}
-     * using F2 = Fp<2>;
-     * using F4 = Ext<F2, {1, 1, 1}>;   // F2 → F4
-     * using F16 = Ext<F4, {2, 2, 1}>;  // F2 → F4 → F16
-     *
-     * // Successful cases
-     * F2 a(1);
-     * F4 b(a);
-     * F16 c(b);
-     * auto d = F2(b);
-     * auto e = F2(c);
-     *
-     * // Error cases
-     * F4 f(2);        // F4 element not in F2
-     * auto g = F2(f); // throws
-     * @endcode
-     *
-     * @note This constructor uses the same algorithm as @ref Ext and @ref Iso cross-field
-     * constructors, but simplified since prime fields are always the largest common subfield
-     * @see @ref details::largest_common_subfield_t
-     * @see Enhanced cross-field constructors in @ref Ext and @ref Iso
+     * Uses a cached @ref CECCO::Embedding from `Fp<p>` to `Ext<S, ext_modulus, mode>`; since
+     * 𝔽_p is the minimal subfield of any extension over it, this is the canonical reverse
+     * lookup. Source and target must share the characteristic (enforced by `static_assert`).
      */
     template <FiniteFieldType S, MOD ext_modulus, LutMode mode>
     Fp(const Ext<S, ext_modulus, mode>& other);
 
     /**
-     * @brief Construct prime field element from Iso (stack of isomorphic fields)
-     * @tparam MAIN Main field type of the stack of isomorphic fields
-     * @tparam OTHERS Alternative field representations in the stack of isomorphic fields
-     * @param other Iso object to convert from
-     * @throws std::invalid_argument if element is not in prime subfield
+     * @brief Extract a prime-field element from an `Iso` containing this prime subfield
      *
-     * Extracts prime field element from any component of the Iso that contains this prime field.
+     * @throws std::invalid_argument if no `Iso` component contains an element in 𝔽_p
+     *
+     * Tries the MAIN representation first, then each of OTHERS, until one yields a successful
+     * downcast to `Fp<p>`.
      */
     template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
     Fp(const Iso<MAIN, OTHERS...>& other)
@@ -2629,207 +1662,55 @@ class Fp : public details::Field<Fp<p>> {
 
     ~Fp() noexcept = default;
 
-    /* assignment operators */
-
-    /**
-     * @brief Assign integer value to prime field element
-     * @param l Integer value to assign
-     * @return Reference to this element after assignment
-     *
-     * Assigns the value l (mod p) to this prime field element.
-     * Automatically reduces l modulo p.
-     */
+    /// @brief Assign `int`, reducing modulo p
     constexpr Fp& operator=(int l) noexcept;
 
-    /**
-     * @brief Copy assignment operator
-     */
     constexpr Fp& operator=(const Fp& rhs) noexcept = default;
-
-    /**
-     * @brief Move assignment operator
-     */
     constexpr Fp& operator=(Fp&& rhs) noexcept = default;
 
-    /**
-     * @brief Assign prime field element by projection from superfield
-     * @tparam S Base field type of the superfield
-     * @tparam ext_modulus Irreducible modulus polynomial defining the superfield
-     * @param other Superfield element to project to prime field
-     * @return Reference to this prime field element
-     * @throws std::invalid_argument if the two fields are not in the same tower of fields (tower extension)
-     *
-     * Performs field projection/restriction assignment from an extension field
-     * Ext<S, ext_modulus> to the prime field 𝔽_p. This operator assigns the prime
-     * field component extracted from the extension field element.
-     *
-     * The operation is identical to the corresponding constructor, handling:
-     * - **Direct extension**: When S ≡ 𝔽_p, extracts element from 𝔽_p → Ext<𝔽_p, modulus>
-     *   by verifying the element lies in the prime subfield
-     * - **Tower extension**: When S ≢ 𝔽_p, handles field towers like
-     *   𝔽_p → Ext<𝔽_p, mod₁> → Ext<Ext<𝔽_p, mod₁>, mod₂> by converting to vector
-     *   representation over Fp and extracting the constant term
-     *
-     * @note Implementation uses copy-and-swap idiom for exception safety,
-     *       ensuring the object remains unchanged if projection fails
-     *
-     * @section Usage_Example
-     *
-     * @code{.cpp}
-     * using F2 = Fp<2>;
-     * using F4 = Ext<F2, {1, 1, 1}>;
-     * using F16 = Ext<F4, {2, 1, 1}>;
-     *
-     * // Successful cases
-     * F16 a = F4(2);
-     * F16 b = 1;
-     * F4 c = a;  // OK, b generated from F4 element
-     * F4 d = b;  // OK, 1 is in every field of the tower (even F2)
-     *
-     * // Error cases
-     * F16 e = 13;
-     * F4 g = e;  // Not OK (throws), e is not in F4...
-     * F2 h(e);   // ... and certainly not in F2 (throws as well)
-     * @endcode
-     */
+    /// @brief Project an extension-field element to 𝔽_p (copy-and-swap; same semantics as the constructor)
     template <FiniteFieldType S, MOD ext_modulus, LutMode mode>
     Fp& operator=(const Ext<S, ext_modulus, mode>& other);
 
-    /**
-     * @brief Cross-field assignment from Iso type
-     *
-     * Performs field conversion assignment from an Iso field with the same characteristic.
-     * Uses copy-and-swap idiom leveraging enhanced cross-field constructors for exception safety.
-     *
-     * @tparam MAIN Main field type of the Iso (must have same characteristic as this Fp)
-     * @tparam OTHERS Additional isomorphic field types in the Iso group
-     * @param other Source Iso element to assign from
-     * @return Reference to this Fp element after assignment
-     * @throws std::invalid_argument if conversion not possible
-     */
+    /// @brief Project an `Iso` element to 𝔽_p (copy-and-swap; same semantics as the constructor)
     template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
         requires(MAIN::get_characteristic() == p)
     Fp& operator=(const Iso<MAIN, OTHERS...>& other);
 
-    /* comparison */
     constexpr bool operator==(const Fp& rhs) const noexcept { return label == rhs.get_label(); }
 
-    /* operations */
-
-    /**
-     * @brief Additive inverse for lvalue references
-     * @return Additive inverse of this element (-this mod p)
-     *
-     * Returns the additive inverse such that this + (-this) ≡ 0 (mod p).
-     * Creates a new element with the negated value.
-     */
+    /// @brief Additive inverse (lvalue): returns a new element with `-label mod p`
     constexpr Fp operator-() const& noexcept;
-
-    /**
-     * @brief Additive inverse for rvalue references
-     * @return Reference to this element after in-place negation
-     *
-     * Optimized version for temporary objects: negates value in-place
-     * and returns reference to avoid unnecessary copy.
-     */
+    /// @brief Additive inverse (rvalue): in place
     constexpr Fp& operator-() && noexcept;
 
-    /* operational assignments */
-
-    /**
-     * @brief Add prime field element to this element
-     * @param rhs Right-hand side element to add
-     * @return Reference to this element after addition
-     *
-     * Performs in-place addition: this = (this + rhs) mod p
-     */
+    /// @brief `*this = (label + rhs.label) mod p`
     constexpr Fp& operator+=(const Fp& rhs) noexcept;
-
-    /**
-     * @brief Subtract prime field element from this element
-     * @param rhs Right-hand side element to subtract
-     * @return Reference to this element after subtraction
-     *
-     * Performs in-place subtraction: this = (this - rhs) mod p
-     */
+    /// @brief `*this = (label − rhs.label) mod p`
     constexpr Fp& operator-=(const Fp& rhs) noexcept;
-
-    /**
-     * @brief Multiply this element by another prime field element
-     * @param rhs Right-hand side element to multiply by
-     * @return Reference to this element after multiplication
-     *
-     * Performs in-place multiplication: this = (this * rhs) mod p
-     */
+    /// @brief `*this = (label · rhs.label) mod p`
     constexpr Fp& operator*=(const Fp& rhs) noexcept;
-
-    /**
-     * @brief Multiply this element by a scalar
-     * @param s Scalar value to multiply by
-     * @return Reference to this element after multiplication
-     *
-     * Performs in-place scalar multiplication: this = (this * s) mod p
-     */
+    /// @brief `*this = (label · s) mod p` (repeated addition)
     constexpr Fp& operator*=(int s) noexcept;
-
-    /**
-     * @brief Divide this element by another prime field element
-     * @param rhs Right-hand side element to divide by
-     * @return Reference to this element after division
-     * @throws std::invalid_argument if rhs is zero (division by zero)
-     *
-     * Performs in-place division: this = (this * rhs^(-1)) mod p
-     * Uses modular multiplicative inverse of rhs.
-     */
+    /// @brief `*this = (label · rhs.label⁻¹) mod p`; throws `std::invalid_argument` if rhs is zero
     Fp& operator/=(const Fp& rhs);
 
-    /* randomization */
-
-    /**
-     * @brief Set this element to a random value
-     * @return Reference to this element after randomization
-     *
-     * Generates a random element from 𝔽_p by setting a uniformly
-     * random value in the range [0, p-1].
-     */
+    /// @brief Uniform random element in {0, …, p − 1}
     Fp& randomize() noexcept;
-
-    /**
-     * @brief Set this element to a random value different from current
-     * @return Reference to this element after randomization
-     *
-     * Generates a random element from 𝔽_p that is guaranteed to be
-     * different from the current value. Useful for testing algorithms.
-     */
+    /// @brief Like @ref randomize but guaranteed to differ from the current value
     Fp& randomize_force_change() noexcept;
 
-    /* getters */
-
     /**
-     * @brief Get multiplicative order of this field element
-     * @return Smallest positive integer k such that this^k = 1
-     * @throws std::invalid_argument if this element is zero
+     * @brief Multiplicative order in 𝔽_p*
      *
-     * Computes the multiplicative order in the group 𝔽_p*.
-     * For the zero element, multiplicative order is undefined.
+     * @throws std::invalid_argument if `*this` is zero
      */
     size_t get_multiplicative_order() const;
 
-    /**
-     * @brief Get additive order of this field element
-     * @return Characteristic p (order of additive group)
-     *
-     * In prime fields, every non-zero element has additive order p,
-     * and zero has additive order 1.
-     */
+    /// @brief Additive order: 1 for zero, p otherwise
     size_t get_additive_order() const;
 
-    /**
-     * @brief Get human-readable information about this prime field
-     * @return String describing the field
-     *
-     * Returns formatted string with field size.
-     */
+    /// @brief Human-readable description: `"prime field with p elements"`
     static std::string get_info() noexcept {
         static const std::string info = "prime field with " + std::to_string(p) + " elements";
         return info;
@@ -2837,103 +1718,52 @@ class Fp : public details::Field<Fp<p>> {
 
     static constexpr size_t get_characteristic() noexcept { return p; }
 
+    /// @brief Underlying integer label in {0, …, p − 1}
     constexpr size_t get_label() const noexcept { return label; }
 
-    /// @brief Get a generator (primitive root) of the multiplicative group F_p*
-    /// @return Field element whose multiplicative order is p - 1
-    ///
-    /// @see Gen for the precomputed underlying label
+    /// @brief Generator (primitive root) of 𝔽_p*; precomputed label is @ref Gen
     static constexpr Fp get_generator() noexcept { return Fp(Gen); }
 
     static constexpr size_t get_p() noexcept { return p; }
-
     static constexpr size_t get_m() noexcept { return 1; }
-
     static constexpr size_t get_q() noexcept { return p; }
-
     static constexpr size_t get_size() noexcept { return p; }
 
     /**
-     * @brief Check if this field interface is constexpr-ready for compile-time usage
-     * @return Always true for prime fields
+     * @brief Always true for prime fields
      *
-     * Prime fields always provide a constexpr-compatible interface to extension fields,
-     * regardless of internal implementation details. Whether Fp uses direct modular arithmetic
-     * (default) or actual lookup tables (CECCO_USE_LUTS_FOR_FP), the interface functions like
-     * lut_add(), lut_mul(), lut_neg() are always constexpr and can be used by CompileTime
-     * extension fields during their LUT generation.
-     *
-     * @see LutMode for extension field LUT generation modes
-     * @see Ext::is_constexpr_ready() for extension field constexpr-readiness checking
+     * Prime fields' arithmetic interface is constexpr regardless of @ref CECCO_USE_LUTS_FOR_FP,
+     * so a `CompileTime` @ref CECCO::Ext can always be built on top.
      */
     static constexpr bool is_constexpr_ready() noexcept { return true; }
 
-    /**
-     * @brief Display lookup tables for debugging
-     *
-     * Prints the internal lookup tables (addition, multiplication, etc.)
-     * to standard output for debugging and verification purposes.
-     */
+    /// @brief Print all lookup tables to `std::cout` (debugging aid)
     static void show_tables() noexcept;
 
-    /**
-     * @brief Check if element has positive sign
-     * @return Always true (finite fields have no natural ordering)
-     */
+    /// @brief Always true (finite fields are unordered)
     constexpr bool has_positive_sign() const noexcept { return true; }
-
-    /**
-     * @brief Check if this element is zero
-     * @return true if this is the additive identity (0)
-     */
+    /// @brief True iff this is the additive identity
     constexpr bool is_zero() const noexcept { return label == 0; }
 
 #ifdef CECCO_ERASURE_SUPPORT
     /**
-     * @brief Erases this element, i.e., sets it to an "outside of field" marker
-     * @return Reference to this element after erasing
+     * @brief Mark this element as erased (encoded as `label == max(label_t)`)
      *
-     * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased
-     * field elements is the responsibility of the user!
+     * @warning Erased elements must not participate in field arithmetic — see
+     * @ref CECCO_ERASURE_SUPPORT.
      */
     constexpr Fp& erase();
-
-    /**
-     * @brief Un-erases this element, i.e., sets it to an actual field element (the additive neutral 0)
-     * @return Reference to this element after un-erasing
-     */
+    /// @brief Clear the erasure flag, resetting to the additive identity
     constexpr Fp& unerase();
-
-    /**
-     * @brief Checks whether this element is erased
-     * @return true if this element is erased, false otherwise (meaning it actually is a field element)
-     */
+    /// @brief Test whether this element is currently erased
     constexpr bool is_erased() const noexcept { return label == std::numeric_limits<label_t>::max(); }
 #endif
 
     /**
-     * @brief Compile-time synchronization point for staged template instantiation
-     * @return true when all LUTs for this field are computed
+     * @brief Compile-time signal that all LUTs are constructed
      *
-     * This function serves as a compile-time synchronization mechanism for staged template
-     * instantiation in field towers. It returns true when all lookup tables (LUTs) have been computed and are ready
-     * for use.
-     *
-     * @section Purpose
-     *
-     * The ready() function is designed to prevent compiler recursion depth issues that
-     * can occur when constructing complex field towers. By forcing completion of base
-     * field LUT calculations before extension fields begin their own computations, it
-     * ensures a controlled, staged instantiation process.
-     *
-     * @section Usage_in_Field_Towers
-     *
-     * Extension fields should check their base field's readiness before starting their
-     * own LUT computations:
-     *
-     * @see luts_ready
-     * @see Ext::ready()
+     * Used by extension fields built on top of 𝔽_p to defer their own LUT computation until
+     * the base field is fully instantiated, avoiding compiler recursion-depth issues.
      */
     static constexpr bool ready() {
 #ifdef CECCO_USE_LUTS_FOR_FP
@@ -3307,15 +2137,7 @@ constexpr Fp<p>& Fp<p>::unerase() {
 }
 #endif
 
-/**
- * @brief Output stream operator for prime field elements
- * @tparam p Prime modulus
- * @param os Output stream
- * @param e Prime field element to output
- * @return Reference to the output stream
- *
- * Outputs the integer label of the field element.
- */
+/// @brief Print as the integer label (or @ref ERASURE_MARKER if erased)
 template <uint16_t p>
 std::ostream& operator<<(std::ostream& os, const Fp<p>& e) noexcept {
 #ifdef CECCO_ERASURE_SUPPORT
@@ -3329,78 +2151,38 @@ std::ostream& operator<<(std::ostream& os, const Fp<p>& e) noexcept {
 }
 
 /**
- * @class Ext
- * @brief Extension field 𝔽_{q^m} constructed via irreducible polynomial
+ * @brief Extension field 𝔽_{q^m} ≅ B[x]/(f(x)), constructed from a base field and an
+ *        irreducible monic modulus polynomial
  *
- * @tparam B Base field type (must satisfy FiniteFieldType concept, either Fp, Ext or Iso)
- * @tparam modulus Irreducible monic polynomial (of degree at least two) coefficients as initializer list, constant
- * coefficient first
- * @tparam mode Lookup table generation mode (LutMode::Runtime or LutMode::CompileTime, defaults to Runtime)
+ * @tparam B Base field, either @ref CECCO::Fp, another @ref CECCO::Ext, or @ref CECCO::Iso
+ * @tparam modulus Coefficients of f(x) low-to-high (constant term first); leading coefficient
+ *                 must be 1, degree m ≥ 2; f(x) must be irreducible over B
+ * @tparam mode @ref CECCO::LutMode::RunTime (default) or @ref CECCO::LutMode::CompileTime
  *
- * Constructs finite extension fields of the form 𝔽_{q^m} ≅ B[x]/(f(s)) where:
- * - B is the base field with q = |B| elements (q either a prime p or a prime power p^m)
- * - The resulting field has Q = q^m elements
+ * The result has q = |B| and Q = q^m elements; elements are stored as `label_t` integers in
+ * {0, …, Q − 1}. Towers are built by re-using `Ext` as the base. Pick `CompileTime` for small
+ * fields (zero startup, larger binary) or `RunTime` for large fields (faster compilation,
+ * lazy initialisation on first use). LUT modes mix freely across a tower; a `CompileTime`
+ * extension can only be built when its base satisfies @ref CECCO::Ext::is_constexpr_ready.
  *
- * @section Irreducible_Polynomial_Format
- *
- * The modulus template parameter specifies f(x) = a_0 + a_1 x + ... + a_m x^m:
- * - **Coefficients**: Listed from a_0 to a_m (constant coefficient first)
- * - **Degree**: deg(f(x)) = m >= 2
- * - **Monic Requirement**: a_m = 1 (leading coefficient must be 1)
- * - **Irreducibility**: Must be irreducible over the base field B
- *
- * @warning The modulus polynomial must be monic (leading coefficient = 1) and irreducible over the base field.
- * Non-irreducible polynomials will cause errors during table generation with a message indicating that a
- * reducible polynomial was chosen. Irreducible polynomials can be found using @ref find_irreducible().
- *
- * @section Implementation_Details
- *
- * - **Label Storage**: Elements stored as integers of type label_t<p> (automatically chosen based on field size)
- * - **Type Safety**: Template parameter ensures compile-time checking that B is in fact a finite field (prime or
- * extended)
- * - **Vector Interface**: Seamless conversion to/from vector representations (vectors over subfields)
+ * @warning A non-irreducible @p modulus is detected during LUT construction and surfaces as
+ * `std::invalid_argument` at runtime, or as a constexpr-evaluation error at compile time when
+ * `mode == LutMode::CompileTime`. Use @ref CECCO::find_irreducible to obtain a valid one.
  *
  * @section Usage_Example
  *
  * @code{.cpp}
- * using F3 = Fp<3>;
- * using F9 = Ext<F3, {2, 2, 1}>;
+ * using F3  = Fp<3>;
+ * using F9  = Ext<F3, {2, 2, 1}>;            // 𝔽₃[x]/(2 + 2x + x²)
+ * using F27 = Ext<F9, {1, 2, 1}>;            // 3-level tower 𝔽₃ ⊂ 𝔽₉ ⊂ 𝔽₂₇
  *
- * F9 a(5), b(7);                                // Elements with labels 5 and 7
- * F9 c = a * b + F9(1);                         // Field arithmetic
- * Vector<F3> vec = a.as_vector<F3>();           // Polynomial coefficients
- * size_t order = a.get_multiplicative_order();  // Element order
+ * F9 a(5), b(7);
+ * auto c = a * b + F9(1);                    // arithmetic
+ * Vector<F3> coeffs = a.as_vector<F3>();     // coefficient vector over the prime subfield
+ * size_t ord = a.get_multiplicative_order();
  *
- * // Tower construction
- * using F27 = Ext<F9, {1, 2, 1}>;            // F9[y]/(1 + 2y + y²)
- * F27 x(100);                                // Element in 3-level tower
- * Vector<F9> base_vec = x.as_vector<F9>();   // Extract to vector over intermediate extension field
- * Vector<F3> prime_vec = x.as_vector<F3>();  // Extract to vector over prime field
- * @endcode
- *
- * @section Field_Towers_and_LUT_modes
- *
- * This implementation supports field towers through recursive construction with configurable LUT modes:
- *
- * **Runtime Mode**: LUTs are computed on first access. This is the default.
- *
- * **CompileTime Mode**: LUTs are computed during compilation and embedded in the executable.
- * No initialization required - field operations are immediately available.
- *
- * @warning Field constructions with CompileTime LUT calculation are only possible from base fields with CompileTime
- * LUT calculation.
- *
- * @code{.cpp}
- * // Tower: F2 ⊂ F4 ⊂ F16 ⊂ F256 with mixed LUT modes
- * using F2 = Fp<2>;
- * using F4 = Ext<F2, {1, 1, 1}, LutMode::CompileTime>;  // F2[X]/(X² + X + 1) - CompileTime
- * using F16 = Ext<F4, {2, 1, 1}, LutMode::RunTime>;     // F4[Y]/(Y² + Y + 2) - RunTime (explicit)
- * using F256 = Ext<F16, {2, 5, 1}>;                     // F16[Z]/(Z² + 5Z + 2) - Runtime (default)
- *
- * @section Performance considerations for field towers:
- * - Small fields (F2, F4, F8, F16, F64, F127): CompileTime mode recommended
- * - Large fields (F256, F512, ...): Runtime mode for faster compilation
- * - Mixed modes work seamlessly together in the same tower
+ * F27 x(100);
+ * Vector<F3> v = x.as_vector<F3>();          // descend straight to the prime subfield
  * @endcode
  */
 template <FiniteFieldType B, MOD modulus, LutMode mode = LutMode::RunTime>
@@ -3420,511 +2202,207 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
     using label_t = ::CECCO::label_t<Q>;
     using BASE_FIELD = B;
 
-    /* constructors */
-
-    /**
-     * @brief Default constructor - creates zero element
-     *
-     * Initializes this extension field element to 0 (additive identity).
-     */
+    /// @brief Default constructor: 0
     constexpr Ext() noexcept : label{0} {}
 
-    /**
-     * @brief Construct extension field element from integer label
-     * @param l Integer label to convert to extension field element
-     * @throws std::invalid_argument l is not in {0, ..., Q-1}
-     *
-     * Creates extension field element, throws in case of l not in {0, ..., Q-1}.
-     */
+    /// @brief Construct from an integer label `l ∈ {0, …, Q − 1}`; throws `std::invalid_argument` otherwise
     Ext(int l);
 
-    /**
-     * @brief Copy constructor
-     */
     constexpr Ext(const Ext& other) noexcept = default;
-
-    /**
-     * @brief Move constructor
-     */
     constexpr Ext(Ext&& other) noexcept = default;
 
-    /**
-     * @brief Construct extension field element from base field element
-     * @param other Base field element to embed in extension field
-     *
-     * Embeds base field element into extension field as constant polynomial.
-     * This creates the natural field embedding B → Ext<B, modulus>.
-     */
+    /// @brief Embed a base-field element via the natural embedding B → Ext<B, modulus, mode>
     Ext(const B& other) noexcept;
 
     /**
-     * @brief Cross-field constructor for compatible extension fields
-     * @tparam S Base field type of the source extension field
-     * @tparam ext_modulus Modulus polynomial of the source extension field
-     * @param other Extension field element to convert
-     * @throws std::invalid_argument if conversion is not valid
+     * @brief Cross-field conversion from another extension field of the same characteristic
      *
-     * This constructor handles all cross-field conversions between extension fields:
-     * - **Isomorphic fields**: Direct conversion using cached isomorphisms
-     * - **Subfield embedding (upcast)**: Source ⊆ Target via cached embedding maps (never throws)
-     * - **Superfield extraction (downcast)**: Target ⊆ Source via reverse lookup (may throw)
-     * - **Different towers**: Conversion via @ref details::largest_common_subfield_t
+     * @tparam S Base of the source extension field
+     * @tparam ext_modulus Modulus of the source extension field
+     * @throws std::invalid_argument on a downcast whose source value lies outside the target
      *
-     * The algorithm automatically selects the most appropriate conversion method:
-     * 1. **Same field**: Handled by copy constructor
-     * 2. **Isomorphic**: Uses deterministic cached isomorphism
-     * 3. **Tower relationship**: Direct embedding/extraction
-     * 4. **Cross-tower**: Two-step conversion via largest common subfield
-     *
-     * @section Usage_Examples
-     * @code{.cpp}
-     * using F2 = Fp<2>;
-     * using F4 = Ext<F2, {1, 1, 1}>;
-     * using F16_a = Ext<F2, {1, 0, 0, 1, 1}>;
-     * using F16_b = Ext<F4, {2, 2, 1}>;
-     *
-     * F2 a(1);
-     * F4 b(a);     // Upcast: F2 → F4 (always succeeds)
-     * F16_a c(b);  // Cross-tower: F4 → F16_a via F2 (largest common subfield)
-     * F16_b d(c);  // Cross-tower: F16_a → F16_b via F2
-     * F4 e(d);     // Downcast: F16_b → F4 (may throw if d not in F4)
-     * @endcode
+     * Picks the cheapest available path: direct copy if the type matches; cached @ref Isomorphism
+     * for isomorphic fields; cached @ref Embedding for tower relationships (upcast cannot fail,
+     * downcast may); two-step conversion via @ref details::largest_common_subfield_t for
+     * unrelated towers.
      */
     template <FiniteFieldType S, MOD ext_modulus, LutMode ext_mode>
         requires(!std::is_same_v<Ext<B, modulus, mode>, Ext<S, ext_modulus, ext_mode>>)
     Ext(const Ext<S, ext_modulus, ext_mode>& other);
 
     /**
-     * @brief Construct extension field element from coefficient vector over subfield
-     * @tparam T Coefficient field type
-     * @param v Vector of coefficients over the subfield
-     * @throws std::invalid_argument if vector dimension is incompatible or coefficients produce invalid label
+     * @brief Construct from a coefficient vector over a subfield
      *
-     * Vector v is interpreted as base-|T| representation: label = v[0] + v[1]×|T| + v[2]×|T|² + ...
-     * Uses optimized coefficient table lookup for O(degree) performance instead of O(field_size) search.
+     * @tparam T Subfield type
+     * @throws std::invalid_argument if `v.length()` does not match the extension degree of this field over T
      *
-     * @note If at least one of the components of v has the erasure flag then the resulting element of Ext will have
-     * the erasure flag as well.
+     * Reads @p v as base-|T| coefficients (low-to-high). With @ref CECCO_ERASURE_SUPPORT, an
+     * erased component in @p v produces an erased element here.
      */
     template <FiniteFieldType T>
     Ext(const Vector<T>& v);
 
     /**
-     * @brief Cross-field constructor from Iso using largest common subfield
-     * @tparam MAIN Main field type of the Iso stack
-     * @tparam OTHERS Alternative field representations in the Iso stack
-     * @param iso Iso object to convert from
-     * @throws std::invalid_argument if conversion is not valid
+     * @brief Cross-field conversion from an `Iso` of the same characteristic
      *
-     * This constructor handles all cross-field conversions from Iso to Ext using the
-     * @ref details::largest_common_subfield_t algorithm.
+     * Delegates to the `Ext(other.main())` overload, letting the Ext-to-Ext logic choose the
+     * conversion path; works equally for downcasts, upcasts, and cross-tower bridges.
      *
-     * **Simple Delegation Approach:**
-     *
-     * **Delegation Process:**
-     * 1. **Extract MAIN**: Get `iso.main()` from the source Iso
-     * 2. **Delegate**: Use `Ext(iso.main())` constructor
-     * 3. **Ext constructor logic decides**: The Ext constructor determines optimal conversion path
-     *
-     * @section Usage_Examples
-     *
-     * @code{.cpp}
-     * using F2 = Fp<2>;
-     * using F4_a = Ext<F2, {1, 1, 1}>;        // F2 → F4 (path 1)
-     * using F4_b = Ext<F2, {1, 0, 1}>;        // F2 → F4 (path 2)
-     * using F16 = Ext<F4_a, {2, 2, 1}>;       // F2 → F4_a → F16
-     * using F8 = Ext<F2, {1, 1, 0, 1}>;       // F2 → F8 (different branch)
-     * using F4_iso = Iso<F4_a, F4_b>;
-     *
-     * F4_iso iso_elem(F2(1));
-     * F4_a result_a(iso_elem);     // Direct: MAIN matches Ext
-     * F4_b result_b(iso_elem);     // Isomorphic: F4_a → F4_b via enhanced logic
-     * F16 result_super(iso_elem);  // Upcast: F4_a embedded in F16 via enhanced logic
-     * F8 result_cross(iso_elem);   // Cross-field: F4_a → F8 via F2 common subfield
-     * @endcode
-     *
-     * @see @ref details::largest_common_subfield_t
-     * @see Cross-field constructors in @ref Ext and @ref Iso
+     * @throws std::invalid_argument if no conversion path exists
      */
     template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
     Ext(const Iso<MAIN, OTHERS...>& other);
 
     /**
-     * @brief Constructor from prime field elements
-     * @tparam p Prime characteristic of the source field
-     * @param other Prime field element to embed in this extension field
-     * @throws std::invalid_argument if embedding fails (shouldn't happen for valid subfield relationships)
+     * @brief Embed a prime-field element when 𝔽_p is a (possibly indirect) subfield
      *
-     * Embeds a prime field element into this extension field by using the cached embedding
-     * from Fp<p> to this field.
-     *
-     * @section Embedding_Strategy
-     * - Uses the cached `Embedding<Fp<p>, Ext<B, modulus, mode>>` for mathematically correct embedding
-     * - Automatically handles the case where the prime field is a (possibly indirect) subfield
-     *
-     * @code{.cpp}
-     * using F2 = Fp<2>;
-     * using F8 = Ext<F2, {1, 0, 1, 1}>;
-     * using F64 = Ext<F8, {6, 2, 1}>;  // F2 → F8 → F64 tower
-     *
-     * F2 a(1);
-     * F64 b(a);  // Direct embedding F2 → F64
-     * @endcode
+     * Uses the cached @ref Embedding from `Fp<p>` to this `Ext`; cannot fail for any value
+     * permitted by `SubfieldOf<Ext, Fp<p>>`.
      */
     template <uint16_t p>
     constexpr Ext(const Fp<p>& other)
         requires SubfieldOf<Ext<B, modulus, mode>, Fp<p>> && (!std::is_same_v<B, Fp<p>>);
 
-    /* assignment operators */
-
-    /**
-     * @brief Assign integer value to extension field element
-     * @param l Integer label to convert to extension field element
-     * @return Reference to this element after assignment
-     * @throws std::invalid_argument l is not in {0, ..., Q-1}
-     *
-     * Creates extension field element, throws if l is not in {0, ..., Q-1}
-     */
+    /// @brief Assign integer label `l ∈ {0, …, Q − 1}`; throws `std::invalid_argument` otherwise
     constexpr Ext& operator=(int l);
 
-    /**
-     * @brief Copy assignment operator
-     */
     constexpr Ext& operator=(const Ext& rhs) noexcept = default;
-
-    /**
-     * @brief Move assignment operator
-     */
     Ext& operator=(Ext&& rhs) noexcept = default;
 
-    /**
-     * @brief Assign extension field element from other extension field
-     * @tparam S Base field type of the source extension field
-     * @tparam ext_modulus Modulus polynomial of the source extension field
-     * @param other Extension field element to assign
-     * @return Reference to this element after assignment
-     * @throws std::invalid_argument if conversion is not valid
-     *
-     * Performs field conversion assignment between compatible extension fields.
-     * Uses copy-and-swap idiom for exception safety, supports both subfield extraction and field tower operations.
-     */
+    /// @brief Cross-field assignment from another extension (copy-and-swap; same semantics as the constructor)
     template <FiniteFieldType S, MOD ext_modulus, LutMode ext_mode>
         requires(S::get_characteristic() == B::get_characteristic())
     Ext& operator=(const Ext<S, ext_modulus, ext_mode>& other);
 
-    /**
-     * @brief Cross-field assignment from Fp type
-     *
-     * Performs field conversion assignment from an Fp field with the same characteristic.
-     * Uses copy-and-swap idiom leveraging enhanced cross-field constructors for exception safety.
-     *
-     * @tparam p Prime of the source Fp field (must match base field characteristic)
-     * @param other Source Fp element to assign from
-     * @return Reference to this Ext element after assignment
-     * @throws std::invalid_argument if conversion not possible
-     */
+    /// @brief Embed an `Fp` element of matching characteristic (copy-and-swap)
     template <uint16_t p>
         requires(p == B::get_characteristic())
     Ext& operator=(const Fp<p>& other);
 
-    /**
-     * @brief Cross-field assignment from Iso type
-     *
-     * Performs field conversion assignment from an Iso field with the same characteristic.
-     * Uses copy-and-swap idiom leveraging enhanced cross-field constructors for exception safety.
-     *
-     * @tparam MAIN Main field type of the Iso (must have same characteristic as this Ext)
-     * @tparam OTHERS Additional isomorphic field types in the Iso group
-     * @param other Source Iso element to assign from
-     * @return Reference to this Ext element after assignment
-     * @throws std::invalid_argument if conversion not possible
-     */
+    /// @brief Cross-field assignment from an `Iso` of matching characteristic (copy-and-swap)
     template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
         requires(MAIN::get_characteristic() == B::get_characteristic())
     Ext& operator=(const Iso<MAIN, OTHERS...>& other);
 
-    /* comparison */
     constexpr bool operator==(const Ext& rhs) const noexcept { return label == rhs.get_label(); }
 
-    /* operations */
-
-    /**
-     * @brief Additive inverse for lvalue references
-     * @return Additive inverse of this element (-this mod modulus)
-     *
-     * Returns the additive inverse such that this + (-this) ≡ 0 (mod modulus).
-     * Creates a new element with the negated value.
-     */
+    /// @brief Additive inverse (lvalue): returns a new element
     constexpr Ext operator-() const& noexcept;
-
-    /**
-     * @brief Additive inverse for rvalue references
-     * @return Reference to this element after in-place negation
-     *
-     * Optimized version for temporary objects: negates value in-place
-     * and returns reference to avoid unnecessary copy.
-     */
+    /// @brief Additive inverse (rvalue): in place
     constexpr Ext& operator-() && noexcept;
 
-    /* operational assignments */
-
-    /**
-     * @brief Add extension field element to this element
-     * @param rhs Right-hand side element to add
-     * @return Reference to this element after addition
-     *
-     * Performs in-place addition: this = (this + rhs) mod modulus
-     * Uses efficient lookup table operations when available.
-     */
+    /// @brief `*this += rhs` via the addition LUT
     constexpr Ext& operator+=(const Ext& rhs) noexcept;
-
-    /**
-     * @brief Subtract extension field element from this element
-     * @param rhs Right-hand side element to subtract
-     * @return Reference to this element after subtraction
-     *
-     * Performs in-place subtraction: this = (this - rhs) mod modulus
-     * Uses efficient lookup table operations when available.
-     */
+    /// @brief `*this -= rhs` via the addition LUT applied to `−rhs`
     constexpr Ext& operator-=(const Ext& rhs) noexcept;
-
-    /**
-     * @brief Multiply this element by another extension field element
-     * @param rhs Right-hand side element to multiply by
-     * @return Reference to this element after multiplication
-     *
-     * Performs in-place multiplication: this = (this * rhs) mod modulus
-     * Uses efficient lookup table operations when available.
-     */
+    /// @brief `*this *= rhs` via the multiplication LUT
     constexpr Ext& operator*=(const Ext& rhs) noexcept;
-
-    /**
-     * @brief Multiply this element by an integer scalar
-     * @param s Integer scalar to multiply with
-     * @return Reference to this element after scalar multiplication
-     *
-     * Performs in-place scalar multiplication: this = this * s
-     * Uses repeated addition in the extension field.
-     */
+    /// @brief Scalar multiplication by an `int` (repeated addition, reduced mod characteristic)
     constexpr Ext& operator*=(int s) noexcept;
-
-    /**
-     * @brief Divide this element by another extension field element
-     * @param rhs Right-hand side element to divide by
-     * @return Reference to this element after division
-     * @throws std::invalid_argument if rhs is zero (division by zero)
-     *
-     * Performs in-place division: this = (this * rhs^(-1)) mod modulus
-     * Uses multiplicative inverse of rhs in the extension field.
-     */
+    /// @brief `*this /= rhs`; throws `std::invalid_argument` if rhs is zero
     Ext& operator/=(const Ext& rhs);
 
-    /* randomization */
-
-    /**
-     * @brief Set this element to a random value
-     * @return Reference to this element after randomization
-     *
-     * Generates a random element from the extension field by setting
-     * a uniformly random value in the range [0, Q-1].
-     */
+    /// @brief Uniform random element in {0, …, Q − 1}
     Ext& randomize() noexcept;
-
-    /**
-     * @brief Set this element to a random value different from current
-     * @return Reference to this element after randomization
-     *
-     * Generates a random element from the extension field that is guaranteed
-     * to be different from the current value. Useful for testing algorithms.
-     */
+    /// @brief Like @ref randomize but guaranteed to differ from the current value
     Ext& randomize_force_change() noexcept;
 
-    /* getters */
-
     /**
-     * @brief Get multiplicative order of this field element
-     * @return Smallest positive integer k such that this^k = 1
-     * @throws std::invalid_argument if this element is zero
+     * @brief Multiplicative order in the field's multiplicative group
+     *
+     * @throws std::invalid_argument if `*this` is zero
      */
     size_t get_multiplicative_order() const;
 
-    /**
-     * @brief Get additive order of this field element
-     * @return Either one or characteristic p (order of additive group)
-     *
-     * In extension fields, every non-zero element has additive order p (the characteristic),
-     * and zero has additive order one.
-     */
+    /// @brief Additive order: 1 for zero, characteristic p otherwise
     size_t get_additive_order() const;
 
     /**
-     * @brief Get minimal polynomial of this field element over arbitrary subfield
-     * @tparam S Subfield type (must be subfield of this extension field)
-     * @return Minimal polynomial over the specified subfield S
+     * @brief Minimal polynomial of this element over a subfield S (defaults to immediate base field B)
      *
-     * Computes the minimal polynomial of this element with coefficients from subfield S.
-     * This is particularly useful for:
-     * - Computing absolute minimal polynomials over the prime field
-     * - Finding polynomials over intermediate subfields in field towers
-     * - Constructing field isomorphisms between different representations
+     * @tparam S Subfield (`SubfieldOf<Ext, S>`)
      *
-     * The algorithm computes the S-conjugacy orbit {α, α^|S|, α^|S|², ...} and forms
-     * the polynomial having these conjugates as roots.
-     *
-     * @section Usage_Example
+     * Computed from the S-conjugacy orbit { α, α^{|S|}, α^{|S|²}, … } as the polynomial whose
+     * roots are exactly those conjugates. Useful for working with polynomials over an
+     * intermediate or the prime subfield in a tower.
      *
      * @code{.cpp}
-     * using F2 = Fp<2>;
-     * using F4 = Ext<F2, MOD{1, 1, 1}>;
-     * using F16 = Ext<F4, MOD{2, 1, 1}>;
-     *
      * F16 alpha = F16::get_generator();
-     *
-     * auto poly_F4 = alpha.get_minimal_polynomial<F4>();   // Over F4
-     * auto poly_F2 = alpha.get_minimal_polynomial<F2>();   // Over F2 (absolute)
-     * auto poly_base = alpha.get_minimal_polynomial();     // Over F4 (default, immediate base field)
+     * auto over_F4 = alpha.get_minimal_polynomial<F4>();
+     * auto over_F2 = alpha.get_minimal_polynomial<F2>();   // absolute
      * @endcode
      */
     template <FiniteFieldType S = B>
     Polynomial<S> get_minimal_polynomial() const
         requires SubfieldOf<Ext<B, modulus, mode>, S>;
 
-    /**
-     * @brief Get human-readable information about this extension field
-     * @return String describing the field structure
-     *
-     * Returns formatted string with field size, base field, and modulus.
-     */
+    /// @brief Human-readable description (size, base field, modulus)
     static std::string get_info() noexcept;
 
     static constexpr size_t get_characteristic() noexcept { return B::get_p(); }
+    /// @brief Underlying integer label in {0, …, Q − 1}
     constexpr size_t get_label() const noexcept { return label; }
 
     /**
-     * @brief Check if this field interface is constexpr-ready for compile-time usage
-     * @return true if mode == LutMode::CompileTime, false if mode == LutMode::Runtime
+     * @brief True for `LutMode::CompileTime`, false for `LutMode::RunTime`
      *
-     * Extension fields using CompileTime mode compute all lookup tables at compile-time
-     * via constexpr evaluation, making their interface constexpr-ready with zero
-     * initialization overhead but potentially increasing compilation time and executable size.
-     *
-     * Extension fields using Runtime mode compute lookup tables on first access using
-     * lazy initialization. Their LUT access functions return runtime data, making them
-     * non-constexpr and ruling out constexpr-readiness.
-     *
-     * @note CompileTime extension fields require that all base fields also have
-     *       constexpr-ready interfaces to ensure constexpr compatibility throughout the field tower.
-     *
-     * @see LutMode for detailed mode descriptions
-     * @see static_assert constraint that enforces constexpr-readiness requirement for base fields
+     * Used by extensions further up in a tower to gate their own `CompileTime` instantiation
+     * (a `CompileTime` field cannot be built on a `RunTime` base).
      */
     static constexpr bool is_constexpr_ready() noexcept { return mode == LutMode::CompileTime; }
 
-    /**
-     * @brief Get the irreducible modulus polynomial
-     * @return Modulus polynomial defining this extension field
-     *
-     * Returns the monic irreducible polynomial used to construct
-     * this extension field Ext<B, modulus> ≅ B[x]/(modulus).
-     */
+    /// @brief Modulus polynomial f(x) — the irreducible used to construct this field
     static constexpr Polynomial<B> get_modulus() noexcept;
 
     /**
-     * @brief Get a multiplicative generator for this extension field
-     * @return Multiplicative generator element with order |field| - 1
+     * @brief Generator (primitive element) of the multiplicative group
      *
-     * Returns a generator element g such that g^(|field|-1) = 1 and g^k ≠ 1 for any
-     * 0 < k < |field|-1. The generator spans the entire multiplicative group of the field.
-     *
-     * The label is the smallest one with multiplicative order |field| − 1 — the same
-     * deterministic choice used by find_generator on the multiplicative-order LUT.
-     *
-     * @note The computed generator is cached statically for performance
+     * Smallest label with multiplicative order |field| − 1; cached statically.
      */
     static Ext get_generator() noexcept;
 
     static constexpr size_t get_p() noexcept { return B::get_p(); }
-
     static constexpr size_t get_m() noexcept { return m; }
-
     static constexpr size_t get_q() noexcept { return Q; }
-
     static constexpr size_t get_size() noexcept { return Q; }
 
-    /**
-     * @brief Get isomorphism to isomorphic field T
-     * @return Isomorphism, mapping from this extension field to T
-     */
+    /// @brief Isomorphism mapping `Ext → T` for any `Isomorphic<Ext, T>` target
     template <FiniteFieldType T>
     static Isomorphism<Ext, T> isomorphism_to();
 
-    /**
-     * @brief Display lookup tables for debugging
-     *
-     * Prints the internal lookup tables (addition, multiplication, etc.)
-     * to standard output for debugging and verification purposes.
-     */
+    /// @brief Print all lookup tables to `std::cout` (debugging aid)
     static void show_tables() noexcept;
 
-    /**
-     * @brief Check if element has positive sign
-     * @return Always true (finite fields have no natural ordering)
-     */
+    /// @brief Always true (finite fields are unordered)
     constexpr bool has_positive_sign() const noexcept { return true; }
-
-    /**
-     * @brief Check if this element is zero
-     * @return true if this is the additive identity
-     */
+    /// @brief True iff this is the additive identity
     constexpr bool is_zero() const noexcept { return label == 0; }
 
 #ifdef CECCO_ERASURE_SUPPORT
     /**
-     * @brief Erases this element, i.e., sets it to an "outside of field" marker
-     * @return Reference to this element after erasing
+     * @brief Mark this element as erased (encoded as `label == max(label_t)`)
      *
-     * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased
-     * field elements is the responsibility of the user!
+     * @warning Erased elements must not participate in field arithmetic — see
+     * @ref CECCO_ERASURE_SUPPORT.
      */
     constexpr Ext& erase() noexcept;
-
-    /**
-     * @brief Un-erases this element, i.e., sets it to an actual field element (the additive neutral 0)
-     * @return Reference to this element after un-erasing
-     */
+    /// @brief Clear the erasure flag, resetting to the additive identity
     constexpr Ext& unerase() noexcept;
-
-    /**
-     * @brief Checks whether this element is erased
-     * @return true if this element is erased, false otherwise (meaning it actually is a field element)
-     */
+    /// @brief Test whether this element is currently erased
     constexpr bool is_erased() const noexcept { return label == std::numeric_limits<label_t>::max(); }
 #endif
 
     /**
-     * @brief Converts extension field element to vector representation over proper subfield
-     * @tparam T Subfield type (must be a subfield in tower), default: base field B
-     * @return Vector of coefficients of appropriate length representing this element over T
+     * @brief Coordinate vector over a proper subfield T (defaults to the base field B)
      *
-     * Converts this extension field element to its vector representation
-     * over the specified proper subfield T.
-     *
-     * For field tower T ⊂ B ⊂ Ext<B, modulus>, this method provides
-     * the T-linear representation of elements. The vector length is
-     * [Ext : T] = (extension degree of Ext over T).
-     *
-     * The resulting vector can be converted back into an element of the extension field using a constructor.
+     * @tparam T Subfield (`SubfieldOf<Ext, T>` and `T ≠ Ext`)
+     * @return Vector of length [Ext : T]; round-trip through the `Ext(Vector<T>)` constructor
      *
      * @code{.cpp}
-     * using F2 = Fp<2>;
-     * using F4 = Ext<F2, MOD{1, 1, 1}>;
-     * using F16 = Ext<F4, MOD{2, 1, 1}>;
-     *
      * F16 x(10);
-     * Vector<F4> v4 = x.as_vector<F4>();  // Length 2 (F16 = F4^2)
-     * Vector<F2> v2 = x.as_vector<F2>();  // Length 4 (F16 = F2^4)
-     * F16 y = F16(v2);                    // transform vector back to superfield element
+     * Vector<F4> v4 = x.as_vector<F4>();   // length 2
+     * Vector<F2> v2 = x.as_vector<F2>();   // length 4
+     * F16 y = F16(v2);                      // round trip
      * @endcode
      */
     template <FiniteFieldType T = B>
@@ -3932,50 +2410,14 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
     Vector<T> as_vector() const noexcept;
 
     /**
-     * @brief Compile-time synchronization point for staged template instantiation
-     * @return true when all LUTs for this field are computed
+     * @brief Compile-time signal that all LUTs are constructed
      *
-     * This function serves as a compile-time synchronization mechanism for staged template
-     * instantiation in field towers. It returns true when all lookup tables (LUTs) for
-     * this extension field have been computed and are ready for use.
+     * Used by extensions further up in a tower to defer their own LUT computation until this
+     * one is fully instantiated, preventing compiler recursion-depth issues. The implementation
+     * is the constexpr `luts_ready` flag, which forces immediate evaluation of every LUT on
+     * a `CompileTime` instantiation.
      *
-     * @section Purpose
-     *
-     * The ready() function guarantees that further extension fields can safely begin their computations.
-     *
-     * This prevents compiler recursion depth issues that can occur when multiple
-     * extension field layers attempt to compute their LUTs simultaneously.
-     *
-     * @section Usage_in_Field_Towers
-     *
-     * Higher-level extension fields should check this field's readiness before
-     * starting their own LUT computations:
-     *
-     * @code{.cpp}
-     * using F2 = Fp<2>;
-     * using F4 = Ext<F2, MOD{1, 1, 1}>;
-     * using F16 = Ext<F4, MOD{2, 1, 1}>;
-     *
-     * // F16 construction should check:
-     * static_assert(F4::ready(), "F4 LUTs must be ready before F16 construction");
-     * @endcode
-     *
-     * @section Implementation_Details
-     *
-     * The function returns the value of the `luts_ready` constexpr variable, which is
-     * computed by a lambda that forces evaluation of all field LUTs through static_assert
-     * statements. This ensures that:
-     * - All LUTs are computed at compile time
-     * - The computation order is deterministic
-     * - Extension fields wait for base field completion
-     * - Compiler recursion depth limits are respected
-     *
-     * @warning This function must only be called after all LUT declarations in the class.
-     *          The base field B must be ready before this extension field's LUTs are computed.
-     *
-     * @see luts_ready
-     * @see Fp::ready()
-     * @see B::ready()
+     * @warning Only well-defined after all LUT declarations in the class body have been seen.
      */
     static constexpr bool ready() { return luts_ready; }
 
@@ -4239,37 +2681,6 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
     }
 }
 
-/**
- * @brief Cross-field constructor from Iso field using enhanced four-branch conversion logic
- * @tparam MAIN Main field type of the source Iso
- * @tparam OTHERS Alternative representation types in the source Iso
- * @param iso Source Iso field element to convert
- *
- * Advanced constructor that handles conversion from any Iso field representation using optimal
- * conversion paths. Employs a four-branch decision tree to determine the most efficient conversion:
- *
- * **Branch 1 (Isomorphic)**: Direct isomorphism if Ext ≅ MAIN or Ext ≅ any OTHERS
- * **Branch 2 (Upcast)**: Cached embedding if Iso/MAIN/OTHERS ⊆ Ext
- * **Branch 3 (Downcast)**: Reverse embedding with validation if Ext ⊆ Iso/MAIN/OTHERS
- * **Branch 4 (Cross-cast)**: Bridge through @ref details::largest_common_subfield_t when no direct relationship
- * exists
- *
- * @throws std::invalid_argument if downcast validation fails (element not in subfield)
- * @throws std::bad_alloc if memory allocation fails during conversion
- *
- * @section Conversion_Examples
- * @code{.cpp}
- * using F16_v1 = Ext<F2, {1, 0, 0, 1, 1}>;
- * using F16_v2 = Ext<F4, {2, 2, 1}>;
- * using F16_Iso = Iso<F16_v1, F16_v2>;
- * using F4 = Ext<F2, {1, 1, 1}>;
- *
- * F16_Iso iso_elem(7);
- * F4 result(iso_elem);  // Branch 2: F4 ⊆ F16_v2 via cached embedding
- * @endcode
- *
- * @see @ref details::largest_common_subfield_t, @ref SubfieldOf, @ref Isomorphic
- */
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 Ext<B, modulus, mode>::Ext(const Iso<MAIN, OTHERS...>& other) {
@@ -4617,17 +3028,7 @@ void Ext<B, modulus, mode>::show_tables() noexcept {
     std::cout << get_generator() << " (" << get_generator().get_multiplicative_order() << ")" << std::endl;
 }
 
-/**
- * @brief Output stream operator for extension field elements
- * @tparam B Base field type
- * @tparam modulus Monic irreducible polynomial defining the extension
- * @param os Output stream
- * @param e Extension field element to output
- * @return Reference to the output stream
- *
- * Outputs the integer label of the extension field element.
- * The commented code shows an alternative format displaying polynomial coefficients.
- */
+/// @brief Print as the integer label (or @ref ERASURE_MARKER if erased)
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 std::ostream& operator<<(std::ostream& os, const Ext<B, modulus, mode>& e) noexcept {
 #ifdef CECCO_ERASURE_SUPPORT
@@ -4640,64 +3041,36 @@ std::ostream& operator<<(std::ostream& os, const Ext<B, modulus, mode>& e) noexc
     return os;
 }
 
-/** @} */
-
 /**
- * @class Iso
- * @brief Stack of multiple isomorphic field representations
+ * @brief Single logical field unifying several pairwise-isomorphic representations
  *
- * @tparam MAIN Primary field representation (must satisfy FiniteFieldType)
- * @tparam OTHERS Additional isomorphic field representations (all must be isomorphic to MAIN)
+ * @tparam MAIN Primary representation; satisfies @ref CECCO::FiniteFieldType. All operations
+ *              are forwarded to it, so the `Iso` inherits its @ref CECCO::LutMode and
+ *              performance characteristics.
+ * @tparam OTHERS Alternative representations of the same abstract field (each `Isomorphic<MAIN, OTHER>`).
+ *                Pairwise distinctness is enforced at instantiation.
  *
- * The Iso class creates a unified interface for working with multiple isomorphic representations
- * of the same abstract finite field. It internally stores elements using the MAIN representation
- * while providing transparent conversion capabilities to and from all OTHERS representations.
- *
- * This is particularly useful in field towers where the same mathematical field
- * can be constructed in multiple ways (e.g., F16 as Ext<F2, irreducible1> or Ext<F4, irreducible2>).
- *
- * @section Key_Features
- * - **Transparent Conversion**: Seamless construction from any isomorphic representation
- * - **Unified Operations**: All field operations work consistently regardless of source representation
- * - **Performance**: Uses deterministic isomorphisms to avoid Frobenius factors
- * - **Type Safety**: Compile-time validation that all types are mutually isomorphic
- *
- * @section LutMode_Determination
- *
- * **The LUT mode of an Iso field is determined entirely by its MAIN field representation.**
- * All field operations (addition, multiplication, etc.) are forwarded directly to the MAIN field,
- * so the Iso inherits the MAIN field's LUT generation mode and performance characteristics.
- *
- * **Mixed LUT modes are supported**: OTHERS fields may use different LUT modes without conflict.
- * Isomorphism computations between representations occur at runtime using cached mappings,
- * regardless of individual field LUT modes.
- *
- * @code{.cpp}
- * // Mixed-mode Iso field example
- * using F16_a = Ext<Fp<2>, {1, 0, 0, 1, 1}, LutMode::CompileTime>;  // Fast startup
- * using F16_b = Ext<F4, {2, 1, 1}, LutMode::Runtime>;               // Lazy init
- * using F16 = Iso<F16_a, F16_b>;                                    // Uses CompileTime (MAIN)
- *
- * // All operations use F16_a performance characteristics
- * F16 a(100);    // Uses MAIN field's CompileTime LUTs
- * F16_b b(200);  // Source field uses Runtime LUTs
- * a = b;         // Runtime isomorphism conversion when needed
- * @endcode
+ * Useful for merging two construction towers that meet at the same mathematical field — e.g.
+ * 𝔽₁₆ built once from 𝔽₂ and once from 𝔽₄. With those two `Ext` types wrapped in an `Iso`,
+ * @ref CECCO::SubfieldOf can recognise both as containing 𝔽₂ and 𝔽₄, which makes the
+ * cross-field constructors of @ref CECCO::Ext and @ref CECCO::Iso pick optimal paths. The
+ * `OTHERS` representations may use different LUT modes from `MAIN`; isomorphism conversions
+ * across representations happen at runtime via cached maps.
  *
  * @section Usage_Example
+ *
  * @code{.cpp}
- * using F2 = Fp<2>;
- * using F4_a = Ext<F2, {1, 1, 1}>;  // F4 via x² + x + 1
- * using F4_b = Ext<F2, {1, 0, 1}>;  // F4 via x² + 1
- * using F4 = Iso<F4_a, F4_b>;       // Unified F4 interface
+ * using F2   = Fp<2>;
+ * using F4_a = Ext<F2, {1, 1, 1}>;
+ * using F4_b = Ext<F2, {1, 0, 1}>;
+ * using F4   = Iso<F4_a, F4_b>;
  *
  * F4_a a(2);
  * F4_b b(3);
- * F4 result = a + b;  // Seamless conversion and operation
+ * F4 c(a);                   // wrap a into the unified field
+ * c += b;                    // OTHERS-overload converts b into MAIN behind the scenes
+ * F4_b d = c.as<F4_b>();     // explicit projection back to F4_b
  * @endcode
- *
- * @see Isomorphism for the underlying conversion mechanism
- * @see FiniteFieldType for field type requirements
  */
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 class Iso : public details::Base {
@@ -4718,137 +3091,59 @@ class Iso : public details::Base {
     MAIN main_;
 
    public:
-    /**
-     * @brief Default constructor - creates zero element
-     *
-     * Constructs the additive identity (zero) element. The zero element behaves consistently across all isomorphic
-     * representations.
-     */
+    /// @brief Default constructor: 0 (consistent across all representations)
     constexpr Iso() noexcept : main_() {}
 
-    /**
-     * @brief Integer constructor - creates element from integer label
-     * @param l Integer value to convert to field element
-     *
-     * Constructs field element by converting integer through the MAIN representation.
-     */
+    /// @brief Construct from `int` via the MAIN representation
     constexpr Iso(int l) : main_(l) {}
 
-    /**
-     * @brief Copy constructor from MAIN representation
-     * @param other Field element from primary representation to copy
-     */
+    /// @brief Wrap a MAIN-representation element
     constexpr Iso(const MAIN& other) noexcept : main_(other) {}
-
-    /**
-     * @brief Move constructor from MAIN representation
-     * @param other Field element from primary representation to move
-     */
+    /// @brief Wrap a MAIN-representation rvalue
     constexpr Iso(MAIN&& other) noexcept : main_(std::move(other)) {}
 
-    /**
-     * @brief Copy constructor from any OTHERS representation
-     * @tparam OTHER One of the OTHERS... alternative representations
-     * @param other Field element from alternative representation to copy
-     */
+    /// @brief Wrap an `OTHERS` element by converting to MAIN
     template <BelongsTo<OTHERS...> OTHER>
     constexpr Iso(const OTHER& other) noexcept : main_(MAIN(other)) {}
-
-    /**
-     * @brief Move constructor from any OTHERS representation
-     * @tparam OTHER One of the OTHERS... alternative representations
-     * @param other Field element from alternative representation to move
-     */
+    /// @brief Wrap an `OTHERS` rvalue by converting to MAIN
     template <BelongsTo<OTHERS...> OTHER>
     constexpr Iso(OTHER&& other) noexcept : main_(MAIN(std::move(other))) {}
 
-    /**
-     * @brief Copy constructor
-     * @param other Iso element to copy from
-     */
     constexpr Iso(const Iso& other) noexcept = default;
-
-    /**
-     * @brief Move constructor
-     * @param other Iso element to move from (will be left in valid but unspecified state)
-     */
     constexpr Iso(Iso&& other) noexcept = default;
 
     /**
-     * @brief Vector constructor for polynomial representations
-     * @tparam T Component type of the vector (must be a field type)
-     * @param v Vector representation to convert to field element
-     * @throws std::invalid_argument if no representation can construct from the vector
+     * @brief Construct from a coefficient vector over a subfield T
      *
-     * Constructs field element from vector representation using multi-branch strategy:
-     * 1. **Branch 1**: Try direct construction via MAIN representation (compile-time check)
-     * 2. **Branch 2**: Try construction via compatible OTHERS representations and convert via isomorphism
-     * 3. **Branch 3**: Throw if no compatible representation found
+     * @tparam T Subfield type
+     * @throws std::invalid_argument if no representation in the `Iso` can be constructed from @p v
      *
-     * This ensures round-trip correctness: Iso → as_vector<T>() → Iso(vector) preserves the element.
-     * The approach follows the established multi-branch pattern from the cross-field Iso constructor.
+     * Tries MAIN first, then each of OTHERS until one succeeds. Round-trip correct with
+     * @ref as_vector.
      */
     template <FiniteFieldType T>
     Iso(const Vector<T>& v);
 
     /**
-     * @brief Simple constructor from Extension field using Ext constructor
-     * @tparam B Base field of the Extension
-     * @tparam modulus Irreducible polynomial of the Extension
-     * @tparam mode LUT mode of the Extension
-     * @param ext Extension field element to convert from
-     * @throws std::invalid_argument if conversion is not valid
+     * @brief Cross-field conversion from an extension field
      *
-     * Leverages the Ext cross-field constructor to handle all conversion logic.
+     * Delegates to `MAIN(Ext(...))` (or to an `OTHERS` representation when MAIN cannot reach
+     * the source directly), then stores the MAIN result. All paths supported by the
+     * `Ext`-from-`Ext` constructor are available — direct copy, isomorphism, upcast, downcast,
+     * cross-tower bridge.
      *
-     * @section Supported_Conversions
-     * All conversion scenarios supported by the Ext constructor work automatically:
-     * - **Direct**: When Ext type matches MAIN or OTHERS exactly
-     * - **Upcast**: When Ext is subfield of MAIN/OTHERS (embedding, always works)
-     * - **Downcast**: When MAIN/OTHERS is subfield of Ext (extraction, may throw)
-     * - **Cross-field**: Via largest common subfield for cross-tower conversions
-     *
-     * @code{.cpp}
-     * using F2 = Fp<2>;
-     * using F4_a = Ext<F2, {1, 1, 1}>;         // x² + x + 1
-     * using F4_b = Ext<F2, {1, 0, 1}>;         // x² + 1
-     * using F16_a = Ext<F2, {1, 0, 0, 1, 1}>;  // x⁴ + x + 1
-     * using F16_b = Ext<F4_a, {2, 2, 1}>;      // Tower: F2 → F4_a → F16
-     * using F16 = Iso<F16_a, F16_b>;
-     *
-     * F4_a elem_4a(2);
-     * F16 iso_from_4a(elem_4a);  // Upcast: F4_a embedded in F16_a, then to Iso
-     *
-     * F16_b elem_16b(5);
-     * F16 iso_from_16b(elem_16b);  // Direct: F16_b matches OTHERS, isomorphism to MAIN
-     * @endcode
-     *
-     * @note The result is always stored in the MAIN representation regardless of which conversion path is used
-     * @see @ref details::largest_common_subfield_t, @ref SubfieldOf, @ref Isomorphic
+     * @throws std::invalid_argument if no conversion path exists (typically a downcast where
+     * the source value lies outside the target)
      */
     template <FiniteFieldType B, MOD modulus, LutMode mode>
     Iso(const Ext<B, modulus, mode>& other);
 
     /**
-     * @brief Constructor from prime field elements
-     * @tparam p Prime characteristic of the source field
-     * @param other Prime field element to embed in this Iso
-     * @throws std::invalid_argument if embedding fails (shouldn't happen for valid subfield relationships)
+     * @brief Embed a prime-field element when 𝔽_p is a (possibly indirect) subfield of the `Iso`
      *
-     * Embeds a prime field element into this Iso representation by finding an appropriate
-     * embedding path through one of the field representations. Uses the same logic as the
-     * cross-field Iso constructor when the largest common subfield is the prime field.
-     *
-     * @section Embedding_Strategy
-     * 1. **Direct MAIN embedding**: If MAIN contains Fp<p> as subfield
-     * 2. **OTHERS embedding**: Try embedding via any OTHERS representation that contains Fp<p>
-     *
-     * @code{.cpp}
-     * using F2 = Fp<2>;
-     * using F64 = Iso<F64_a, F64_b, F64_c>;  // All have characteristic 2
-     * F2 a(1);
-     * F64 b(a);                              // Embeds F2 element into F64
-     * @endcode
+     * Picks the first of MAIN / OTHERS that contains 𝔽_p and embeds via the corresponding
+     * @ref Embedding. The constraints rule out the trivial cases where 𝔽_p already appears
+     * literally as MAIN or one of OTHERS (those use the wrapping constructors above).
      */
     template <uint16_t p>
     constexpr Iso(const Fp<p>& other)
@@ -4856,154 +3151,62 @@ class Iso : public details::Base {
                  (!BelongsTo<Fp<p>, OTHERS...>);
 
     /**
-     * @brief Cross-field constructor between Iso fields using four-branch conversion logic
-     * @tparam OTHER_MAIN Main field type of the source Iso
-     * @tparam OTHER_OTHERS Alternative representation types in the source Iso
-     * @param other Source Iso field element to convert
-     * @throws std::invalid_argument if downcast validation fails (element not in subfield)
-     * @throws std::bad_alloc if memory allocation fails during conversion
+     * @brief Cross-field conversion from another `Iso` of the same characteristic
      *
-     * Advanced constructor enabling conversion between different Iso field representations using optimal
-     * conversion paths. This constructor handles complex cross-Iso relationships and preserves field context.
-     * The conversion is determined by comprehensive four-branch logic with extensive sub-case handling:
+     * Same four-way decision as the @ref Ext cross-field constructor — direct isomorphism,
+     * upcast, downcast, or bridge via @ref details::largest_common_subfield_t — but extended
+     * to handle every (MAIN, OTHERS...) pairing on both sides. Each side's representation
+     * tower is searched for the cheapest viable path.
      *
-     * **Branch 1 (Isomorphic)**: Direct isomorphism if MAIN ≅ OTHER_MAIN
-     * **Branch 2 (Upcast)**: Multi-level embedding logic:
-     *   - Input Iso ⊆ Output Iso (full Iso relationship)
-     *   - Input MAIN ⊆ Output MAIN (direct MAIN relationship)
-     *   - Input types ⊆ Output OTHERS (via any representation path)
-     * **Branch 3 (Downcast)**: Multi-level extraction with validation:
-     *   - Output Iso ⊆ Input Iso (full Iso relationship)
-     *   - Output MAIN ⊆ Input MAIN (direct MAIN relationship)
-     *   - Output types ⊆ Input types (via any representation path)
-     * **Branch 4 (Cross-cast)**: Bridge through @ref details::largest_common_subfield_t with Iso preference
-     * mechanism
-     *
-     * @section Conversion_Examples
-     * @code{.cpp}
-     * using F16_v1 = Ext<F2, {1, 0, 0, 1, 1}>;
-     * using F16_v2 = Ext<F4, {2, 2, 1}>;
-     * using F256_v3 = Ext<F16_v1, {6, 13, 1}>;
-     * using F16_Iso = Iso<F16_v1, F16_v2>;
-     * using F256_Iso = Iso<F256_v1, F256_v2, F256_v3>;
-     *
-     * F16_Iso source(7);
-     * F256_Iso result(source);  // Branch 2: F16_Iso ⊆ F256_Iso via F256_v3 path
-     * @endcode
-     *
-     * @note Cross-Iso conversions use enhanced @ref SubfieldOf logic that traces all representation paths
-     * @see @ref details::largest_common_subfield_t, @ref SubfieldOf, @ref Isomorphic
+     * @throws std::invalid_argument on a downcast whose source value lies outside the target
      */
     template <FiniteFieldType OTHER_MAIN, FiniteFieldType... OTHER_OTHERS>
     Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other);
 
-    /**
-     * @brief Additive inverse (unary minus)
-     * @return Negated element (mathematically: -a where a + (-a) = 0)
-     */
+    /// @brief Additive inverse (delegates to MAIN)
     constexpr Iso operator-() const noexcept { return Iso{-main_}; }
 
-    /**
-     * @brief Addition assignment
-     * @param other Right-hand side addend
-     * @return Reference to this element after addition
-     */
+    /// @brief `*this += other` (delegates to MAIN)
     constexpr Iso& operator+=(const Iso& other);
-
-    /**
-     * @brief Addition assignment from isomorphic representation
-     * @tparam OTHER One of the OTHERS types (constrained by @ref BelongsTo)
-     * @param other Right-hand side addend in OTHER representation
-     * @return Reference to this element after addition
-     */
+    /// @brief `*this += other` after converting an `OTHERS` operand to MAIN
     template <typename OTHER>
     constexpr Iso& operator+=(const OTHER& other)
         requires BelongsTo<OTHER, OTHERS...>;
 
-    /**
-     * @brief Subtraction assignment
-     * @param other Right-hand side subtrahend
-     * @return Reference to this element after subtraction
-     */
+    /// @brief `*this -= other` (delegates to MAIN)
     constexpr Iso& operator-=(const Iso& other);
-
-    /**
-     * @brief Subtraction assignment from isomorphic representation
-     * @tparam OTHER One of the OTHERS types (constrained by @ref BelongsTo)
-     * @param other Right-hand side subtrahend in OTHER representation
-     * @return Reference to this element after subtraction
-     */
+    /// @brief `*this -= other` after converting an `OTHERS` operand to MAIN
     template <typename OTHER>
     constexpr Iso& operator-=(const OTHER& other)
         requires BelongsTo<OTHER, OTHERS...>;
 
-    /**
-     * @brief Multiplication assignment
-     * @param other Right-hand side multiplier
-     * @return Reference to this element after multiplication
-     */
+    /// @brief `*this *= other` (delegates to MAIN)
     constexpr Iso& operator*=(const Iso& other);
-
-    /**
-     * @brief Multiplication assignment from isomorphic representation
-     * @tparam OTHER One of the OTHERS types (constrained by @ref BelongsTo)
-     * @param other Right-hand side multiplier in OTHER representation
-     * @return Reference to this element after multiplication
-     */
+    /// @brief `*this *= other` after converting an `OTHERS` operand to MAIN
     template <typename OTHER>
     constexpr Iso& operator*=(const OTHER& other)
         requires BelongsTo<OTHER, OTHERS...>;
 
-    /**
-     * @brief Scalar multiplication assignment
-     * @param s Integer scalar
-     * @return Reference to this element after scalar multiplication
-     */
+    /// @brief Scalar multiplication by an `int` (delegates to MAIN)
     constexpr Iso& operator*=(int s) noexcept;
 
-    /**
-     * @brief Division assignment
-     * @param other Right-hand side divisor
-     * @return Reference to this element after division
-     * @throws std::invalid_argument if other is zero (division by zero)
-     */
+    /// @brief `*this /= other`; throws `std::invalid_argument` if other is zero
     Iso& operator/=(const Iso& other);
-
-    /**
-     * @brief Division assignment from isomorphic representation
-     * @tparam OTHER One of the OTHERS types (constrained by @ref BelongsTo)
-     * @param other Right-hand side divisor in OTHER representation
-     * @return Reference to this element after division
-     * @throws std::invalid_argument if other is zero (division by zero)
-     */
+    /// @brief `*this /= other` after converting an `OTHERS` operand to MAIN; same exception
     template <typename OTHER>
     Iso& operator/=(const OTHER& other)
         requires BelongsTo<OTHER, OTHERS...>;
 
     /**
-     * @brief Convert to specific isomorphic representation
-     * @tparam TO Target field type (must be one of OTHERS)
-     * @return Field element converted to TO representation
+     * @brief Project to a specific representation by applying the cached @ref Isomorphism
      *
-     * Explicitly converts the internal MAIN representation to any of the
-     * isomorphic OTHERS representations using the appropriate isomorphism.
-     *
-     * @code{.cpp}
-     * Iso<F4_a, F4_b> unified(some_value);
-     * F4_b specific = unified.as<F4_b>();  // Explicit conversion
-     * @endcode
+     * @tparam TO Target representation, one of the `OTHERS`
      */
     template <typename TO>
     constexpr TO as() const
         requires BelongsTo<TO, OTHERS...>;
 
-    /**
-     * @brief Access underlying MAIN representation (const)
-     * @return Const reference to internal MAIN field element
-     *
-     * Provides read-only access to the underlying MAIN representation
-     * for inspection or performance-critical read operations.
-     */
+    /// @brief Read-only access to the underlying MAIN-representation element
     constexpr const MAIN& main() const noexcept { return main_; }
 
     constexpr bool is_zero() const noexcept { return main_.is_zero(); }
@@ -5028,109 +3231,42 @@ class Iso : public details::Base {
 
 #ifdef CECCO_ERASURE_SUPPORT
     /**
-     * @brief Erases this element, i.e., sets it to an "outside of field" marker
-     * @return Reference to this element after erasing
+     * @brief Mark this element as erased (delegates to MAIN)
      *
-     * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased
-     * field elements is the responsibility of the user!
+     * @warning Erased elements must not participate in field arithmetic — see
+     * @ref CECCO_ERASURE_SUPPORT.
      */
     constexpr Iso& erase() noexcept;
-
-    /**
-     * @brief Un-erases this element, i.e., sets it to an actual field element (the additive neutral 0)
-     * @return Reference to this element after un-erasing
-     */
+    /// @brief Clear the erasure flag, resetting MAIN to its additive identity
     constexpr Iso& unerase() noexcept;
-
-    /**
-     * @brief Checks whether this element is erased
-     * @return true if this element is erased, false otherwise (meaning it actually is a field element)
-     */
+    /// @brief Test whether this element is currently erased
     constexpr bool is_erased() const noexcept { return main_.is_erased(); }
 #endif
 
-    // Assignment operators
     constexpr Iso& operator=(const Iso& other);
-
     constexpr Iso& operator=(Iso&& other) noexcept = default;
 
+    /// @brief Assign a MAIN-representation element directly
     constexpr Iso& operator=(const MAIN& other);
-
+    /// @brief Assign an `int` via MAIN
     constexpr Iso& operator=(int other);
 
-    /**
-     * @brief Assignment operator for isomorphic field representations
-     * @tparam OTHER One of the OTHERS template parameter types (isomorphic field representations)
-     * @param other Field element from an isomorphic representation to assign
-     * @return Reference to this Iso element after assignment
-     *
-     * Performs assignment from any of the isomorphic field representations specified in the
-     * OTHERS template parameter pack. Uses the existing constructor logic with copy-and-swap
-     * idiom for exception safety during the conversion process.
-     *
-     * @note This enables seamless assignment between different representations of the same
-     *       mathematical field, such as F4_a and F4_b in Iso<F4_a, F4_b>.
-     *
-     * @section Usage_Example
-     * @code{.cpp}
-     * using F4_a = Ext<F2, {1, 1, 1}>;
-     * using F4_b = Ext<F2, {1, 0, 1}>;
-     * using F4 = Iso<F4_a, F4_b>;
-     *
-     * F4 iso_elem;
-     * F4_b other_repr(3);
-     * iso_elem = other_repr;  // Uses this assignment operator
-     * @endcode
-     */
+    /// @brief Assign from an `OTHERS` representation (copy-and-swap; same semantics as the constructor)
     template <typename OTHER>
     Iso& operator=(const OTHER& other)
         requires BelongsTo<OTHER, OTHERS...>;
 
-    /**
-     * @brief Cross-field assignment from Fp type
-     *
-     * Performs field conversion assignment from an Fp field with the same characteristic.
-     * Uses copy-and-swap idiom leveraging cross-field constructors for exception safety.
-     *
-     * @tparam p Prime of the source Fp field (must match characteristic of MAIN field)
-     * @param other Source Fp element to assign from
-     * @return Reference to this Iso element after assignment
-     * @throws std::invalid_argument if conversion not possible
-     */
+    /// @brief Assign from an `Fp` of matching characteristic (copy-and-swap)
     template <uint16_t p>
         requires(p == MAIN::get_characteristic())
     Iso& operator=(const Fp<p>& other);
 
-    /**
-     * @brief Cross-field assignment from Ext type
-     *
-     * Performs field conversion assignment from an Ext field with the same characteristic.
-     * Uses copy-and-swap idiom leveraging enhanced cross-field constructors for exception safety.
-     *
-     * @tparam B Base field type of the source Ext
-     * @tparam ext_modulus Modulus polynomial of the source Ext
-     * @tparam mode LUT mode of the source Ext
-     * @param other Source Ext element to assign from
-     * @return Reference to this Iso element after assignment
-     * @throws std::invalid_argument if conversion not possible
-     */
+    /// @brief Assign from an `Ext` of matching characteristic (copy-and-swap)
     template <FiniteFieldType B, MOD ext_modulus, LutMode mode>
         requires(B::get_characteristic() == MAIN::get_characteristic())
     Iso& operator=(const Ext<B, ext_modulus, mode>& other);
 
-    /**
-     * @brief Cross-field assignment from other Iso types (cross-representation)
-     *
-     * Performs field conversion assignment from a different Iso field with the same characteristic.
-     * Uses copy-and-swap idiom leveraging enhanced cross-field constructors for exception safety.
-     *
-     * @tparam OTHER_MAIN Main field type of the source Iso
-     * @tparam OTHER_OTHERS Additional isomorphic field types in the source Iso group
-     * @param other Source Iso element to assign from
-     * @return Reference to this Iso element after assignment
-     * @throws std::invalid_argument if conversion not possible
-     */
+    /// @brief Assign from another `Iso` of matching characteristic (copy-and-swap)
     template <FiniteFieldType OTHER_MAIN, FiniteFieldType... OTHER_OTHERS>
     Iso& operator=(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other)
         requires(OTHER_MAIN::get_characteristic() == MAIN::get_characteristic()) &&
@@ -5167,24 +3303,7 @@ class Iso : public details::Base {
 
     static constexpr Iso get_generator() noexcept { return Iso{MAIN::get_generator()}; }
 
-    /**
-     * @brief Check if this Iso field interface is constexpr-ready for compile-time usage
-     * @return Result of MAIN::is_constexpr_ready()
-     *
-     * The constexpr-readiness of an Iso field is determined entirely by its MAIN field representation.
-     * All field operations are forwarded to the MAIN field, so the Iso field inherits
-     * the MAIN field's constexpr-readiness and interface characteristics.
-     *
-     * OTHERS fields may have different constexpr-readiness without conflict, as isomorphism
-     * computations between different representations occur at runtime regardless
-     * of individual field constexpr-readiness.
-     *
-     * @note This enables mixed-mode Iso fields like Iso<F16_CompileTime, F16_Runtime>
-     *       where different representations can have different constexpr-readiness properties.
-     *
-     * @see MAIN field type for the actual constexpr-readiness determination
-     * @see Isomorphism class for runtime conversion between representations
-     */
+    /// @brief Inherits constexpr-readiness from MAIN (`OTHERS` may differ; isomorphisms run at runtime)
     static constexpr bool is_constexpr_ready() noexcept { return MAIN::is_constexpr_ready(); }
 
     // Required for Ext to use Iso as base field
@@ -5210,7 +3329,11 @@ class Iso : public details::Base {
 
     static constexpr label_t lut_inv(label_t a) noexcept { return lut_inv()(a); }
 
-    // Vector conversion method - handle different target types T
+    /**
+     * @brief Coordinate vector over a subfield T of MAIN or any `OTHERS` representation
+     *
+     * @tparam T Subfield reachable from MAIN or one of `OTHERS`
+     */
     template <FiniteFieldType T>
     Vector<T> as_vector() const noexcept
         requires((SubfieldOf<MAIN, T> || ((SubfieldOf<OTHERS, T>) || ...))) &&

@@ -2,7 +2,7 @@
  * @file helpers.hpp
  * @brief Utility functions and mathematical helpers
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1
+ * @version 2.1.1
  * @date 2026
  *
  * @copyright
@@ -23,7 +23,7 @@
  * - **Square-and-multiply** for exponentiation
  * - **Double-and-add** for multiplication
  * - **High-performance caching**: Template-based Cache class with compile-time type safety
- *   and O(1) access via std::variant and std::array
+ *   and O(1) access via a `std::tuple` of `std::optional` slots
  * - **Utility functions**: Find maxima in vectors, constexpr floor function, divisibility testing
  */
 
@@ -36,8 +36,10 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <random>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -477,22 +479,19 @@ struct CacheEntry {
 };
 
 /**
- * @brief High-performance heterogeneous cache with compile-time type safety
- * @tparam ENTRIES Pack of CacheEntry types specifying ID-to-type mappings
+ * @brief Heterogeneous cache with compile-time type safety, indexed by entry ID
  *
- * Template-based cache providing O(1) access to heterogeneous values using
- * compile-time IDs. Uses std::variant and std::array for efficient storage
- * with full type safety verified at compile time.
+ * @tparam ENTRIES Pack of @ref CacheEntry types specifying ID-to-type mappings
  *
- * @section Design_Features
- * - **Compile-time type safety**: Each ID maps to exactly one type
- * - **O(1) access**: Direct array indexing based on compile-time IDs
- * - **Heterogeneous storage**: Different types can be cached together
- * - **Memory efficient**: Fixed-size array based on maximum ID
- * - **Lazy evaluation**: Values computed only when first requested
+ * Each ID gets its own `std::optional<T>` slot in a `std::tuple`, so different IDs may share
+ * the same value type without ambiguity. Lookup is by compile-time ID; an unknown ID is a
+ * compile-time error (no matching specialisation of `index_finder`). Sparse IDs cost no
+ * extra memory — only the listed entries are stored.
  *
- * @warning **Not thread-safe** for concurrent writes. Use external synchronization
- * if multiple threads may call set(), invalidate(), or operator() simultaneously.
+ * @warning Not thread-safe for concurrent writes. Use external synchronisation if multiple
+ * threads may call `set()`, `invalidate()`, or `operator()` simultaneously.
+ *
+ * @section Usage_Example
  *
  * @code{.cpp}
  * using Entry1 = CacheEntry<0, std::vector<int>>;
@@ -500,109 +499,87 @@ struct CacheEntry {
  * using Entry3 = CacheEntry<5, std::string>;  // IDs need not be consecutive
  * Cache<Entry1, Entry2, Entry3> cache;
  *
- * // Set values
  * cache.set<0>(std::vector<int>{1, 2, 3});
- * cache.set<1>(3.14159);
- *
- * // Get or compute values
- * auto& vec = cache.get_or_compute<0>([]() { return std::vector<int>{4, 5, 6}; });
- * auto& pi = cache.get_or_compute<1>([]() { return compute_pi(); });
- *
- * // Check and invalidate
+ * auto& vec = cache.get_or_compute<0>([] { return std::vector<int>{4, 5, 6}; });
  * if (cache.is_set<0>()) cache.invalidate<0>();
  * @endcode
  */
 template <typename... ENTRIES>
 class Cache {
    private:
-    // Calculate maximum ID at compile time
-    static constexpr auto max_id = std::max({ENTRIES::id...});
+    // ID -> position in the ENTRIES pack. Two constrained partial specialisations select
+    // lazily, so the recursion only instantiates the not-yet-matched tail.
+    template <auto ID, size_t I, typename...>
+    struct index_finder;
 
-    // Create variant type from all entry types
-    using VariantType = std::variant<std::monostate, typename ENTRIES::type...>;
-
-    // Fixed-size array for O(1) access
-    mutable std::array<VariantType, max_id + 1> cache_data{};
-
-    // Compile-time ID -> Type lookup using simple recursion
-    template <auto ID, typename First, typename... Rest>
-    struct type_finder_impl {
-        using type =
-            std::conditional_t<First::id == ID, typename First::type, typename type_finder_impl<ID, Rest...>::type>;
+    template <auto ID, size_t I, typename First, typename... Rest>
+        requires(First::id == ID)
+    struct index_finder<ID, I, First, Rest...> {
+        static constexpr size_t value = I;
     };
 
-    template <auto ID, typename Last>
-    struct type_finder_impl<ID, Last> {
-        static_assert(Last::id == ID,
-                      "Cache ID not found in CacheEntry list - check that all cache IDs are properly defined");
-        using type = typename Last::type;
+    template <auto ID, size_t I, typename First, typename... Rest>
+        requires(First::id != ID)
+    struct index_finder<ID, I, First, Rest...> {
+        static constexpr size_t value = index_finder<ID, I + 1, Rest...>::value;
     };
 
     template <auto ID>
-    using type_for_id_t = typename type_finder_impl<ID, ENTRIES...>::type;
+    static constexpr size_t index_for = index_finder<ID, 0, ENTRIES...>::value;
+
+    template <auto ID>
+    using type_for = typename std::tuple_element_t<index_for<ID>, std::tuple<ENTRIES...>>::type;
+
+    // One slot per entry, indexed by position. Independent slots avoid the duplicate-types
+    // ambiguity that a `std::variant<monostate, T1, T2, …>` would have when two entries
+    // happen to share the same value type.
+    mutable std::tuple<std::optional<typename ENTRIES::type>...> slots{};
 
    public:
     Cache() = default;
 
-    // Check if specific ID is cached
     template <auto ID>
-    bool is_set() const {
-        static_assert(ID <= max_id, "Cache ID out of bounds");
-        return !std::holds_alternative<std::monostate>(cache_data[ID]);
+    bool is_set() const noexcept {
+        return std::get<index_for<ID>>(slots).has_value();
     }
 
-    // Set value for specific ID with automatic type conversion
     template <auto ID, typename TYPE>
-    auto set(TYPE&& value) const {
-        static_assert(ID <= max_id, "Cache ID out of bounds");
-        using ExpectedType = type_for_id_t<ID>;
-
-        auto old_it = cache_data.begin() + ID;
-        cache_data[ID] = static_cast<ExpectedType>(std::forward<TYPE>(value));
-        return std::make_pair(old_it, true);
+    void set(TYPE&& value) const {
+        std::get<index_for<ID>>(slots) = static_cast<type_for<ID>>(std::forward<TYPE>(value));
     }
 
-    // Invalidate specific ID
     template <auto ID>
     bool invalidate() const noexcept {
-        static_assert(ID <= max_id, "Cache ID out of bounds");
-        bool was_set = is_set<ID>();
-        cache_data[ID] = std::monostate{};
+        auto& slot = std::get<index_for<ID>>(slots);
+        const bool was_set = slot.has_value();
+        slot.reset();
         return was_set;
     }
 
-    // Invalidate all entries
     bool invalidate() const noexcept {
-        bool had_any = std::any_of(cache_data.begin(), cache_data.end(),
-                                   [](const auto& entry) { return !std::holds_alternative<std::monostate>(entry); });
-        cache_data.fill(std::monostate{});
-        return had_any;
+        return std::apply(
+            [](auto&... s) {
+                const bool any = (s.has_value() || ...);
+                (s.reset(), ...);
+                return any;
+            },
+            slots);
     }
 
-    // Get or compute with lambda
     template <auto ID>
-    const auto& operator()(auto&& calculate_func) const {
-        static_assert(ID <= max_id, "Cache ID out of bounds");
-        using ReturnType = type_for_id_t<ID>;
-
-        auto& cached = cache_data[ID];
-        if (std::holds_alternative<std::monostate>(cached)) {
-            cached = calculate_func();
-        }
-        return std::get<ReturnType>(cached);
+    const type_for<ID>& operator()(auto&& calculate_func) const {
+        auto& slot = std::get<index_for<ID>>(slots);
+        if (!slot.has_value()) slot = calculate_func();
+        return *slot;
     }
 
-    // Get cached value (if present)
     template <auto ID>
-    std::optional<type_for_id_t<ID>> get() const {
-        static_assert(ID <= max_id, "Cache ID out of bounds");
-        if (std::holds_alternative<std::monostate>(cache_data[ID])) return std::nullopt;
-        return std::get<type_for_id_t<ID>>(cache_data[ID]);
+    std::optional<type_for<ID>> get() const {
+        return std::get<index_for<ID>>(slots);
     }
 
-    // Alternative syntax for cleaner usage
     template <auto ID>
-    const auto& get_or_compute(auto&& calculate_func) const {
+    const type_for<ID>& get_or_compute(auto&& calculate_func) const {
         return operator()<ID>(std::forward<decltype(calculate_func)>(calculate_func));
     }
 };

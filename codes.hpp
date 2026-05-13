@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.0.21
+ * @version 2.1.1
  * @date 2026
  *
  * @copyright
@@ -334,7 +334,7 @@ struct Edge {
 }  // namespace details
 
 // Invariant: within each layer, V[s][i].id == i. The Viterbi / BCJR data plane
-// indexes vertex_costs, alpha, beta, backptrs by edge from_id/to_id directly,
+// indexes path_costs, alpha, beta, backptrs by edge from_id/to_id directly,
 // so ids must equal positions. add_edge preserves this as long as new to_ids
 // are introduced in increasing order (0, 1, 2, ...); all in-tree constructors
 // (row_trellis, operator*, merge_segments) do.
@@ -404,59 +404,69 @@ struct Trellis {
         return max;
     }
 
+    template <typename cost_t>
+        requires std::integral<cost_t> || std::floating_point<cost_t>
     struct Viterbi_Workspace {
+        static constexpr bool is_soft = std::is_floating_point_v<cost_t>;
+        static constexpr cost_t init = is_soft ? std::numeric_limits<cost_t>::infinity()
+                                               : std::numeric_limits<cost_t>::max();
+
         explicit Viterbi_Workspace(const Trellis& tr) {
-            vertex_costs.reserve(tr.V.size());
+            const size_t M = tr.get_maximum_depth();
+            path_costs_prev.resize(M);
+            path_costs_curr.resize(M);
+            tie_counts.resize(M);
             backptrs.reserve(tr.V.size());
-            tie_counts.reserve(tr.V.size());
-            for (const auto& seg : tr.V) {
-                vertex_costs.emplace_back(seg.size(), std::numeric_limits<double>::infinity());
-                backptrs.emplace_back(seg.size(), nullptr);
-                tie_counts.emplace_back(seg.size(), uint16_t{0});
-            }
+            for (size_t s = 0; s < tr.V.size(); ++s) backptrs.emplace_back(tr.V[s].size(), nullptr);
             edge_costs.reserve(tr.E.size());
-            for (const auto& seg : tr.E) edge_costs.emplace_back(seg.size(), std::numeric_limits<double>::quiet_NaN());
+            for (size_t s = 0; s < tr.E.size(); ++s) edge_costs.emplace_back(tr.E[s].size());
         }
 
-        void calculate_edge_costs(const Trellis& tr, const Vector<T>& r) {
+        void calculate_edge_costs(const Trellis& tr, const Vector<T>& r)
+            requires std::integral<cost_t>
+        {
             if (r.get_n() != tr.E.size())
                 throw std::invalid_argument("Vector length must match number of trellis segments!");
             for (size_t s = 0; s < tr.E.size(); ++s)
                 for (size_t j = 0; j < tr.E[s].size(); ++j)
 #ifdef CECCO_ERASURE_SUPPORT
-                    edge_costs[s][j] = r[s].is_erased() ? 0.0 : ((tr.E[s][j].value != r[s]) ? 1.0 : 0.0);
+                    edge_costs[s][j] =
+                        r[s].is_erased() ? cost_t{0} : ((tr.E[s][j].value != r[s]) ? cost_t{1} : cost_t{0});
 #else
-                    edge_costs[s][j] = (tr.E[s][j].value != r[s]) ? 1.0 : 0.0;
+                    edge_costs[s][j] = (tr.E[s][j].value != r[s]) ? cost_t{1} : cost_t{0};
 #endif
         }
 
         void calculate_edge_costs(const Trellis& tr, const Vector<double>& llrs)
-            requires std::is_same_v<T, Fp<2>>
+            requires std::floating_point<cost_t> && std::is_same_v<T, Fp<2>>
         {
             if (llrs.get_n() != tr.E.size())
                 throw std::invalid_argument("Vector length must match number of trellis segments!");
             for (size_t s = 0; s < tr.E.size(); ++s)
                 for (size_t j = 0; j < tr.E[s].size(); ++j)
-                    edge_costs[s][j] = (tr.E[s][j].value != T(0)) ? llrs[s] : 0.0;
+                    edge_costs[s][j] = (tr.E[s][j].value == T(0)) ? cost_t{0} : llrs[s];
         }
 
-        std::vector<std::vector<double>> vertex_costs;
+        std::vector<cost_t> path_costs_prev;
+        std::vector<cost_t> path_costs_curr;
         std::vector<std::vector<const details::Edge<T>*>> backptrs;
-        std::vector<std::vector<uint16_t>> tie_counts;
-        std::vector<std::vector<double>> edge_costs;
+        std::vector<uint16_t> tie_counts;
+        std::vector<std::vector<cost_t>> edge_costs;
         std::optional<std::variant<Vector<T>, Vector<double>>> v;
     };
 
     struct BCJR_Workspace {
+        static constexpr bool is_soft = true;
+
         explicit BCJR_Workspace(const Trellis& tr) {
             alpha.reserve(tr.V.size());
             beta.reserve(tr.V.size());
-            for (const auto& seg : tr.V) {
-                alpha.emplace_back(seg.size(), -std::numeric_limits<double>::infinity());
-                beta.emplace_back(seg.size(), -std::numeric_limits<double>::infinity());
+            for (size_t s = 0; s < tr.V.size(); ++s) {
+                alpha.emplace_back(tr.V[s].size(), -std::numeric_limits<double>::infinity());
+                beta.emplace_back(tr.V[s].size(), -std::numeric_limits<double>::infinity());
             }
             edge_costs.reserve(tr.E.size());
-            for (const auto& seg : tr.E) edge_costs.emplace_back(seg.size(), std::numeric_limits<double>::quiet_NaN());
+            for (size_t s = 0; s < tr.E.size(); ++s) edge_costs.emplace_back(tr.E[s].size());
         }
 
         void calculate_edge_costs(const Trellis& tr, const Vector<double>& llrs)
@@ -491,16 +501,14 @@ struct Trellis {
         return os;
     }
 
-    std::ostream& print(std::ostream& os) const { return print<Viterbi_Workspace>(os, nullptr); }
+    std::ostream& print(std::ostream& os) const { return print<Viterbi_Workspace<uint16_t>>(os, nullptr); }
 
     friend std::ostream& operator<<(std::ostream& os, const Trellis& Tr) { return Tr.print(os); }
 
     template <typename WS>
-    void export_as_tikz(const std::string& filename, const WS* ws) const
-        requires FiniteFieldType<T> && (T::get_size() <= 64)
-    {
-        std::ofstream file;
-        file.open(filename);
+    void tikz_header(std::ostream& file) const {
+        const double arrow_scale = std::min(1.4 / E.size() * 9.0, 1.4);
+        const double vertex_size = std::min(5.0 / E.size() * 9.0, 5.0);
 
         file << R"(% required in preamble:
 % \usepackage{amsfonts}
@@ -508,34 +516,65 @@ struct Trellis {
 % \usepackage{tikz}
 % \usetikzlibrary{arrows.meta, backgrounds, calc, positioning}
 
-\definecolor{vertexcolor}{RGB}{62, 68, 76}
-\definecolor{red}{RGB}{230, 0, 50}
-\tikzset{>={Stealth[scale=)";
-        file << std::min(1.4 / E.size() * 9.0, 1.4);
-        file << R"(]}}
-\tikzstyle{trellisvertex}=[circle, left color=vertexcolor!80, right color=vertexcolor!20, draw = black, inner sep = 0pt, outer sep = 0pt, minimum size = )";
-        file << std::min(5.0 / E.size() * 9.0, 5.0);
-        file << R"(pt]
+\tikzset{>={Stealth[scale=)" << arrow_scale << R"(]}}
+\tikzstyle{trellisvertex}=[circle, draw=black, outer sep=0pt, inner sep=0pt, minimum size=)"
+             << vertex_size << R"(pt, left color=gray!80, right color=gray!20])";
+
+        if constexpr (WS::is_soft) {
+            file << R"(
+\tikzstyle{trellisvertexprev}=[trellisvertex, inner sep=1pt, left color=blue!80, right color=blue!20, text width=4ex, align=center]
+\tikzstyle{trellisvertexcurr}=[trellisvertex, inner sep=1pt, left color=green!80, right color=green!20, text width=4ex, align=center])";
+        } else {
+            file << R"(
+\tikzstyle{trellisvertexprev}=[trellisvertex, inner sep=2pt, left color=blue!80, right color=blue!20]
+\tikzstyle{trellisvertexcurr}=[trellisvertex, inner sep=2pt, left color=green!80, right color=green!20])";
+        }
+
+        file << R"(
 \tikzstyle{trellisarrow}=[draw, ->, fill=black]
 \tikzstyle{trellisarrowone}=[trellisarrow, fill=red, draw=red]
 \tikzstyle{trellisarrowzero}=[trellisarrow, densely dashed, fill=black, draw=black]
 \tikzstyle{trellisedgelabel}=[below, sloped]
+\tikzstyle{trellispath}=[double distance=.075cm, thick, line join=round, cap=round])";
+    }
 
-\begin{tikzpicture}[x=\linewidth/)";
-        file << E.size() << ", y=1cm]";
+    template <typename WS>
+    void tikz_picture(std::ostream& file, const WS* ws, size_t frontier) const
+        requires FiniteFieldType<T> && (T::get_size() <= 64)
+    {
+        file << "\n\n\\begin{tikzpicture}[x=\\linewidth/" << E.size() << ", y=1cm]";
 
         for (size_t s = 0; s < V.size(); ++s) {
             for (size_t i = 0; i < V[s].size(); ++i) {
-                file << R"(
-    \node[trellisvertex])";
-                file << " (" << s << "_" << V[s][i].id << ") at";
-                file << " (" << s << ", " << -static_cast<int>(V[s][i].id) << ") {\\tiny$";
+                const char* style = "trellisvertex";
+                bool labeled = false;
                 if (ws) {
-                    if constexpr (std::is_same_v<WS, BCJR_Workspace>)
-                        file << std::defaultfloat << std::setprecision(2) << ws->alpha[s][i] << "\\mid "
-                             << ws->beta[s][i];
-                    else
-                        file << std::defaultfloat << std::setprecision(2) << (int)ws->vertex_costs[s][i];
+                    if constexpr (std::is_same_v<WS, BCJR_Workspace>) {
+                        style = "trellisvertexprev";
+                        labeled = true;
+                    } else {
+                        if (s == frontier) {
+                            style = "trellisvertexcurr";
+                            labeled = true;
+                        } else if (frontier > 0 && s == frontier - 1) {
+                            style = "trellisvertexprev";
+                            labeled = true;
+                        }
+                    }
+                }
+                file << "\n    \\node[" << style << "] (" << s << "_" << V[s][i].id
+                     << ") at (" << s << ", " << -static_cast<int>(V[s][i].id) << ") {\\tiny$";
+                if (labeled) {
+                    if constexpr (WS::is_soft) {
+                        file << std::fixed << std::setprecision(2);
+                        if constexpr (std::is_same_v<WS, BCJR_Workspace>) {
+                            file << ws->alpha[s][i] << "\\mid " << ws->beta[s][i];
+                        } else {
+                            file << ((s == frontier) ? ws->path_costs_prev[i] : ws->path_costs_curr[i]);
+                        }
+                    } else {
+                        file << ((s == frontier) ? ws->path_costs_prev[i] : ws->path_costs_curr[i]);
+                    }
                 }
                 file << "$};";
             }
@@ -545,91 +584,100 @@ struct Trellis {
             for (size_t j = 0; j < E[s].size(); ++j) {
                 const auto& e = E[s][j];
                 const auto label = e.value.get_label();
-
                 if (label == 0) {
-                    file << R"(
-    \path[trellisarrowzero])";
+                    file << "\n    \\path[trellisarrowzero]";
                 } else if (label == T::get_size() - 1) {
-                    file << R"(
-    \path[trellisarrowone])";
+                    file << "\n    \\path[trellisarrowone]";
                 } else {
                     const size_t a = 63 - 63 * static_cast<double>(label) / (T::get_size() - 1);
-
                     const uint8_t r = details::colormap[a][0];
                     const uint8_t g = details::colormap[a][1];
                     const uint8_t b = details::colormap[a][2];
-
-                    file << R"(
-    \definecolor{color}{RGB}{)"
-                         << static_cast<int>(r) << ", " << static_cast<int>(g) << ", " << static_cast<int>(b) << "}";
-                    file << R"(\path[trellisarrow, draw=color, fill=color])";
+                    file << "\n    \\definecolor{color}{RGB}{" << static_cast<int>(r) << ", "
+                         << static_cast<int>(g) << ", " << static_cast<int>(b)
+                         << "}\\path[trellisarrow, draw=color, fill=color]";
                 }
                 file << " (" << s << "_" << e.from_id << ")";
-                if (ws && !std::isnan(ws->edge_costs[s][j]))
-                    file << " edge[trellisedgelabel] node[black] {\\tiny$" << std::defaultfloat << std::setprecision(2)
-                         << ws->edge_costs[s][j] << "$}";
-                else
+                if (ws) {
+                    file << " edge[trellisedgelabel] node[black] {\\tiny$";
+                    if constexpr (WS::is_soft) file << std::fixed << std::setprecision(2);
+                    file << ws->edge_costs[s][j] << "$}";
+                } else {
                     file << " --";
+                }
                 file << " (" << s + 1 << "_" << e.to_id << ");";
             }
         }
 
-        file << R"(
-    \begin{scope}[on background layer])";
+        file << "\n    \\begin{scope}[on background layer]";
         const size_t maxdepth = get_maximum_depth();
         for (size_t s = 0; s < V.size(); ++s) {
-            file << R"(
-        \draw [dotted, shorten >=-5mm] ()"
-                 << s << "_0) to (" << s << ", " << -static_cast<int>(maxdepth) + 1 << R"();)";
+            file << "\n        \\draw [dotted, shorten >=-5mm] (" << s << "_0) to ("
+                 << s << ", " << -static_cast<int>(maxdepth) + 1 << ");";
         }
-        file << R"(
-    \end{scope})";
 
-        file << R"(
-    \node[node distance=.0cm, below left=of 0_0] {$\mathfrak{s}$};
-    \node[node distance=.0cm, below right=of )";
-        file << E.size();
-        file << R"(_0] {$\mathfrak{t}$};)";
-
-        if constexpr (requires { ws->v; }) {
-            if (ws && ws->v.has_value()) {
-                file << R"(
-    \node[anchor=west] at ($(0_0)+ (0, .5)$) {$\bm{v}=$};)";
-                file << R"(
-    \node at ($(0_0)!0.5!(1_0)+ (0, .5)$) {$()";
-                std::visit([&](const auto& w) { file << w[0]; }, *(ws->v));
-                file << ",$};";
-                for (size_t s = 1; s < E.size() - 1; ++s) {
-                    file << R"(
-    \node at ($()";
-                    file << s;
-                    file << "_0)!0.5!(";
-                    file << s + 1;
-                    file << "_0)+ (0, .5)$) {$";
-                    std::visit([&](const auto& w) { file << w[s]; }, *(ws->v));
-                    file << ",$};";
+        if constexpr (!std::is_same_v<WS, BCJR_Workspace>) {
+            if (ws && frontier > 0) {
+                std::vector<size_t> path;
+                path.reserve(frontier + 1);
+                for (size_t i = 0; i < V[frontier].size(); ++i) {
+                    path.clear();
+                    size_t v = i;
+                    path.push_back(v);
+                    for (size_t s = frontier; s > 0; --s) {
+                        v = ws->backptrs[s][v]->from_id;
+                        path.push_back(v);
+                    }
+                    file << "\n        \\draw[trellispath, green, double=green!15] ("
+                         << frontier - 1 << "_" << path[1] << ") -- ("
+                         << frontier << "_" << path[0] << ");";
+                    if (path.size() > 2) {
+                        file << "\n        \\draw[trellispath, blue, double=blue!15]";
+                        for (size_t k = 1; k < path.size(); ++k) {
+                            file << " (" << frontier - k << "_" << path[k] << ")";
+                            if (k + 1 < path.size()) file << " --";
+                        }
+                        file << ";";
+                    }
                 }
-                file << R"(
-    \node at ($()";
-                file << E.size() - 1;
-                file << "_0)!0.5!(";
-                file << E.size();
-                file << "_0)+ (0, .5)$) {$";
-                std::visit([&](const auto& w) { file << w[E.size() - 1]; }, *(ws->v));
-                file << ")$};";
             }
         }
 
-        file << R"(
-\end{tikzpicture}
-        )" << std::endl;
+        file << "\n    \\end{scope}"
+             << "\n    \\node[node distance=.0cm, below left=of 0_0] {$\\mathfrak{s}$};"
+             << "\n    \\node[node distance=.0cm, below right=of " << E.size() << "_0] {$\\mathfrak{t}$};";
+
+        if constexpr (requires { ws->v; }) {
+            if (ws && ws->v.has_value()) {
+                file << "\n    \\node[anchor=east] at ($(0_0)+(0,.5)$) {\\small$\\bm{v}=$};";
+                for (size_t s = 0; s < E.size(); ++s) {
+                    file << "\n    \\node at ($(" << s << "_0)!0.5!(" << s + 1
+                         << "_0)+(0,.5)$) {\\small$";
+                    if (s == 0) file << "(";
+                    std::visit([&](const auto& w) { file << w[s]; }, *(ws->v));
+                    file << (s + 1 == E.size() ? ")" : ",") << "$};";
+                }
+            }
+        }
+
+        file << "\n\\end{tikzpicture}\n";
+    }
+
+    template <typename WS>
+    void export_as_tikz(const std::string& filename, const WS* ws) const
+        requires FiniteFieldType<T> && (T::get_size() <= 64)
+    {
+        std::ofstream file;
+        file.open(filename);
+        tikz_header<WS>(file);
+        tikz_picture(file, ws, V.size() - 1);
         file.close();
     }
 
     void export_as_tikz(const std::string& filename) const
         requires FiniteFieldType<T> && (T::get_size() <= 64)
     {
-        export_as_tikz<Viterbi_Workspace>(filename, nullptr);
+        export_as_tikz<Viterbi_Workspace<uint16_t>>(filename, nullptr);
     }
 
     template <FiniteFieldType U>
@@ -1264,8 +1312,8 @@ class LinearCode : public Code<T> {
     }
 
     long double Bhattacharyya_bound(long double gamma) const
-        requires(std::is_same_v<T, Fp<2>>)
     {
+        if constexpr(!std::is_same_v<T, Fp<2>>) throw std::logic_error("Bhattacharyya bound can only be calculated for binary codes!");
         const auto& A = get_weight_enumerator();
         const size_t dmin = get_dmin();
 
@@ -1763,19 +1811,21 @@ class LinearCode : public Code<T> {
                 os << "[F_" << q << "; " << this->n << ", " << k << "]";
                 if (os.iword(details::index) > 1) {
                     get_weight_enumerator();
+                    os << ", dmin = ";
                     try {
-                        os << ", dmin = " << get_dmin();
+                        os  << get_dmin();
                     } catch (const std::logic_error& e) {
-                        os << ", dmin = undefined";
+                        os << "undefined";
                     }
                 }
             } else {
                 os << "[Q; " << this->n << ", " << k << "]";
                 if (os.iword(details::index) > 1) {
+                    os << ", dmin = ";
                     try {
-                        os << ", dmin = " << get_dmin();
+                        os << get_dmin();
                     } catch (const std::logic_error& e) {
-                        os << ", dmin = undefined";
+                        os << "undefined";
                     }
                 }
             }
@@ -1794,10 +1844,11 @@ class LinearCode : public Code<T> {
         }
         if (os.iword(details::index) > 1 && os.iword(details::index) < 3) {
             if constexpr (FiniteFieldType<T>) os << "A(x) = " << get_weight_enumerator() << std::setfill(' ') << " ";
+            os << "tmax = ";
             try {
-                os << "tmax = " << get_tmax() << " ";
+                os << get_tmax() << " ";
             } catch (const std::logic_error& e) {
-                os << "tmax = undefined ";
+                os << "undefined ";
             }
         }
 
@@ -2160,19 +2211,14 @@ class LinearCode : public Code<T> {
 #endif
             validate_length(r);
             if (!filename.empty() && T::get_size() > 64)
-                throw std::invalid_argument("Viterbi trellis TikZ export  not supported for fields with size > 64!");
+                throw std::invalid_argument("Viterbi trellis TikZ export not supported for fields with size > 64!");
             if (k == 0) return Vector<T>(this->n);
 
             const auto& Tr = get_minimal_trellis();
-            typename Trellis<T>::Viterbi_Workspace ws(Tr);
+            typename Trellis<T>::template Viterbi_Workspace<uint16_t> ws(Tr);
             ws.calculate_edge_costs(Tr, r);
-            auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
-            if (!filename.empty()) {
-                if constexpr (T::get_size() <= 64) {
-                    ws.v.emplace(r);
-                    Tr.export_as_tikz(filename, &ws);
-                }
-            }
+            if (!filename.empty()) ws.v.emplace(r);
+            auto c_est = viterbi_forward_pass_and_traceback<uint16_t>(Tr, ws, filename);
             return c_est;
         }
     }
@@ -2185,13 +2231,10 @@ class LinearCode : public Code<T> {
             if (k == 0) return Vector<T>(this->n);
 
             const auto& Tr = get_minimal_trellis();
-            typename Trellis<T>::Viterbi_Workspace ws(Tr);
+            typename Trellis<T>::template Viterbi_Workspace<double> ws(Tr);
             ws.calculate_edge_costs(Tr, llrs);
-            auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
-            if (!filename.empty()) {
-                ws.v.emplace(llrs);
-                Tr.export_as_tikz(filename, &ws);
-            }
+            if (!filename.empty()) ws.v.emplace(llrs);
+            auto c_est = viterbi_forward_pass_and_traceback<double>(Tr, ws, filename);
             return c_est;
         }
     }
@@ -2331,20 +2374,15 @@ class LinearCode : public Code<T> {
             throw std::logic_error("Viterbi error/erasure decoding only available for codes over finite fields!");
         } else {
             validate_length(r);
+            if (!filename.empty() && T::get_size() > 64)
+                throw std::invalid_argument("Viterbi trellis TikZ export not supported for fields with size > 64!");
             if (k == 0) return Vector<T>(this->n);
 
             const auto& Tr = get_minimal_trellis();
-            typename Trellis<T>::Viterbi_Workspace ws(Tr);
+            typename Trellis<T>::template Viterbi_Workspace<uint16_t> ws(Tr);
             ws.calculate_edge_costs(Tr, r);
-            auto c_est = viterbi_forward_pass_and_traceback(Tr, ws);
-            if (!filename.empty()) {
-                if constexpr (T::get_size() <= 64) {
-                    ws.v.emplace(r);
-                    Tr.export_as_tikz(filename, &ws);
-                } else {
-                    throw std::invalid_argument("Viterbi trellis export not supported for fields with size > 64!");
-                }
-            }
+            if (!filename.empty()) ws.v.emplace(r);
+            auto c_est = viterbi_forward_pass_and_traceback<uint16_t>(Tr, ws, filename);
             return c_est;
         }
     }
@@ -2507,37 +2545,55 @@ class LinearCode : public Code<T> {
     mutable std::once_flag minimal_trellis_flag;
 
    private:
+    template <typename cost_t>
     Vector<T> viterbi_forward_pass_and_traceback(const Trellis<T>& Tr,
-                                                 typename Trellis<T>::Viterbi_Workspace& ws) const {
+                                                 typename Trellis<T>::template Viterbi_Workspace<cost_t>& ws,
+                                                 const std::string& filename = "") const {
         thread_local std::mt19937 rng(std::random_device{}());
         thread_local std::uniform_real_distribution<double> uniform(0.0, 1.0);
 
         const size_t n = this->n;
+        using ws_t = typename Trellis<T>::template Viterbi_Workspace<cost_t>;
 
-        ws.vertex_costs[0][0] = 0.0;
+        std::ofstream file;
+        if constexpr (T::get_size() <= 64) {
+            if (!filename.empty()) {
+                file.open(filename);
+                Tr.template tikz_header<ws_t>(file);
+            }
+        }
+
+        std::fill(ws.path_costs_prev.begin(), ws.path_costs_prev.end(), ws_t::init);
+        ws.path_costs_prev[0] = cost_t{0};
 
         for (size_t s = 0; s < n; ++s) {
+            std::fill(ws.path_costs_curr.begin(), ws.path_costs_curr.end(), ws_t::init);
+            std::fill(ws.tie_counts.begin(), ws.tie_counts.end(), 0);
             for (size_t j = 0; j < Tr.E[s].size(); ++j) {
                 const auto& e = Tr.E[s][j];
-                const double cost = ws.vertex_costs[s][e.from_id] + ws.edge_costs[s][j];
-                if (cost < ws.vertex_costs[s + 1][e.to_id]) {
-                    ws.vertex_costs[s + 1][e.to_id] = cost;
+                const cost_t cost = ws.path_costs_prev[e.from_id] + ws.edge_costs[s][j];
+                if (cost < ws.path_costs_curr[e.to_id]) {
+                    ws.path_costs_curr[e.to_id] = cost;
                     ws.backptrs[s + 1][e.to_id] = &e;
-                    ws.tie_counts[s + 1][e.to_id] = 1;
-                } else if (cost == ws.vertex_costs[s + 1][e.to_id]) {
-                    ++ws.tie_counts[s + 1][e.to_id];
-                    if (uniform(rng) < 1.0 / ws.tie_counts[s + 1][e.to_id]) ws.backptrs[s + 1][e.to_id] = &e;
+                    ws.tie_counts[e.to_id] = 1;
+                } else if (cost == ws.path_costs_curr[e.to_id]) {
+                    ++ws.tie_counts[e.to_id];
+                    if (uniform(rng) < 1.0 / ws.tie_counts[e.to_id]) ws.backptrs[s + 1][e.to_id] = &e;
                 }
+            }
+            std::swap(ws.path_costs_prev, ws.path_costs_curr);
+            if constexpr (T::get_size() <= 64) {
+                if (file.is_open()) Tr.tikz_picture(file, &ws, s + 1);
             }
         }
 
         Vector<T> c_est(n);
 
         size_t v = 0;
-        double best = ws.vertex_costs[n][0];
+        cost_t best = ws.path_costs_prev[0];
         uint16_t sink_ties = 1;
-        for (size_t u = 1; u < ws.vertex_costs[n].size(); ++u) {
-            const double c = ws.vertex_costs[n][u];
+        for (size_t u = 1; u < Tr.V[n].size(); ++u) {
+            const cost_t c = ws.path_costs_prev[u];
             if (c < best) {
                 best = c;
                 v = u;
@@ -2546,10 +2602,6 @@ class LinearCode : public Code<T> {
                 ++sink_ties;
                 if (uniform(rng) < 1.0 / sink_ties) v = u;
             }
-        }
-
-        if (!std::isfinite(best)) {
-            throw std::runtime_error("Traceback failed: no reachable final state!");
         }
 
         for (size_t s = n; s > 0; --s) {
@@ -3971,7 +4023,7 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
             if (os.iword(details::index) > 0) os << std::endl;
         }
         if (os.iword(details::index) > 0)
-            os << BOLD("Cordaro-Wagner code") " with properties: { r = " << r << ", m = " << (int)m << " }";
+            os << BOLD("Cordaro-Wagner code") " with properties: { r = " << r << ", m = " << static_cast<int>(m) << " }";
     }
 
     Vector<Fp<2>> dec_BD(const Vector<Fp<2>>& r) const override {
@@ -4802,6 +4854,9 @@ class ExtendedCode : public LinearCode<T> {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Cannot calculate weight enumerator of code over infinite field!");
         } else {
+            // In non-binary case, zero row sum is not the same as even Hamming distance so this really only
+            // works for the binary Fp<2> case! Otherwise we fall back to linear code weight weight enumerator
+            // calculation.
             if constexpr (std::is_same_v<T, Fp<2>>) {
                 if (parity) {
                     auto weight_enumerator = BaseCode.get_weight_enumerator();
@@ -5261,7 +5316,7 @@ auto puncture(C&& code, size_t i) {
 template <FieldType T>
 LinearCode<T> expurgate(const LinearCode<T>& C, const std::vector<size_t>& v) {
     if (!details::validate(v, C.get_k())) throw std::invalid_argument("Invalid pattern for expurgating linear code!");
-    if (C.get_k() == 0) return EmptyCode<T>(C.get_n());
+    if (C.get_k() == 0) return C;
 
     auto G = C.get_G();
     G.delete_rows(v);

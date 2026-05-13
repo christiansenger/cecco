@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.8
+ * @version 2.2.9
  * @date 2026
  *
  * @copyright
@@ -14,57 +14,38 @@
  *
  * @section Description
  *
- * This header file provides an implementation of univariate polynomial arithmetic. It supports:
- *
- * - **Generic polynomial operations**: Over any @ref CECCO::ComponentType including finite fields,
- *   floating-point numbers, complex numbers, and signed integers
- * - **Field-specific algorithms**: Polynomial long division, GCD computation, and factorization
- *   support for @ref CECCO::FieldType coefficients
- * - **Cross-field compatibility**: Safe conversions between polynomials over related fields using
- *   @ref CECCO::SubfieldOf, @ref CECCO::ExtensionOf, and @ref CECCO::largest_common_subfield_t
- * - **Performance optimizations**: High-performance O(1) caching for expensive operations, move semantics, and
- *   Horner's method for efficient evaluation
+ * Univariate polynomials over any @ref CECCO::ComponentType (finite fields, `double`,
+ * `std::complex<double>`, signed integers). Algorithms that need division — long division,
+ * GCD, LCM, derivatives, normalisation, irreducibility test — require @ref CECCO::FieldType
+ * coefficients. Cross-field constructors between two finite fields of the same characteristic
+ * route through @ref CECCO::details::largest_common_subfield_t. Polynomials are stored in
+ * canonical form (leading zero coefficients pruned automatically) and evaluated by Horner.
  *
  * @section Usage_Example
  *
  * @code{.cpp}
- * // Basic polynomial operations
  * using F7 = Fp<7>;
- * Polynomial<F7> p = {1, 2, 3};  // 1 + 2x + 3x²
- * Polynomial<F7> q = {4, 5};     // 4 + 5x
- * auto r = p * q;                // Polynomial multiplication
- * F7 result = p(F7(2));          // Evaluate p at x=2 using Horner's method
+ * Polynomial<F7> p = {1, 2, 3};                        // 1 + 2x + 3x²
+ * Polynomial<F7> q = {4, 5};                           // 4 + 5x
+ * auto r = p * q;                                      // multiplication
+ * F7 v = p(F7(2));                                     // Horner-method evaluation
+ * auto [quot, rem] = p.poly_long_div(q);               // long division
+ * auto g = GCD(p, q);                                  // gcd via extended Euclid
  *
- * // Advanced polynomial algorithms
- * auto [quotient, remainder] = p.poly_long_div(q);  // Polynomial division
- * auto gcd = GCD(p, q);                            // Greatest common divisor
- * auto derivative_p = p.differentiate(1);          // First derivative
- *
- * // Cross-field operations (field tower compatibility)
  * using F2 = Fp<2>;
  * using F4 = Ext<F2, MOD{1, 1, 1}>;
- * Polynomial<F2> a = {1, 0, 1};       // x² + 1 over F₂
- * Polynomial<F4> b(a);                // Safe upcast: F₂ ⊆ F₄
- * Vector<F2> coeffs = Vector<F2>(b);  // Convert to coefficient vector
+ * Polynomial<F2> a = {1, 0, 1};                        // x² + 1 over F₂
+ * Polynomial<F4> b(a);                                 // upcast F₂ ⊆ F₄
  * @endcode
  *
  * @section Performance_Features
  *
- * - **Lazy evaluation**: Hamming weight computed on-demand with compile-time optimized caching
- * - **Move semantics**: Optimal performance for temporary polynomial operations and chained computations
- * - **Horner's method**: O(n) polynomial evaluation algorithm for maximum efficiency
- * - **Automatic pruning**: Maintains canonical form by removing leading zero coefficients
- * - **STL integration**: Uses standard algorithms for optimal compiler optimization
- * - **Type safety**: C++20 concepts prevent invalid operations:
- *   - @ref CECCO::ComponentType Ensures valid coefficient types
- *   - @ref CECCO::FieldType Required for division and advanced algorithms
- *   - @ref CECCO::FiniteFieldType Enables specialized finite field operations
- *   - @ref CECCO::largest_common_subfield_t Enables generalized cross-field conversions
+ * - Hamming weight is lazily computed and cached.
+ * - Move-aware free arithmetic operators, so chained expressions don't copy intermediates.
+ * - Horner's method gives O(n) polynomial evaluation.
+ * - Canonical form (leading zeros pruned) is maintained by the mutating operations.
  *
- * @see @ref fields.hpp for finite field arithmetic and extension field operations
- * @see @ref vectors.hpp for vector representations and linear algebra integration
- * @see @ref matrices.hpp for matrix representations and matrix operations
- * @see @ref field_concepts_traits.hpp for type constraints and field relationships (C++20 concepts)
+ * @see @ref fields.hpp, @ref vectors.hpp, @ref matrices.hpp, @ref field_concepts_traits.hpp
  */
 
 #ifndef POLYNOMIALS_HPP
@@ -96,66 +77,31 @@ template <ComponentType T>
 Polynomial<T> ZeroPolynomial();
 
 /**
- * @class Polynomial
- * @brief Generic univariate polynomial class for error control coding (CECCO) and finite field applications
+ * @brief Univariate polynomial p(x) = a₀ + a₁x + … + aₙxⁿ over a @ref CECCO::ComponentType
  *
- * @tparam T Coefficient type satisfying @ref CECCO::ComponentType concept. Supported types include:
- *   - **Finite field types**: @ref CECCO::Fp, @ref CECCO::Ext, also satisfying concept @ref CECCO::FiniteFieldType
- *   - **Floating-point types**: `double`
- *   - **Complex types**: `std::complex<double>`
- *   - **Signed integer types**: Signed integer types including `InfInt` satisfying concept @ref CECCO::SignedIntType
+ * @tparam T Coefficient type satisfying @ref CECCO::ComponentType (finite field, `double`,
+ *           `std::complex<double>`, or signed integer including `InfInt`)
  *
- * This class provides comprehensive polynomial operations optimized for error-correcting codes (CECCO),
- * with special support for finite field arithmetic and cross-field conversions.
+ * Coefficients are stored low-to-high in a contiguous buffer; the leading-zero invariant is
+ * maintained by an internal `prune()` so `data.size() - 1` is the degree (when non-empty and
+ * not the zero polynomial). The empty polynomial (no coefficients) is *distinct* from the
+ * zero polynomial — most queries throw `std::invalid_argument` on an empty polynomial.
  *
- * @section Implementation_Notes
- *
- * - **Coefficient storage**: Uses `std::vector<T>` with index i representing coefficient of x^i
- * - **Canonical form**: Automatically removes leading zero coefficients via pruning
- * - **Cross-field compatibility**: Safe conversions between related field types using concepts
- * - **Performance optimization**: Lazy evaluation with compile-time optimized O(1) caching for expensive operations
- * - **Type safety**: Compile-time validation of coefficient types and field relationships
+ * Methods that need division are gated by `requires FieldType<T>`; methods that compare
+ * against zero (degree, Hamming weight, …) are gated by `requires ReliablyComparableType<T>`.
  *
  * @section Usage_Example
  *
  * @code{.cpp}
- * // Create polynomials over finite fields
  * using F7 = Fp<7>;
- * Polynomial<F7> p = {1, 2, 3};  // 1 + 2x + 3x²
- * Polynomial<F7> q({4, 5});      // 4 + 5x
- *
- * // Basic polynomial operations
- * auto sum = p + q;      // Addition
- * auto product = p * q;  // Multiplication
- * F7 value = p(F7(3));   // Evaluation at x=3
- *
- * // Advanced operations (field types only)
- * auto [quotient, remainder] = p.poly_long_div(q);  // Polynomial division
- * auto derivative = p.differentiate(1);             // First derivative
- * p.normalize();                                    // Make monic
- *
- * // Applications (e.g., error control coding)
- * size_t weight = p.wH();     // Hamming weight (non-zero coefficients)
- * auto gcd_poly = GCD(p, q);  // Greatest common divisor
- *
- * // Cross-field operations (F₂ ⊆ F₄)
- * using F2 = Fp<2>;
- * using F4 = Ext<F2, MOD{1, 1, 1}>;
- * Polynomial<F2> p_f2 = {1, 0, 1};  // x² + 1 over F₂
- * Polynomial<F4> p_f4(p_f2);        // Safe upcast: F₂ ⊆ F₄
+ * Polynomial<F7> p = {1, 2, 3};                    // 1 + 2x + 3x²
+ * Polynomial<F7> q = {4, 5};                       // 4 + 5x
+ * auto sum = p + q;
+ * auto prod = p * q;
+ * F7 v = p(F7(3));                                 // evaluation
+ * auto [quot, rem] = p.poly_long_div(q);
+ * size_t w = p.wH();                               // Hamming weight (cached)
  * @endcode
- *
- * @note Polynomial operations require compatible types. Division operations require
- *          coefficient types satisfying @ref CECCO::FieldType concept.
- *
- * @note Additional methods available via concept constraints:
- *       - **Field types only**: poly_long_div(), normalize(), differentiate()
- *       - **Finite fields and signed integers**: degree(), wH() (Hamming weight)
- *
- * @see Concept @ref CECCO::ComponentType for supported coefficient types
- * @see Concepts @ref CECCO::FieldType, @ref CECCO::FiniteFieldType for advanced operations
- * @see Concepts @ref CECCO::SubfieldOf, @ref CECCO::largest_common_subfield_t for cross-field operation constraints
- * @see @ref CECCO::Vector for coefficient vector representations
  */
 template <ComponentType T>
 class Polynomial {
@@ -170,84 +116,44 @@ class Polynomial {
      * @{
      */
 
-    /**
-     * @brief Default constructor creating an empty polynomial
-     *
-     * Creates an empty polynomial (uninitialized state, distinct from the zero polynomial).
-     */
+    /// @brief Default constructor: empty polynomial (no coefficients; distinct from the zero polynomial)
     constexpr Polynomial() noexcept {}
 
-    /**
-     * @brief Constructs a constant polynomial from an integer
-     *
-     * @param e Integer value to convert to coefficient type T
-     */
+    /// @brief Constant polynomial from an `int` (constructs `T(e)`)
     constexpr Polynomial(int e) noexcept : data(1) { data.back() = T(e); }
 
-    /**
-     * @brief Constructs a constant polynomial from a coefficient
-     *
-     * @param e Coefficient value of type T
-     */
+    /// @brief Constant polynomial from a coefficient
     constexpr Polynomial(const T& e) : data(1) { data.back() = e; }
 
     /**
-     * @brief Constructs a polynomial from an initializer list of coefficients
+     * @brief From an initializer list of coefficients in ascending degree order
      *
-     * @param l Initializer list containing coefficients in ascending degree order
-     *
-     * l[i] is the coefficient of x^i:
-     * @code{.cpp}
-     * Polynomial<int> p{1, 2, 3};       // 1 + 2x + 3x²
-     * Polynomial<Fp<7>> q{0, 1, 0, 1};  // x + x³
-     * @endcode
-     *
-     * Automatically removes leading zero coefficients from list in order to maintain canonical form.
+     * `l[i]` becomes the coefficient of x^i. Trailing (high-degree) zeros are pruned to keep
+     * canonical form: `Polynomial<int>{1, 2, 3}` represents 1 + 2x + 3x².
      */
     constexpr Polynomial(const std::initializer_list<T>& l) : data(l) { prune(); }
 
-    /**
-     * @brief Copy constructor
-     *
-     * @param other Polynomial to copy from
-     */
     constexpr Polynomial(const Polynomial& other) noexcept : data(other.data), cache(other.cache) {}
-
-    /**
-     * @brief Move constructor
-     *
-     * @param other Polynomial to move from (left in valid but unspecified state)
-     */
     constexpr Polynomial(Polynomial&& other) noexcept : data(std::move(other.data)), cache(std::move(other.cache)) {}
 
     /**
-     * @brief Cross-field constructor between finite fields with the same characteristic
+     * @brief Cross-field conversion between two finite fields of the same characteristic
      *
-     * @tparam S Source field type that must have the same characteristic as T
-     * @param other Polynomial over field S to convert
+     * @tparam S Source field type (`Polynomial<S>`); must share characteristic with T
      *
-     * Safely converts polynomials between any finite fields with the same characteristic using
-     * @ref largest_common_subfield_t as the conversion bridge. Supports conversions across
-     * different field towers, not just within the same construction hierarchy.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     * @note May propagate exceptions from T's cross-field constructor if a coefficient cannot be represented
+     * Converts coefficient by coefficient via T's cross-field constructor, which routes through
+     * @ref CECCO::details::largest_common_subfield_t and so handles disjoint construction towers.
+     * Propagates `std::invalid_argument` if any coefficient is not representable in T.
      */
     template <FiniteFieldType S>
         requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
     Polynomial(const Polynomial<S>& other);
 
     /**
-     * @brief Constructs polynomial from coefficient vector
+     * @brief From a coefficient vector: `v[i]` becomes the coefficient of x^i
      *
-     * @param v Vector whose components become polynomial coefficients
-     *
-     * Creates a polynomial where v[i] is the coefficient of x^i.
-     * The polynomial degree equals v.get_n() - 1.
-     *
-     * @note If you need cross-field polynomial <-> vector conversion then first convert v into the other field.
-     *
-     * @throws std::bad_alloc if memory allocation fails
+     * Resulting degree is `v.get_n() - 1` (after pruning). For cross-field conversion, convert
+     * the vector first.
      */
     Polynomial(const Vector<T>& v);
 
@@ -257,44 +163,13 @@ class Polynomial {
      * @{
      */
 
-    /**
-     * @brief Scalar assignment operator
-     *
-     * @param rhs Coefficient value to assign
-     * @return Reference to this polynomial after assignment
-     */
+    /// @brief Assign a scalar: replace `*this` with the constant polynomial @p rhs
     constexpr Polynomial& operator=(const T& rhs);
 
-    /**
-     * @brief Copy assignment operator
-     *
-     * @param rhs Polynomial to copy from
-     * @return Reference to this polynomial after assignment
-     */
     constexpr Polynomial& operator=(const Polynomial<T>& rhs);
-
-    /**
-     * @brief Move assignment operator
-     *
-     * @param rhs Polynomial to move from (left in valid but unspecified state)
-     * @return Reference to this polynomial after assignment
-     */
     constexpr Polynomial& operator=(Polynomial&& rhs) noexcept;
 
-    /**
-     * @brief Cross-field assignment operator between finite fields with the same characteristic
-     *
-     * @tparam S Source field type that must have the same characteristic as T
-     * @param other Polynomial over field S to convert
-     * @return Reference to this polynomial after assignment
-     *
-     * Safely converts polynomials between any finite fields with the same characteristic using
-     * @ref largest_common_subfield_t as the conversion bridge. Supports conversions across
-     * different field towers, not just within the same construction hierarchy.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     * @note May propagate exceptions from T's cross-field constructor if a coefficient cannot be represented
-     */
+    /// @brief Cross-field assignment (same semantics as the cross-field constructor)
     template <FiniteFieldType S>
         requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
     Polynomial& operator=(const Polynomial<S>& other);
@@ -305,48 +180,21 @@ class Polynomial {
      * @{
      */
 
-    /**
-     * @brief Unary plus operator for lvalue references (identity)
-     *
-     * @return Copy of this polynomial (mathematical identity operation)
-     */
+    /// @brief Unary `+` (lvalue): returns a copy
     constexpr Polynomial operator+() const& noexcept { return *this; }
-
-    /**
-     * @brief Unary plus operator for rvalue references (move optimization)
-     *
-     * @return This polynomial moved (mathematical identity operation)
-     */
+    /// @brief Unary `+` (rvalue): returns the rvalue itself
     constexpr Polynomial operator+() && noexcept { return std::move(*this); }
 
-    /**
-     * @brief Unary minus operator for lvalue references
-     *
-     * @return New polynomial with all coefficients negated
-     *
-     * Creates a new polynomial -p(x) where each coefficient is negated.
-     * Uses copy constructor for lvalue references.
-     */
+    /// @brief Unary `−` (lvalue): returns a new polynomial with each coefficient negated
     constexpr Polynomial operator-() const& noexcept;
-
-    /**
-     * @brief Unary minus operator for rvalue references (move optimization)
-     *
-     * @return This polynomial with all coefficients negated in-place
-     *
-     * Efficiently negates coefficients in-place for temporary polynomials.
-     */
+    /// @brief Unary `−` (rvalue): negates coefficients in place
     constexpr Polynomial operator-() && noexcept;
 
     /**
-     * @brief Polynomial evaluation using Horner's method
+     * @brief Evaluate at @p s using Horner's method (O(n))
      *
-     * @param s Value at which to evaluate the polynomial
-     * @return Result of p(s) = a₀ + a₁s + a₂s² + ... + aₙsⁿ
-     *
-     * Evaluates the polynomial at the given value using Horner's method (O(n)).
-     *
-     * @throws std::invalid_argument if attempting to evaluate empty polynomial
+     * @return p(s) = a₀ + a₁s + a₂s² + … + aₙsⁿ
+     * @throws std::invalid_argument if `*this` is empty
      */
     T operator()(const T& s) const;
 
@@ -356,131 +204,57 @@ class Polynomial {
      * @{
      */
 
-    /**
-     * @brief Polynomial addition assignment
-     *
-     * @param rhs Polynomial to add to this polynomial
-     * @return Reference to this polynomial after addition
-     *
-     * Performs coefficient-wise addition with automatic degree handling.
-     * Automatically expands coefficient storage if rhs has higher degree.
-     * Maintains canonical form through automatic pruning.
-     */
+    /// @brief Coefficient-wise addition; expands storage if @p rhs has higher degree, then prunes
     constexpr Polynomial& operator+=(const Polynomial& rhs) noexcept;
-
-    /**
-     * @brief Polynomial subtraction assignment
-     *
-     * @param rhs Polynomial to subtract from this polynomial
-     * @return Reference to this polynomial after subtraction
-     *
-     * Performs coefficient-wise subtraction with automatic degree handling.
-     * Automatically expands coefficient storage if rhs has higher degree.
-     * Maintains canonical form through automatic pruning.
-     */
+    /// @brief Coefficient-wise subtraction; expands storage if @p rhs has higher degree, then prunes
     constexpr Polynomial& operator-=(const Polynomial& rhs) noexcept;
 
     /**
-     * @brief Polynomial multiplication assignment
+     * @brief Polynomial multiplication by convolution (O(n²))
      *
-     * @param rhs Polynomial to multiply with this polynomial
-     * @return Reference to this polynomial after multiplication
-     *
-     * Performs polynomial multiplication using convolution algorithm.
-     * Result degree is deg(this) + deg(rhs). Uses O(n²) naive algorithm.
+     * @return Reference to `*this` with degree `deg(this) + deg(rhs)`
+     * @throws std::invalid_argument if either operand is the empty polynomial
      */
     constexpr Polynomial& operator*=(const Polynomial& rhs);
 
     /**
-     * @brief Polynomial division assignment (field coefficients only)
+     * @brief Polynomial division: `*this` becomes the quotient of `(*this) / rhs`
      *
-     * @param rhs Polynomial to divide this polynomial by
-     * @return Reference to this polynomial after division (quotient)
-     *
-     * Performs polynomial long division, storing the quotient in this polynomial.
-     * Requires field coefficient type for division operations.
-     *
-     * @throws std::invalid_argument if attempting to divide by zero polynomial
-     *
-     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
+     * @throws std::invalid_argument if @p rhs is the zero polynomial
      */
     Polynomial& operator/=(const Polynomial& rhs)
         requires FieldType<T>;
 
     /**
-     * @brief Polynomial modulo assignment (field coefficients only)
+     * @brief Polynomial remainder: `*this` becomes `(*this) mod rhs`
      *
-     * @param rhs Polynomial to compute remainder against
-     * @return Reference to this polynomial after modulo operation (remainder)
+     * Specialised path when `deg(this) == deg(rhs)` (one subtraction); long division otherwise.
      *
-     * Computes polynomial remainder: this = this mod rhs.
-     * Uses optimized algorithm for equal degree case, full division otherwise.
-     * Critical for modular polynomial arithmetic in coding theory.
-     *
-     * @throws std::invalid_argument if attempting modulo by zero polynomial
-     *
-     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
+     * @throws std::invalid_argument if @p rhs is the zero polynomial
      */
     Polynomial& operator%=(const Polynomial& rhs)
         requires FieldType<T>;
 
-    /**
-     * @brief Scalar multiplication assignment
-     *
-     * @param s Scalar value to multiply with
-     * @return Reference to this polynomial after multiplication
-     *
-     * Multiplies each coefficient by the scalar: p(x) *= s.
-     */
+    /// @brief Multiply every coefficient by the scalar @p s
     constexpr Polynomial& operator*=(const T& s) noexcept;
 
     /**
-     * @brief Scalar division assignment
+     * @brief Divide every coefficient by the scalar @p s
      *
-     * @param s Scalar value to divide by
-     * @return Reference to this polynomial after division
-     *
-     * Divides each coefficient by the scalar: p(x) /= s.
-     *
-     * @throws std::invalid_argument if attempting to divide by zero scalar
-     *
-     * @note Reliable results ((p / s) * s == p) for a polynomial p and nonzero scalar s are only guaranteed in case
-     * T fulfills concept FieldType<T>
+     * @throws std::invalid_argument if @p s == T(0)
+     * @note Round-trip `(p / s) * s == p` is only guaranteed when T satisfies @ref CECCO::FieldType
+     * (otherwise integer rounding may corrupt coefficients).
      */
     Polynomial& operator/=(const T& s);
 
-    /**
-     * @brief Integer multiplication assignment (field coefficients only)
-     *
-     * @param n Integer value to multiply with (handles characteristic)
-     * @return Reference to this polynomial after multiplication
-     *
-     * Multiplies each coefficient by integer n, accounting for field characteristic.
-     * For finite fields, reduces n modulo characteristic before multiplication.
-     *
-     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
-     */
+    /// @brief Multiply every coefficient by the integer @p n; reduces @p n modulo characteristic
     constexpr Polynomial& operator*=(size_t n) noexcept
         requires FieldType<T>;
 
     /**
-     * @brief Polynomial long division
+     * @brief Long division: returns `(q, r)` with `*this == q · rhs + r` and `r == 0` or `deg(r) < deg(rhs)`
      *
-     * @param rhs Divisor polynomial
-     * @return Pair containing quotient and remainder polynomials
-     *
-     * Performs polynomial long division: this = quotient * rhs + remainder.
-     *
-     * @throws std::invalid_argument if attempting division by zero polynomial
-     *
-     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
-     *
-     * @code{.cpp}
-     * using F7 = Fp<7>;
-     * Polynomial<F7> p = {1, 2, 3};  // 1 + 2x + 3x²
-     * Polynomial<F7> q = {4, 5};     // 4 + 5x
-     * auto [quotient, remainder] = p.poly_long_div(q);
-     * @endcode
+     * @throws std::invalid_argument if @p rhs is the zero polynomial
      */
     std::pair<Polynomial<T>, Polynomial<T>> poly_long_div(const Polynomial<T>& rhs) const
         requires FieldType<T>;
@@ -492,14 +266,11 @@ class Polynomial {
      */
 
     /**
-     * @brief Randomize polynomial coefficients
+     * @brief Replace `*this` with a random polynomial of degree exactly @p d
      *
-     * @param d Desired degree of the randomized polynomial
-     * @return Reference to this polynomial after randomization
-     *
-     * Creates a random polynomial of degree exactly d with random coefficients.
-     * Ensures the leading coefficient is non-zero to maintain the exact degree.
-     * Uses the coefficient type's randomize() method for field elements.
+     * The leading coefficient is resampled until non-zero, so the result really has degree d.
+     * Distribution per coefficient: finite-field types draw uniformly from the field; signed
+     * integers from [−100, 100]; `double` and the parts of `std::complex<double>` from [−1, 1].
      */
     Polynomial& randomize(size_t d) noexcept;
 
@@ -510,35 +281,23 @@ class Polynomial {
      */
 
     /**
-     * @brief Compute s-th classical derivative (field coefficients only)
+     * @brief In-place classical s-th derivative
      *
-     * @param s Order of differentiation (0 = identity, 1 = first derivative, etc.)
-     * @return Reference to this polynomial after differentiation
+     * d^s/dx^s [∑ aᵢ xⁱ] = ∑_{i ≥ s} (i! / (i − s)!) aᵢ x^{i − s}. The s-th derivative of a
+     * polynomial of degree < s is the zero polynomial. `s == 0` is the identity.
      *
-     * Computes the s-th formal derivative using the standard formula:
-     * d^s/dx^s [∑ aᵢxᵢ] = ∑ (i!/(i-s)!) aᵢx^(i-s) for i ≥ s
-     *
-     * For s=0, returns the original polynomial unchanged.
-     *
-     * @throws std::invalid_argument if attempting to differentiate empty polynomial
-     *
-     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
+     * @throws std::invalid_argument if `*this` is empty
      */
     Polynomial& differentiate(size_t s)
         requires FieldType<T>;
 
     /**
-     * @brief Compute s-th Hasse derivative (field coefficients only)
+     * @brief In-place s-th Hasse derivative (= classical s-th derivative divided by s!)
      *
-     * @param s Order of Hasse differentiation
-     * @return Reference to this polynomial after Hasse differentiation
+     * D^{(s)}[∑ aᵢ xⁱ] = ∑_{i ≥ s} C(i, s) aᵢ x^{i − s}. Useful in characteristic p where the
+     * classical derivative loses information whenever s ≥ p.
      *
-     * Computes the s-th Hasse derivative using binomial coefficients:
-     * D^(s)[∑ aᵢxᵢ] = ∑ C(i,s) aᵢx^(i-s) for i ≥ s
-     *
-     * @throws std::invalid_argument if attempting to Hasse differentiate empty polynomial
-     *
-     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
+     * @throws std::invalid_argument if `*this` is empty
      */
     Polynomial& Hasse_differentiate(size_t s)
         requires FieldType<T>;
@@ -550,76 +309,46 @@ class Polynomial {
      */
 
     /**
-     * @brief Get the degree of the polynomial
+     * @brief Degree max{i : aᵢ ≠ 0}
      *
-     * @return deg(p) = max{i : aᵢ ≠ 0}
-     *
-     * @throws std::invalid_argument if called on empty polynomial
-     *
-     * @note Only available for types satisfying @ref ReliablyComparableType
+     * @throws std::invalid_argument if `*this` is empty
      */
     size_t degree() const
         requires ReliablyComparableType<T>;
 
-    /**
-     * @brief Get the coefficients as a vector
-     *
-     * @return Vector<T> of length equal to the number of stored coefficients (0 for empty polynomial)
-     */
+    /// @brief Coefficient vector (length = number of stored coefficients; 0 for an empty polynomial)
     Vector<T> get_coefficients() const;
 
     /**
-     * @brief Get the trailing degree (lowest power with non-zero coefficient)
+     * @brief Trailing degree min{i : aᵢ ≠ 0}
      *
-     * @return min{i : aᵢ ≠ 0}
-     *
-     * @throws std::invalid_argument if called on empty polynomial
-     *
-     * @note Only available for types satisfying @ref ReliablyComparableType
+     * @throws std::invalid_argument if `*this` is empty
      */
     size_t trailing_degree() const
         requires ReliablyComparableType<T>;
 
     /**
-     * @brief Get the trailing coefficient (coefficient of lowest power term)
+     * @brief Coefficient of the lowest non-zero power
      *
-     * @return Const reference to the trailing coefficient
-     *
-     * @throws std::invalid_argument if called on empty polynomial
-     *
-     * @note Only available for types satisfying @ref ReliablyComparableType
+     * @throws std::invalid_argument if `*this` is empty
      */
     const T& trailing_coefficient() const
         requires ReliablyComparableType<T>;
 
     /**
-     * @brief Get the leading coefficient (coefficient of highest power term)
+     * @brief Coefficient of the highest non-zero power
      *
-     * @return Const reference to the leading coefficient
-     *
-     * @throws std::invalid_argument if called on empty polynomial
+     * @throws std::invalid_argument if `*this` is empty
      */
     const T& leading_coefficient() const;
 
-    /**
-     * @brief Check if polynomial is empty (uninitialized)
-     *
-     * @return true if polynomial has no coefficients, false otherwise
-     *
-     * @note Distinct from the zero polynomial.
-     */
+    /// @brief True iff `*this` has no coefficients (distinct from the zero polynomial)
     constexpr bool is_empty() const noexcept { return data.empty(); }
 
     /**
-     * @brief Check if polynomial is the zero polynomial
+     * @brief True iff `*this` is the zero polynomial (one coefficient, equal to T(0))
      *
-     * @return true if p(x) = 0, false otherwise
-     *
-     * @note Distinct from empty polynomial.
-     *
-     * @throws std::invalid_argument if called on empty polynomial
-     *
-     * @note Only available for types satisfying @ref ReliablyComparableType
+     * @throws std::invalid_argument if `*this` is empty
      */
     bool is_zero() const
         requires ReliablyComparableType<T>
@@ -629,13 +358,9 @@ class Polynomial {
     }
 
     /**
-     * @brief Check if polynomial is the constant polynomial 1
+     * @brief True iff `*this` is the constant polynomial 1
      *
-     * @return true if p(x) = 1, false otherwise
-     *
-     * @throws std::invalid_argument if called on empty polynomial
-     *
-     * @note Only available for types satisfying @ref ReliablyComparableType
+     * @throws std::invalid_argument if `*this` is empty
      */
     bool is_one() const
         requires ReliablyComparableType<T>
@@ -645,13 +370,9 @@ class Polynomial {
     }
 
     /**
-     * @brief Check if polynomial is monic (leading coefficient equals 1)
+     * @brief True iff the leading coefficient equals 1
      *
-     * @return true if leading coefficient is 1, false otherwise
-     *
-     * @throws std::invalid_argument if called on empty polynomial
-     *
-     * @note Only available for types satisfying @ref ReliablyComparableType
+     * @throws std::invalid_argument if `*this` is empty
      */
     bool is_monic() const
         requires ReliablyComparableType<T>
@@ -661,16 +382,11 @@ class Polynomial {
     }
 
     /**
-     * @brief Check whether the polynomial is irreducible over its coefficient field
+     * @brief Test irreducibility by trial division against every monic polynomial of degree ≤ deg/2
      *
-     * @return True if the polynomial is irreducible, false otherwise
+     * Cost grows as q^{deg/2} in field size — practical only for small fields and small degrees.
      *
-     * Tests irreducibility by trial division: checks all monic polynomials of degree
-     * up to deg(p)/2 for divisibility.
-     *
-     * @throws std::invalid_argument if called on empty polynomial (via degree())
-     *
-     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
+     * @throws std::invalid_argument if `*this` is empty
      */
     constexpr bool is_irreducible() const
         requires FiniteFieldType<T>
@@ -700,15 +416,7 @@ class Polynomial {
         return true;
     }
 
-    /**
-     * @brief Compute Hamming weight (number of non-zero coefficients)
-     *
-     * @return Number of non-zero coefficients
-     *
-     * Uses lazy evaluation with O(1) compile-time optimized caching for optimal performance on repeated calls.
-     *
-     * @note Only available for types satisfying @ref ReliablyComparableType
-     */
+    /// @brief Hamming weight: number of non-zero, non-erased coefficients; cached on first call
     size_t wH() const noexcept
         requires ReliablyComparableType<T>
     {
@@ -722,65 +430,33 @@ class Polynomial {
      */
 
     /**
-     * @brief Add value to coefficient at specified position using perfect forwarding
+     * @brief Add @p c to the coefficient of x^i; grows the polynomial if `i > degree`
      *
-     * @tparam U Type that can be converted to T
-     * @param i Index of coefficient to modify (power of x)
-     * @param c Value to add to the coefficient
-     * @return Reference to this polynomial after modification
-     *
-     * Adds c to the coefficient of x^i. Automatically grows polynomial
-     * if i exceeds current degree. Maintains canonical form through pruning.
+     * @param i Power of x
+     * @param c Value to add (perfect-forwarded)
      */
     template <typename U>
     constexpr Polynomial& add_to_coefficient(size_t i, U&& c)
         requires std::convertible_to<std::decay_t<U>, T>;
 
     /**
-     * @brief Set coefficient at specified position using perfect forwarding
+     * @brief Set the coefficient of x^i to @p c; grows the polynomial if `i > degree`
      *
-     * @tparam U Type that can be converted to T
-     * @param i Index of coefficient to set (power of x)
-     * @param c New value for the coefficient
-     * @return Reference to this polynomial after modification
-     *
-     * Sets the coefficient of x^i to c. Automatically grows polynomial
-     * if i exceeds current degree. Maintains canonical form through pruning.
+     * @param i Power of x
+     * @param c New value (perfect-forwarded)
      */
     template <typename U>
     constexpr Polynomial& set_coefficient(size_t i, U&& c)
         requires std::convertible_to<std::decay_t<U>, T>;
 
-    /**
-     * @brief Reverse coefficient order (reciprocal polynomial)
-     *
-     * @return Reference to this polynomial after reciprocal operation
-     *
-     * Transforms p(x) = a₀ + a₁x + ... + aₙx^n into x^n·p(1/x) = aₙ + aₙ₋₁x + ... + a₀x^n.
-     */
+    /// @brief Reciprocal: reverse coefficients, sending p(x) to xⁿ · p(1/x)
     constexpr Polynomial& reciprocal() noexcept;
 
-    /**
-     * @brief Normalize polynomial to monic form (field coefficients only)
-     *
-     * @return Reference to this polynomial after normalization
-     *
-     * Divides all coefficients by the leading coefficient to make the polynomial monic.
-     *
-     * @note Only available for coefficient types satisfying @ref CECCO::FieldType
-     */
+    /// @brief Make monic by dividing every coefficient by the leading one (no-op on zero or already-monic)
     constexpr Polynomial& normalize()
         requires FieldType<T>;
 
-    /**
-     * @brief Access coefficient by index (const version)
-     *
-     * @param i Index of coefficient to access (power of x)
-     * @return Coefficient of x^i (returns T(0) if i exceeds degree)
-     *
-     * Provides safe, bounds-checked access to polynomial coefficients.
-     * Returns zero for indices beyond the polynomial degree.
-     */
+    /// @brief Coefficient of x^i; returns T(0) for `i > degree`
     constexpr T operator[](size_t i) const noexcept;
 
     /** @} */
@@ -788,8 +464,7 @@ class Polynomial {
    private:
     std::vector<T> data;
 
-    /// High-performance O(1) cache for expensive operations (Hamming weight, etc.) - uses compile-time optimized array
-    /// storage
+    /// @brief Cache for Hamming weight (invalidated by mutating operations)
     mutable details::Cache<details::CacheEntry<Weight, size_t>> cache;
 
     constexpr size_t calculate_weight() const noexcept
@@ -1225,7 +900,13 @@ template <ComponentType T>
 constexpr size_t Polynomial<T>::calculate_weight() const noexcept
     requires ReliablyComparableType<T>
 {
-    return data.size() - std::count(data.cbegin(), data.cend(), T(0));
+    size_t res = data.size() - std::count(data.cbegin(), data.cend(), T(0));
+
+#ifdef CECCO_ERASURE_SUPPORT
+    if constexpr (FieldType<T>) res -= std::count_if(data.cbegin(), data.cend(), [](T x) { return x.is_erased(); });
+#endif
+
+    return res;
 }
 
 template <ComponentType T>
@@ -1561,14 +1242,10 @@ std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) noexcept {
 }
 
 /**
- * @brief Create a monomial polynomial ax^i
+ * @brief Monomial a · xⁱ
  *
- * @tparam T Coefficient type satisfying @ref CECCO::ComponentType
- * @param i Degree of the monomial (power of x)
- * @param a Coefficient of the monomial (defaults to 1)
- * @return Polynomial representing ax^i
- *
- * Creates a monomial polynomial with single non-zero term ax^i.
+ * @param i Power of x
+ * @param a Coefficient (defaults to T(1))
  */
 template <ComponentType T>
 constexpr Polynomial<T> Monomial(size_t i, auto&& a = T(1)) noexcept
@@ -1579,28 +1256,14 @@ constexpr Polynomial<T> Monomial(size_t i, auto&& a = T(1)) noexcept
     return res;
 }
 
-/**
- * @brief Create the zero polynomial
- *
- * @tparam T Coefficient type satisfying @ref CECCO::ComponentType
- * @return Polynomial representing the constant 0
- *
- * Creates the polynomial p(x) = 0.
- */
+/// @brief Constant polynomial 0 (cached)
 template <ComponentType T>
 Polynomial<T> ZeroPolynomial() {
     static const Polynomial<T> zero(0);
     return zero;
 }
 
-/**
- * @brief Create the one polynomial
- *
- * @tparam T Coefficient type satisfying @ref CECCO::ComponentType
- * @return Polynomial representing the constant 1
- *
- * Creates the polynomial p(x) = 1.
- */
+/// @brief Constant polynomial 1 (cached)
 template <ComponentType T>
 Polynomial<T> OnePolynomial() {
     static const Polynomial<T> one(1);
@@ -1608,17 +1271,15 @@ Polynomial<T> OnePolynomial() {
 }
 
 /**
- * @brief Compute greatest common divisor of two polynomials using Extended Euclidean Algorithm
+ * @brief Greatest common divisor of two polynomials via the (extended) Euclidean algorithm
  *
- * @tparam T Coefficient type satisfying @ref CECCO::FieldType
  * @param a First polynomial
  * @param b Second polynomial
- * @param s Optional pointer to store Bézout coefficient for polynomial a
- * @param t Optional pointer to store Bézout coefficient for polynomial b
- * @return gcd(a,b); if s and t are provided, also satisfies gcd(a,b) = s·a + t·b
+ * @param s Optional out-pointer for the Bézout coefficient of @p a
+ * @param t Optional out-pointer for the Bézout coefficient of @p b
+ * @return gcd(a, b); if both @p s and @p t are non-null, additionally `gcd(a, b) = s·a + t·b`
  *
- * @note Only available for coefficient types satisfying @ref CECCO::FieldType
- * @note Automatically handles degree ordering (larger degree polynomial processed first)
+ * Operands are reordered internally so that the higher-degree one drives the recursion.
  */
 template <ComponentType T>
 Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, Polynomial<T>* t = nullptr)
@@ -1657,15 +1318,10 @@ Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, 
 }
 
 /**
- * @brief Compute greatest common divisor of multiple polynomials
+ * @brief Greatest common divisor of a list of polynomials, computed iteratively
  *
- * @tparam T Coefficient type satisfying @ref CECCO::FieldType
- * @param polys std::vector of polynomials to find GCD of
- * @return gcd(p₁, p₂, ..., pₙ) computed iteratively
- *
- * @throws std::invalid_argument if polys is empty
- *
- * @note Only available for coefficient types satisfying @ref CECCO::FieldType
+ * @return gcd(p₁, p₂, …, pₙ)
+ * @throws std::invalid_argument if @p polys is empty
  */
 template <ComponentType T>
 Polynomial<T> GCD(const std::vector<Polynomial<T>>& polys)
@@ -1682,16 +1338,7 @@ Polynomial<T> GCD(const std::vector<Polynomial<T>>& polys)
     return res;
 }
 
-/**
- * @brief Compute least common multiple of two polynomials
- *
- * @tparam T Coefficient type satisfying @ref CECCO::FieldType
- * @param a First polynomial
- * @param b Second polynomial
- * @return lcm(a,b) = (a·b)/gcd(a,b)
- *
- * @note Only available for coefficient types satisfying @ref CECCO::FieldType
- */
+/// @brief Least common multiple `lcm(a, b) = (a · b) / gcd(a, b)`
 template <ComponentType T>
 Polynomial<T> LCM(const Polynomial<T>& a, const Polynomial<T>& b)
     requires FieldType<T>
@@ -1700,18 +1347,10 @@ Polynomial<T> LCM(const Polynomial<T>& a, const Polynomial<T>& b)
 }
 
 /**
- * @brief Compute least common multiple of multiple polynomials
+ * @brief Least common multiple of a list of polynomials, computed iteratively
  *
- * @tparam T Coefficient type satisfying @ref CECCO::FieldType
- * @param polys Vector of polynomials to find LCM of
- * @return Least common multiple of all polynomials in the vector
- *
- * Computes lcm(p₁, p₂, ..., pₙ) by iteratively applying binary LCM.
- * Uses the associative property: lcm(a,b,c) = lcm(lcm(a,b), c).
- *
- * @throws std::invalid_argument if polys is empty
- *
- * @note Only available for coefficient types satisfying @ref CECCO::FieldType
+ * @return lcm(p₁, p₂, …, pₙ)
+ * @throws std::invalid_argument if @p polys is empty
  */
 template <ComponentType T>
 Polynomial<T> LCM(const std::vector<Polynomial<T>>& polys)
@@ -1729,20 +1368,13 @@ Polynomial<T> LCM(const std::vector<Polynomial<T>>& polys)
 }
 
 /**
- * @brief Polynomial exponentiation operator
+ * @brief Polynomial exponentiation by square-and-multiply
  *
- * @tparam T Coefficient type satisfying @ref CECCO::ComponentType
- * @param base Polynomial to raise to exponent
- * @param exponent Integer exponent
- * @return Polynomial base^exponent
+ * @return base^exponent
  *
- * Computes polynomial exponentiation using square-and-multiply algorithm.
- *
- * @warning **DANGEROUS OPERATOR**: This operator violates usual precedence rules!
- * Expression `b*a^p` is evaluated as `(b*a)^p` instead of expected `b*(a^p)`.
- * Use explicit parentheses: `b*(a^p)` to ensure correct evaluation order.
- *
- * @note Consider using explicit function calls for clarity in complex expressions
+ * @warning Does **not** follow C++ precedence for `^`: in `b * base ^ exponent` the parser
+ * evaluates `(b * base) ^ exponent`. Parenthesise as `b * (base ^ exponent)`, or call
+ * @ref CECCO::sqm directly.
  */
 template <ComponentType T>
 constexpr Polynomial<T> operator^(const Polynomial<T>& base, int exponent) noexcept {
@@ -1750,16 +1382,13 @@ constexpr Polynomial<T> operator^(const Polynomial<T>& base, int exponent) noexc
 }
 
 /**
- * @brief Get the coefficient vector of the Conway polynomial for 𝔽_{p^m}
+ * @brief Coefficient vector [a₀, a₁, …, aₘ] of the Conway polynomial for 𝔽_{p^m}
  *
  * @tparam p Prime characteristic
  * @tparam m Extension degree
- * @return Coefficient vector [a₀, a₁, ..., aₘ] of the Conway polynomial
+ * @return Coefficients low-to-high; empty vector if the (p, m) pair is not in the built-in table
  *
- * Returns the standardized Conway polynomial coefficients for the finite field
- * with p^m elements.
- *
- * @note Returns an empty vector if the requested (p, m) pair is not in the table
+ * The built-in table covers all primes ≤ 97 and degrees ≤ ~13 (more for small p).
  */
 template <uint16_t p, size_t m>
 constexpr Vector<Fp<p>> ConwayCoefficients() {
@@ -1943,16 +1572,9 @@ constexpr Vector<Fp<p>> ConwayCoefficients() {
 }
 
 /**
- * @brief Get the Conway polynomial for 𝔽_{p^m}
+ * @brief Conway polynomial for 𝔽_{p^m} as a `Polynomial<Fp<p>>`
  *
- * @tparam p Prime characteristic
- * @tparam m Extension degree
- * @return The Conway polynomial for 𝔽_{p^m} as a Polynomial<Fp<p>>
- *
- * Convenience wrapper that constructs a polynomial from @ref ConwayCoefficients.
- *
- * @note Returns an empty polynomial if the requested (p, m) pair is not in the table
- * @see ConwayCoefficients
+ * Wraps @ref ConwayCoefficients; returns the empty polynomial if (p, m) is not tabulated.
  */
 template <uint16_t p, size_t m>
 constexpr Polynomial<Fp<p>> ConwayPolynomial() {
@@ -1960,17 +1582,11 @@ constexpr Polynomial<Fp<p>> ConwayPolynomial() {
 }
 
     /**
-     * @brief Find a random irreducible polynomial of given degree
+     * @brief Sample a random monic irreducible polynomial of degree @p degree over T
      *
-     * @tparam T Field type for coefficients (must satisfy @ref CECCO::FieldType)
-     * @param degree Degree of the irreducible polynomial to find
-     * @return A monic irreducible polynomial of the specified degree
-     *
-     * Generates random monic polynomials of the given degree and tests them for
-     * irreducibility until one is found.
-     *
-     * @note Relies on randomization; runtime depends on the density of irreducible
-     *       polynomials at the given degree
+     * Tries random polynomials until @ref Polynomial::is_irreducible accepts one. Runtime is
+     * bounded in expectation by the density of irreducibles, but unbounded in the worst case;
+     * suitable as a `modulus` for @ref CECCO::Ext.
      */
     template <FieldType T>
     Polynomial<T> find_irreducible(size_t degree) {

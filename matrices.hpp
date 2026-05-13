@@ -2,7 +2,7 @@
  * @file matrices.hpp
  * @brief Matrix arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.8
+ * @version 2.2.9
  * @date 2026
  *
  * @copyright
@@ -14,81 +14,29 @@
  *
  * @section Description
  *
- * This header file provides a complete implementation of matrix arithmetic and many linear algebra
- * operations. It supports:
+ * Dense and structured matrices over any @ref CECCO::ComponentType (finite fields, floating-point,
+ * complex, signed integers). Provides REF/RREF (with binary-field fast paths), cached rank,
+ * determinant, nullspace, characteristic polynomial, and matrix inversion. Cross-field
+ * operations bridge through @ref CECCO::largest_common_subfield_t.
  *
- * - **details::Generic matrix operations**: Over any @ref CECCO::ComponentType including finite fields,
- *   floating-point numbers, complex numbers, and signed integers
- * - **Specialized matrix types**: details::Zero, details::Identity, details::Diagonal, details::Vandermonde, and
- * details::Toeplitz matrices with optimized operations
- * - **Optimized linear algebra operations**: REF/RREF with binary field optimizations, cached rank computation,
- *   determinant, nullspace, characteristic polynomial, eigenvalue computation, and matrix inversion
- * - **Cross-field operations**: Safe conversions between matrices over related fields using
- *   @ref CECCO::SubfieldOf, @ref CECCO::ExtensionOf, and @ref CECCO::largest_common_subfield_t
- * - **Vector integration**: Bidirectional conversion Matrix -> Vector -> Matrix
- * - **Performance optimizations**: STL algorithms, move semantics, and type-specific optimizations
- *
- * @section Usage_Examples
+ * The class template `Matrix<T>` automatically tracks structural type
+ * (@ref CECCO::details::matrix_type_t — Zero, Identity, Diagonal, Vandermonde, Toeplitz)
+ * to enable specialized fast paths. The type tag is transparent to callers; factories
+ * (`IdentityMatrix`, `DiagonalMatrix`, `VandermondeMatrix`, …) all return `Matrix<T>`.
  *
  * @code{.cpp}
- * Matrix<int> U = {{1, 2, 3}, {4, 5, 6}};  // 2x3 matrix
- * Matrix<int> V(2, 3, 7);                  // 2x3 matrix filled with 7s
- * auto W = U + V;                          // Element-wise addition
- * auto X = U * V.transpose();              // Matrix multiplication
+ * // Factory + arithmetic
+ * auto I = IdentityMatrix<double>(3);
+ * auto D = DiagonalMatrix(Vector<double>{1, 2, 3});
+ * auto M = I + D;                              // 3×3, type tag stays Diagonal
  *
- * // Special matrices (factories, results are type Matrix)
- * auto I = IdentityMatrix<double>(3);  // 3x3 identity matrix
- * auto Z = ZeroMatrix<double>(2, 4);   // 2x4 zero matrix
- * Vector<double> v = {1, 2, 3};
- * auto D = DiagonalMatrix(v);          // 3x3 diagonal matrix
- *
- * // Finite field matrices
+ * // Finite-field linear algebra
  * Matrix<Fp<7>> P = {{1, 2}, {3, 4}};
- * auto det = P.determinant();  // Determinant
- * size_t rank = P.rank();      // Cached rank computation
- * P.rref();                    // Bring into RREF
- *
- * using F2 = Fp<2>;
- * using F4 = Ext<F2, {1, 1, 1}>;
- * Matrix<F4> Q = {{0, 1}, {2, 3}};
- * auto nullspace = Q.basis_of_nullspace();         // Nullspace basis
- * auto char_poly = Q.characteristic_polynomial();  // Characteristic polynomial
- *
- * // Cross-field operations (field tower compatibility)
- * Vector<F4> r(10);
- * r.randomize();
- * auto R = r.as_matrix<F2>();  // Convert vector over superfield to matrix over subfield
- * Matrix<F4> S(R);             // Safe upcast: F₂ ⊆ F₄
+ * size_t r = P.rank();                         // Cached
+ * auto null_basis = P.basis_of_nullspace();
  * @endcode
  *
- * @section Matrix_Types
- *
- * The library supports several types of matrices:
- * - **Generic**: General dense matrices with arbitrary elements
- * - **Zero**: Matrices with all zero elements
- * - **Identity**: Identity matrices
- * - **Diagonal**: Diagonal matrices
- * - **Vandermonde**: Vandermonde matrices
- * - **Toeplitz**: Toeplitz matrices
- *
- * @note There is only one class template Matrix<T>! The type of matrix is only for internal use and transparent to the
- * user of Matrix<T>. Example: Both IdentityMatrix<double>(3) and ZeroMatrix<double>(2, 4) return an instance
- * of class (template) Matrix<T>!
- *
- * @section Performance_Features
- *
- * - **Optimized algorithms**: REF (Row Echelon Form) for efficient rank computation, binary field optimizations using
- * constexpr if
- * - **High-performance caching**: Rank computation uses caching
- * - **Move semantics**: Optimal performance for temporary matrix operations
- * - **STL integration**: Uses standard algorithms for optimal compiler optimization
- * - **Type safety**: C++20 concepts prevent invalid operations:
- *   - @ref CECCO::ComponentType Ensures valid component types
- *   - @ref CECCO::largest_common_subfield_t Enables generalized cross-field conversions
- *
- * @see @ref fields.hpp for fields and field arithmetic
- * @see @ref vectors.hpp for vectors and associated operations
- * @see @ref field_concepts_traits.hpp for type constraints and field relationships (C++20 concepts)
+ * @see @ref fields.hpp, @ref vectors.hpp, @ref field_concepts_traits.hpp
  */
 
 #ifndef MATRICES_HPP
@@ -115,14 +63,11 @@ namespace CECCO {
 namespace details {
 
 /**
- * @brief Enumeration of matrix types for operations (internal use only)
+ * @brief Matrix structural type tag for optimization (internal)
  *
- * This enum enables type-specific optimizations by tracking the structural properties
- * of matrices. Different matrix types allow for specialized algorithms that can
- * dramatically improve performance.
- *
- * @note Matrix type information is automatically maintained during operations.
- *       Operations that break the structure will demote to details::Generic type.
+ * Maintained automatically by `Matrix<T>` operations; mutations that break a structure
+ * demote the tag to `Generic`. Specialized algorithms dispatch on this tag to avoid
+ * full O(mn) traversals when possible.
  */
 enum matrix_type_t : uint8_t {
     /**
@@ -179,94 +124,35 @@ template <ComponentType T>
 std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept;
 
 /**
- * @class Matrix
- * @brief Generic matrix class for error control coding (CECCO) and finite field applications
+ * @brief Dense m × n matrix over a @ref CECCO::ComponentType
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType concept. Supported types include:
- *   - **Finite field types**: @ref CECCO::Fp, @ref CECCO::Ext satisfying @ref CECCO::FiniteFieldType
- *   - **Floating-point type**: `double`
- *   - **Complex type**: `std::complex<double>`
- *   - **Signed integer types**: Signed integer types including `InfInt` satisfying @ref CECCO::SignedIntType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType (finite field, `double`,
+ *           `std::complex<double>`, or signed integer including `InfInt`)
  *
- * The Matrix class provides a linear algebra framework for error control
- * coding applications. It supports both dense and structured matrix types with automatic
- * optimization based on matrix structure.
+ * Components are stored row-major in a contiguous buffer. A structural tag
+ * (@ref details::matrix_type_t) tracks `Zero` / `Identity` / `Diagonal` / `Vandermonde` /
+ * `Toeplitz` structures and dispatches to specialised fast paths; mutating operations that
+ * break a tracked structure demote the tag to `Generic` and structure is not re-detected.
+ * Dimension mismatches in arithmetic throw `std::invalid_argument`.
  *
- * @section Implementation_Notes
+ * Methods that need division (REF/RREF, inversion, nullspace, determinant, characteristic
+ * polynomial, …) are gated by `requires FieldType<T>`; eigenvalue computation by
+ * `requires FiniteFieldType<T>`. Methods that compare against zero (Hamming weight, rank,
+ * structural tests, …) are gated by `requires ReliablyComparableType<T>`.
  *
- * - **Cross-field compatibility**: Safe conversions between related field types using concepts
- * - **CECCO-specific operations**: Hamming weight, Hamming distance, burst length calculations
- * - **Type safety**: Compile-time validation of field relationships and operations
+ * Cross-field constructors and assignment operators between two finite fields of the same
+ * characteristic route through @ref CECCO::details::largest_common_subfield_t, so matrices
+ * over fields from disjoint construction towers can interoperate.
  *
- * - **Automatic type optimization**: Recognizes and optimizes for special matrix structures
- *   (Zero, Identity, Diagonal, Vandermonde, Toeplitz) with significant
- * performance gains
- * - **Cross-field compatibility**: Safe conversions between matrices over related fields
- *   using C++20 concepts for field tower relationships
- * - **Optimized linear algebra**: REF/RREF with binary field optimizations, cached rank computation,
- *   determinant, nullspace, eigenvalues, matrix inversion, characteristic polynomial computation
- *
- * @section Matrix_Types
- *
- * The library supports several types of matrices:
- * - **Generic**: General dense matrices with arbitrary elements
- * - **Zero**: Matrices with all zero elements
- * - **Identity**: Identity matrices
- * - **Diagonal**: Diagonal matrices
- * - **Vandermonde**: Vandermonde matrices
- * - **Toeplitz**: Toeplitz matrices
- *
- * @section Usage_Examples
+ * @section Usage_Example
  *
  * @code{.cpp}
- * Matrix<int> U = {{1, 2, 3}, {4, 5, 6}};  // 2x3 matrix
- * Matrix<int> V(2, 3, 7);                  // 2x3 matrix filled with 7s
- * auto W = U + V;                          // Element-wise addition
- * auto X = U * V.transpose();              // Matrix multiplication
- *
- * // Special matrices (factories, results are type Matrix)
- * auto I = IdentityMatrix<double>(3);  // 3x3 identity matrix
- * auto Z = ZeroMatrix<double>(2, 4);   // 2x4 zero matrix
- * Vector<double> v = {1, 2, 3};
- * auto D = DiagonalMatrix(v);          // 3x3 diagonal matrix
- *
- * // Finite field matrices
- * Matrix<Fp<7>> P = {{1, 2}, {3, 4}};
- * auto det = P.determinant();  // Determinant
- * size_t rank = P.rank();      // Cached rank computation
- * P.rref();                    // Bring into RREF
- *
- * using F2 = Fp<2>;
- * using F4 = Ext<F2, {1, 1, 1}>;
- * Matrix<F4> Q = {{0, 1}, {2, 3}};
- * auto nullspace = Q.basis_of_nullspace();         // Nullspace basis
- * auto char_poly = Q.characteristic_polynomial();  // Characteristic polynomial
- *
- * // Cross-field operations (field tower compatibility)
- * Vector<F4> r(10);
- * r.randomize();
- * auto R = r.as_matrix<F2>();  // Convert vector over superfield to matrix over subfield
- * Matrix<F4> S(R);             // Safe upcast: F₂ ⊆ F₄
+ * using F4 = Ext<Fp<2>, MOD{1, 1, 1}>;
+ * Matrix<F4> M = {{1, 0}, {1, 1}};
+ * size_t r = M.rank();                          // cached
+ * auto null_basis = M.basis_of_nullspace();
+ * auto chi = M.characteristic_polynomial();
  * @endcode
- *
- * @section Template Constraints
- *
- * - **Basic operations**: Available for all @ref CECCO::ComponentType
- * - **Field operations**: RREF, inversion, nullspace require @ref CECCO::FieldType
- * - **Cross-field operations**: Require same characteristic using @ref CECCO::largest_common_subfield_t
- * - **Finite field specific**: Some operations require @ref CECCO::FiniteFieldType
- *
- * @warning Matrix operations assume compatible dimensions. Operations on incompatible
- *          matrices throw `std::invalid_argument` exceptions.
- *
- * @note The class maintains strong exception safety guarantees. Failed operations
- *       leave the matrix in its original state.
- *
- * @see @ref CECCO::Vector for vector operations and matrix-vector conversions
- * @see @ref CECCO::details::matrix_type_t for matrix type optimizations
- * @see @ref CECCO::ComponentType for supported component types
- * @see @ref CECCO::FieldType, @ref CECCO::FiniteFieldType for field operation constraints
- * @see @ref CECCO::largest_common_subfield_t for cross-field operation requirements
  */
 template <ComponentType T>
 class Matrix {
@@ -281,98 +167,40 @@ class Matrix {
     friend class Matrix;
 
    public:
-    /**
-     * @brief Default constructor creating an empty matrix
+    /** @name Constructors
+     * @{
      */
+
+    /// @brief Default constructor: empty matrix
     constexpr Matrix() noexcept : data(0) {}
 
-    /**
-     * @brief Constructs a zero matrix of specified dimensions
-     *
-     * @param m Number of rows
-     * @param n Number of columns
-     *
-     * Creates an m × n zero matrix with all elements initialized to T(0).
-     * Automatically sets matrix type to @ref details::Zero for optimization.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
+    /// @brief m × n zero matrix (tag @ref details::Zero)
     constexpr Matrix(size_t m, size_t n) : data(m * n), m(m), n(n), type(details::Zero) {}
 
     /**
-     * @brief Constructs a matrix filled with a specific value from T
+     * @brief m × n matrix with every component equal to `l`
      *
-     * @param m Number of rows
-     * @param n Number of columns
-     * @param l Value to assign to all elements
-     *
-     * Creates an m × n matrix with all elements set to the specified value.
-     * Matrix type is automatically set to @ref details::Zero if value is T(0), otherwise @ref details::Generic.
-     *
-     * @throws std::bad_alloc if memory allocation fails
+     * Tag is @ref details::Zero if `l == T(0)`, otherwise @ref details::Generic.
      */
     Matrix(size_t m, size_t n, const T& l);
 
     /**
-     * @brief Constructs a matrix from a flat initializer list
+     * @brief m × n matrix from a flat initializer list (row-major)
      *
-     * @param m Number of rows
-     * @param n Number of columns
-     * @param l Initializer list containing m*n elements from T in row-major order
-     *
-     * Creates an m × n matrix from elements provided in row-major order.
-     *
-     * @throws std::invalid_argument if initializer list size doesn't match m*n
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @code{.cpp}
-     * Matrix<int> M(2, 3, {1, 2, 3, 4, 5, 6});  // 2 × 3 matrix
-     * @endcode
+     * @throws std::invalid_argument if `l.size() != m * n`
      */
     constexpr Matrix(size_t m, size_t n, std::initializer_list<T> l);
 
     /**
-     * @brief Constructs a matrix from nested initializer lists
+     * @brief From nested initializer lists, e.g. `{{1, 2, 3}, {4, 5, 6}}`
      *
-     * @param l Nested initializer list where each inner list represents a row
-     *
-     * Creates a matrix from a 2D initializer list structure. Dimensions are
-     * automatically determined from the initializer list structure.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @code{.cpp}
-     * Matrix<int> M = {{1, 2, 3}, {4, 5, 6}};  // 2 × 3 matrix
-     * @endcode
-     *
-     * @note Rows with different lengths are zero-padded to match the longest row
+     * Rows of unequal length are zero-padded to the longest row.
      */
     Matrix(std::initializer_list<std::initializer_list<T>> l);
 
-    /**
-     * @brief Constructs a single-row matrix from a vector
-     *
-     * @param v Vector to convert into a 1 × n matrix
-     *
-     * Creates a 1 × n matrix (row vector) from the provided vector.
-     * Matrix type is set to @ref details::Toeplitz for optimization.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @code{.cpp}
-     * Vector<int> v = {1, 2, 3, 4};
-     * Matrix<int> M(v);  // 1 × 4 matrix
-     * @endcode
-     */
+    /// @brief 1 × n row matrix from a `Vector<T>`
     Matrix(const Vector<T>& v);
 
-    /**
-     * @brief Copy constructor
-     *
-     * @param other Matrix to copy from
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
     constexpr Matrix(const Matrix& other)
         : data(other.data),
           m(other.m),
@@ -381,11 +209,6 @@ class Matrix {
           type(other.type),
           cache(other.cache) {}
 
-    /**
-     * @brief Move constructor
-     *
-     * @param other Matrix to move from (left in valid but unspecified state)
-     */
     constexpr Matrix(Matrix&& other) noexcept
         : data(std::move(other.data)),
           m(other.m),
@@ -395,93 +218,45 @@ class Matrix {
           cache(std::move(other.cache)) {}
 
     /**
-     * @brief Cross-field copy constructor for finite fields with the same characteristic
+     * @brief Cross-field conversion between two finite fields of the same characteristic
      *
-     * @tparam S Source finite field type that must have the same characteristic as T
-     * @param other Matrix over finite field S to copy from
+     * @tparam S Source field type (`Matrix<S>`); must share characteristic with T
      *
-     * Safely converts matrices between any finite fields with the same characteristic using
-     * @ref largest_common_subfield_t as the conversion bridge. Supports conversions across
-     * different field towers, not just within the same construction hierarchy.
-     *
-     * @throws std::invalid_argument if field components cannot be represented in target field (downcasting not
-     * possible)
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @note Available for any finite field types with matching characteristics
+     * Converts component by component via T's cross-field constructor, which routes through
+     * @ref CECCO::details::largest_common_subfield_t and so handles disjoint construction towers.
+     * Propagates `std::invalid_argument` if any component is not representable in T.
      */
     template <FiniteFieldType S>
     constexpr Matrix(const Matrix<S>& other)
         requires FiniteFieldType<T> && (T::get_characteristic() == S::get_characteristic());
 
     /**
-     * @brief Construct matrix from a PPM (P3) image file
+     * @brief Read from a PPM (P3) image file using the 64-entry colormap of @ref export_as_ppm
      *
-     * @param filename Path to the input PPM file (ASCII P3 format)
+     * Pixels whose RGB does not match any colormap entry are erased (under
+     * @ref CECCO_ERASURE_SUPPORT) or replaced by a random field element.
      *
-     * Reads a PPM image and constructs an m × n matrix (m = height, n = width)
-     * by mapping each pixel's RGB triplet back to a field element label using the
-     * same 64-entry colormap as @ref export_as_ppm. Pixels whose RGB values do not
-     * match any colormap entry are treated as erased (when @c CECCO_ERASURE_SUPPORT
-     * is defined) or set to a random field element.
-     *
-     * @note Only available for finite field types with field size at most 64
-     * @note The input file must use the colormap palette. To convert any image
-     *       (PNG, JPG, etc.) into the appropriate PPM format, use ImageMagick:
+     * @note Convert other formats with ImageMagick:
      * @code{.sh}
      * magick input.png -alpha remove -background black +dither -remap palette.ppm -compress none output.ppm
-     * @endcode
-     *
-     * @code{.cpp}
-     * using F4 = Ext<Fp<2>, MOD{1, 1, 1}>;
-     * Matrix<F4> M("matrix.ppm");
      * @endcode
      */
     Matrix(const std::string& filename)
         requires FiniteFieldType<T> && (T::get_size() <= 64);
 
+    /** @} */
+
     /** @name Assignment Operators
      * @{
      */
 
-    /**
-     * @brief Copy assignment operator
-     *
-     * @param rhs Matrix to copy from
-     * @return Reference to this matrix after assignment
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
     constexpr Matrix& operator=(const Matrix& rhs);
-
-    /**
-     * @brief Move assignment operator
-     *
-     * @param rhs Matrix to move from (left in valid but unspecified state)
-     * @return Reference to this matrix after assignment
-     */
     constexpr Matrix& operator=(Matrix&& rhs) noexcept;
 
-    /**
-     * @brief Cross-field assignment operator between fields with the same characteristic
-     *
-     * @tparam S Source field type that must have the same characteristic as T
-     * @param rhs Matrix over field S to convert
-     * @return Reference to this matrix after assignment
-     *
-     * Safely converts matrices between any fields with the same characteristic using
-     * @ref largest_common_subfield_t as the conversion bridge. Supports conversions across
-     * different field towers, not just within the same construction hierarchy.
-     *
-     * @throws std::invalid_argument if field components cannot be represented in target field (downcasting not
-     * possible)
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @note Available for any field types with matching characteristics
-     */
-    template <FieldType S>
-    constexpr Matrix& operator=(const Matrix<S>& other)
-        requires FiniteFieldType<S> && FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic());
+    /// @brief Cross-field assignment (same semantics as the cross-field constructor)
+    template <FiniteFieldType S>
+        requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
+    constexpr Matrix& operator=(const Matrix<S>& other);
 
     /** @} */
 
@@ -489,34 +264,14 @@ class Matrix {
      * @{
      */
 
-    /**
-     * @brief Unary plus operator for lvalue references (identity)
-     *
-     * @return Copy of this matrix (mathematical identity operation)
-     */
+    /// @brief Unary `+` (lvalue): returns a copy
     constexpr Matrix operator+() const& noexcept { return *this; }
-
-    /**
-     * @brief Unary plus operator for rvalue references (move optimization)
-     *
-     * @return This matrix moved (mathematical identity operation)
-     */
+    /// @brief Unary `+` (rvalue): returns the rvalue itself
     constexpr Matrix operator+() && noexcept { return std::move(*this); }
 
-    /**
-     * @brief Unary minus operator for lvalue references
-     *
-     * @return New matrix with all elements negated
-     */
+    /// @brief Unary `−` (lvalue): returns a new matrix with each component negated
     constexpr Matrix operator-() const& noexcept;
-
-    /**
-     * @brief Unary minus operator for rvalue references (move optimization)
-     *
-     * @return This matrix with all elements negated in-place
-     *
-     * @note This modifies the matrix in-place (move operation)
-     */
+    /// @brief Unary `−` (rvalue): negates components in place
     constexpr Matrix operator-() && noexcept;
 
     /** @} */
@@ -526,66 +281,35 @@ class Matrix {
      */
 
     /**
-     * @brief Matrix addition assignment
+     * @brief Component-wise addition `this(i, j) += rhs(i, j)`
      *
-     * @param rhs Matrix to add to this matrix
-     * @return Reference to this matrix after addition
-     *
-     * Performs element-wise addition: this[i,j] += rhs[i,j] for all valid indices.
-     * Matrices must have identical dimensions.
-     *
-     * @throws std::invalid_argument if matrices have different dimensions
+     * @throws std::invalid_argument if dimensions differ
      */
     Matrix& operator+=(const Matrix& rhs);
 
     /**
-     * @brief Matrix subtraction assignment
+     * @brief Component-wise subtraction `this(i, j) -= rhs(i, j)`
      *
-     * @param rhs Matrix to subtract from this matrix
-     * @return Reference to this matrix after subtraction
-     *
-     * Performs element-wise subtraction: this[i,j] -= rhs[i,j] for all valid indices.
-     * Matrices must have identical dimensions.
-     *
-     * @throws std::invalid_argument if matrices have different dimensions
+     * @throws std::invalid_argument if dimensions differ
      */
     Matrix& operator-=(const Matrix& rhs);
 
     /**
-     * @brief Matrix multiplication assignment
+     * @brief Matrix multiplication `*this = *this · rhs`
      *
-     * @param rhs Matrix to multiply with this matrix
-     * @return Reference to this matrix after multiplication
-     *
-     * Performs matrix multiplication: this = this * rhs.
-     * Number of columns in this matrix must equal number of rows in rhs.
-     *
-     * @throws std::invalid_argument if matrix dimensions are incompatible
+     * @throws std::invalid_argument if `this->get_n() != rhs.get_m()`
      */
     Matrix& operator*=(const Matrix& rhs);
 
-    /**
-     * @brief Scalar multiplication assignment
-     *
-     * @param s Scalar value to multiply with
-     * @return Reference to this matrix after multiplication
-     *
-     * Multiplies each matrix element by the scalar: this[i,j] *= s for all elements.
-     */
+    /// @brief Multiply every component by the scalar `s`
     constexpr Matrix& operator*=(const T& s);
 
     /**
-     * @brief Scalar division assignment
+     * @brief Divide every component by the scalar `s`
      *
-     * @param s Nonzero scalar value to divide by
-     * @return Reference to this matrix after division
-     *
-     * Divides each matrix element by the scalar: this[i,j] /= s for all elements.
-     *
-     * @throws std::invalid_argument if attempting to divide by zero
-     *
-     * @warning Reliable results ( (M / s) *  s == M for a matrix M and nonzero scalar s are only guaranteed in case T
-     * fulfills concept FieldType<T>
+     * @throws std::invalid_argument if `s == T(0)`
+     * @note Round-trip `(M / s) * s == M` is only guaranteed when T satisfies @ref CECCO::FieldType
+     * (otherwise integer rounding may corrupt components).
      */
     Matrix& operator/=(const T& s);
 
@@ -597,15 +321,15 @@ class Matrix {
 
     /**
      * @brief Fill matrix with random values
+     *
      * @return Reference to this matrix after randomization
      *
-     * Fills the matrix with random values appropriate for the component type:
-     * - **Finite fields**: Using field-specific randomization
-     * - **Signed integers**: Uniform random values in range [-100, 100]
-     * - **Complex numbers**: Real and imaginary parts uniform random in [-1.0, 1.0]
-     * - **Double**: Uniform random values in range [-1.0, 1.0]
+     * Distribution depends on the component type: finite-field types draw uniformly from the
+     * field; signed integers from [−100, 100]; `double` and the real/imaginary parts of
+     * `std::complex<double>` from [−1.0, 1.0].
      *
-     * @note Matrix type becomes @ref details::Generic after randomization, actual structure is not checked
+     * @note Tag becomes @ref details::Generic — incidental structure (e.g. an accidental zero
+     * matrix) is not re-detected.
      */
     Matrix& randomize();
 
@@ -637,13 +361,12 @@ class Matrix {
     constexpr bool is_empty() const noexcept { return m == 0 || n == 0; }
 
     /**
-     * @brief Check if matrix is zero
+     * @brief Check if the matrix is zero, caching the result via the type tag
      *
-     * Sets type to details::Zero in case the matrix is zero.
+     * @return true iff every component equals T(0)
      *
-     * @return true if matrix has only zero components, false otherwise
-     *
-     * @see @ref CECCO::details::matrix_type_t for matrix type optimizations
+     * On a positive result the tag is updated to @ref details::Zero, so subsequent calls and
+     * other tag-aware fast paths short-circuit.
      */
     constexpr bool is_zero() noexcept {
         if (type == details::Zero) return true;
@@ -653,36 +376,29 @@ class Matrix {
     }
 
     /**
-     * @brief Check if matrix is zero
+     * @brief Check if the matrix is zero (no caching)
      *
-     * @return true if matrix has only zero components, false otherwise
+     * @return true iff every component equals T(0)
      */
     constexpr bool is_zero() const noexcept {
         if (type == details::Zero) return true;
         return std::ranges::all_of(data, [](const T& v) { return v == T(0); });
     }
 
-    /**
-     * @brief Compute Hamming weight (number of non-zero elements)
-     *
-     * @return Number of non-zero elements in the matrix
-     *
-     * Counts the number of elements that are not equal to T(0).
-     *
-     * @note Only for types fulfilling CECCO::ReliablyComparableType.
-     */
-    constexpr size_t wH() const
-        requires ReliablyComparableType<T>;
+    /// @brief Hamming weight: number of non-zero, non-erased components; cached on first call
+    size_t wH() const
+        requires ReliablyComparableType<T>
+    {
+        return cache.template get_or_compute<Weight>([this] { return calculate_weight(); });
+    }
 
     /**
-     * @brief Compute matrix rank with caching
+     * @brief Matrix rank, computed once and cached
      *
-     * @return Rank of the matrix (dimension of row/column space)
+     * @return Dimension of the row space (equivalently, of the column space)
      *
-     * Computes the rank using Gaussian elimination (REF algorithm).
-     * Uses caching for repeated calls.
-     *
-     * @note Only available for field types (requires division)
+     * Uses row reduction to echelon form. Subsequent calls return the cached value until a
+     * mutating operation invalidates it.
      */
     size_t rank() const
         requires FieldType<T>;
@@ -690,9 +406,7 @@ class Matrix {
     /**
      * @brief Check if matrix is invertible
      *
-     * @return true if matrix is square and has full rank, false otherwise
-     *
-     * @note Only available for field types
+     * @return true iff the matrix is square and has full rank
      */
     bool is_invertible() const
         requires FieldType<T>
@@ -701,55 +415,41 @@ class Matrix {
     }
 
     /**
-     * @brief Extract the main diagonal as a vector
+     * @brief Main diagonal as a vector
      *
-     * @return Vector containing the diagonal elements
+     * @return Vector containing entries (i, i) for i = 0, …, m−1
      *
-     * Returns a vector containing the elements on the main diagonal. For square matrices only.
-     *
-     * @throws std::invalid_argument if matrix is not square
-     * @throws std::bad_alloc if memory allocation fails
+     * @throws std::invalid_argument if the matrix is not square
      */
     Vector<T> diagonal() const;
 
     /**
-     * @brief Compute characteristic polynomial
+     * @brief Characteristic polynomial det(λI − A)
      *
-     * @return Characteristic polynomial det(λI - A)
+     * @return Polynomial of degree m
      *
-     * Computes the characteristic polynomial using the Samuelson-Berkowitz algorithm.
-     * For square matrices only. The result is a polynomial of degree m.
+     * Computed via the Samuelson–Berkowitz algorithm in the general case; the
+     * @ref details::Diagonal and @ref details::Vandermonde tags trigger closed-form shortcuts.
      *
-     * @throws std::invalid_argument if matrix is not square or empty
-     *
-     * @note Specialized algorithms for structured matrices (@ref details::Diagonal, @ref details::Vandermonde)
-     * @note Only available for field types
+     * @throws std::invalid_argument if the matrix is not square or is empty
      */
     Polynomial<T> characteristic_polynomial() const
         requires FieldType<T>;
 
     /**
-     * @brief Compute basis for the nullspace (kernel)
+     * @brief Basis of the nullspace (right kernel)
      *
-     * @return Matrix whose rows form a basis for the nullspace
+     * @return Matrix whose rows span { x : A xᵀ = 0 }; empty matrix if the nullspace is trivial
      *
-     * Computes a basis for the nullspace using Gaussian elimination.
-     * The nullspace consists of all row vectors x such that Ax^T = 0.
-     *
-     * @note Only available for field types
+     * Computed by row reduction.
      */
     Matrix<T> basis_of_nullspace() const
         requires FieldType<T>;
 
     /**
-     * @brief Compute basis for the kernel (alias for nullspace)
+     * @brief Alias for @ref basis_of_nullspace
      *
-     * @return Matrix whose rows form a basis for the kernel
-     *
-     * Equivalent to basis_of_nullspace(). The kernel and nullspace are
-     * the same mathematical concept.
-     *
-     * @note Only available for field types
+     * @return Matrix whose rows form a basis of the kernel
      */
     Matrix<T> basis_of_kernel() const
         requires FieldType<T>
@@ -758,56 +458,44 @@ class Matrix {
     }
 
     /**
-     * @brief Compute matrix determinant
+     * @brief Matrix determinant
      *
-     * @return Determinant of the matrix
+     * @return det(A); T(0) for singular matrices
      *
-     * Computes the determinant using algorithms based on matrix type.
-     * For square matrices only.
+     * Algorithm depends on the type tag: closed-form for @ref details::Identity,
+     * @ref details::Zero, and @ref details::Diagonal; Samuelson–Berkowitz otherwise.
      *
-     * @throws std::invalid_argument if matrix is not square or empty
-     *
-     * @note Returns T(0) for singular matrices
-     * @note Only available for field types that support division operations
+     * @throws std::invalid_argument if the matrix is not square or is empty
      */
     T determinant() const
         requires FieldType<T>;
 
     /**
-     * @brief Compute eigenvalues of the matrix
+     * @brief Eigenvalues lying in the underlying finite field
      *
-     * @return Vector of eigenvalues
+     * @return Roots of the characteristic polynomial that lie in T
      *
-     * Computes eigenvalues by finding roots of the characteristic polynomial.
-     * For square matrices only.
+     * Eigenvalues that exist only in an extension of T are omitted.
      *
-     * @throws std::invalid_argument if matrix is not square
-     *
-     * @note Only available for finite field types
+     * @throws std::invalid_argument if the matrix is not square
      */
     std::vector<T> eigenvalues() const
         requires FiniteFieldType<T>;
 
     /**
-     * @brief Computes all vectors of the row space
+     * @brief Enumerate every vector in the row space
      *
-     * @return Container of all vectors of the row space
+     * @return All q^rank vectors in span(rows), where q = |T|
      *
-     * @warning The row space can be exceedingly large!!
-     *
-     * @note Only available for field types
+     * @warning Size grows as q^rank — only practical for small fields and small rank.
      */
     std::vector<Vector<T>> rowspace() const
         requires FieldType<T>;
 
     /**
-     * @brief Compute span of matrix rows (alias for row space)
+     * @brief Alias for @ref rowspace
      *
-     * @return Container of all vectors of the row space
-     *
-     * Equivalent to rowspace(). Computes the span of the matrix rows.
-     *
-     * @note Only available for field types
+     * @return Every vector in the span of the rows
      */
     std::vector<Vector<T>> span() const
         requires FieldType<T>
@@ -822,274 +510,191 @@ class Matrix {
      */
 
     /**
-     * @brief Set component value using perfect forwarding
+     * @brief Set component (i, j) by perfect forwarding
      *
-     * @tparam U Type that can be converted to T
      * @param i Row index (0-based)
      * @param j Column index (0-based)
-     * @param c Value to forward into the component
+     * @param c Value to assign; bound by lvalue or rvalue reference
      * @return Reference to this matrix after modification
      *
-     * Efficiently forwards the value into the specified component position.
-     * Handles both lvalue and rvalue references optimally.
-     *
      * @throws std::invalid_argument if either index is out of bounds
-     *
-     * @note Matrix type may decay to Generic after this operation
      */
     template <typename U>
     Matrix& set_component(size_t i, size_t j, U&& c)
         requires std::convertible_to<std::decay_t<U>, T>;
 
     /**
-     * @brief Access matrix element (const)
+     * @brief Access component (i, j) (read-only)
      *
      * @param i Row index (0-based)
      * @param j Column index (0-based)
-     * @return Const reference to element at position (i ,j)
+     * @return Const reference to the component at (i, j)
      *
-     * Provides read-only access to matrix elements with bounds checking.
-     *
-     * @throws std::invalid_argument if indices are out of bounds
+     * @throws std::invalid_argument if either index is out of bounds
      */
     const T& operator()(size_t i, size_t j) const;
 
     /**
-     * @brief Extract a row as a vector
+     * @brief Extract row i as a vector
      *
-     * @param i Row index to extract
-     * @return Vector containing the elements of row i
+     * @param i Row index
+     * @return Vector containing the components of row i
      *
-     * Creates a new vector containing all elements from the specified row.
-     *
-     * @throws std::invalid_argument if row index is out of bounds
-     * @throws std::bad_alloc if memory allocation fails
+     * @throws std::invalid_argument if i is out of bounds
      */
     Vector<T> get_row(size_t i) const;
 
     /**
-     * @brief Extract a column as a vector
+     * @brief Extract column j as a (row) vector
      *
-     * @param j Column index to extract
-     * @return Vector containing the elements of column j
+     * @param j Column index
+     * @return Vector containing the components of column j; transposed, since @ref Vector models row vectors
      *
-     * Creates a new vector containing all elements from the specified column. This implies that the column is
-     * transposed (since @ref Vector realizes only row vectors).
-     *
-     * @throws std::invalid_argument if column index is out of bounds
-     * @throws std::bad_alloc if memory allocation fails
+     * @throws std::invalid_argument if j is out of bounds
      */
     Vector<T> get_col(size_t j) const;
 
     /**
-     * @brief Extract a submatrix
+     * @brief Extract submatrix from region [i, i+h) × [j, j+w)
      *
      * @param i Starting row index
      * @param j Starting column index
-     * @param h Height (number of rows) of submatrix
-     * @param w Width (number of columns) of submatrix
-     * @return Submatrix containing elements from the specified region
+     * @param h Height (number of rows)
+     * @param w Width (number of columns)
+     * @return Submatrix of shape h × w
      *
-     * Extracts a submatrix from the region [i:i+h, j:j+w).
-     *
-     * @throws std::invalid_argument if submatrix extends beyond matrix bounds
-     * @throws std::bad_alloc if memory allocation fails
+     * @throws std::invalid_argument if the region extends beyond the matrix
      */
     Matrix<T> get_submatrix(size_t i, size_t j, size_t h, size_t w) const;
 
     /**
-     * @brief Set a submatrix region
+     * @brief Overwrite the region starting at (i, j) with N
      *
-     * @param i Starting row index for placement
-     * @param j Starting column index for placement
-     * @param N Matrix to copy into this matrix
-     * @return Reference to this matrix after submatrix assignment
+     * @param i Starting row index
+     * @param j Starting column index
+     * @param N Source matrix; its shape must fit within this matrix from (i, j)
+     * @return Reference to this matrix after the assignment
      *
-     * Copies the contents of matrix N into this matrix starting at position (i, j).
-     * The target region must fit within this matrix's bounds.
-     *
-     * @throws std::invalid_argument if submatrix would extend beyond bounds
-     *
-     * @note Matrix type may change to details::Generic after this operation
+     * @throws std::invalid_argument if the region would extend beyond bounds
      */
     Matrix<T>& set_submatrix(size_t i, size_t j, const Matrix& N);
 
     /**
-     * @brief Join another matrix horizontally (concatenate columns)
+     * @brief Concatenate other to the right (column-wise)
      *
-     * @param other Matrix to join to the right
-     * @return Reference to this matrix after horizontal join
+     * @param other Matrix to append on the right; must have the same number of rows as this
+     * @return Reference to this matrix after the join
      *
-     * Concatenates the columns of another matrix to the right of this matrix.
-     * The matrices must have the same number of rows.
-     *
-     * @throws std::invalid_argument if matrices have different numbers of rows
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @code{.cpp}
-     * Matrix<int> A = {{1, 2}, {3, 4}};  // 2 × 2 matrix
-     * Matrix<int> B = {{5, 6}, {7, 8}};  // 2 × 2 matrix
-     * A.horizontal_join(B);              // A becomes 2 × 4 matrix [[1,2,5,6], [3,4,7,8]]
-     * @endcode
+     * @throws std::invalid_argument if row counts differ
      */
     Matrix<T>& horizontal_join(const Matrix& other);
 
     /**
-     * @brief Join another matrix vertically (concatenate rows)
+     * @brief Concatenate other below (row-wise)
      *
-     * @param other Matrix to join below
-     * @return Reference to this matrix after vertical join
+     * @param other Matrix to append below; must have the same number of columns as this
+     * @return Reference to this matrix after the join
      *
-     * Concatenates the rows of another matrix below this matrix.
-     * The matrices must have the same number of columns.
-     *
-     * @throws std::invalid_argument if matrices have different numbers of columns
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @code{.cpp}
-     * Matrix<int> A = {{1, 2}, {3, 4}};  // 2 × 2 matrix
-     * Matrix<int> B = {{5, 6}, {7, 8}};  // 2 × 2 matrix
-     * A.vertical_join(B);                // A becomes 4 × 2 matrix [[1,2], [3,4], [5,6], [7,8]]
-     * @endcode
+     * @throws std::invalid_argument if column counts differ
      */
     Matrix<T>& vertical_join(const Matrix& other);
 
     /**
-     * @brief Join another matrix diagonally (block diagonal)
+     * @brief Block-diagonal join: this in the upper-left, other in the lower-right
      *
-     * @param other Matrix to join diagonally
-     * @return Reference to this matrix after diagonal join
+     * @param other Matrix placed in the lower-right block
+     * @return Reference to this matrix after the join
      *
-     * Creates a block diagonal matrix with this matrix in the upper-left
-     * and the other matrix in the lower-right. Off-diagonal blocks are zero.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @code{.cpp}
-     * Matrix<int> A = {{1, 2}, {3, 4}};  // 2 × 2 matrix
-     * Matrix<int> B = {{5, 6}, {7, 8}};  // 2 × 2 matrix
-     * A.diagonal_join(B);                // A becomes 4 × 4 block diagonal matrix
-     * @endcode
+     * Off-diagonal blocks are filled with zeros.
      */
     Matrix<T>& diagonal_join(const Matrix& other);
 
     /**
-     * @brief Compute Kronecker product with another matrix
+     * @brief Kronecker (tensor) product with other
      *
-     * @param other Matrix to compute Kronecker product with
-     * @return Reference to this matrix after Kronecker product
+     * @param other Right operand
+     * @return Reference to this matrix after the product
      *
-     * Computes the Kronecker product (tensor product) of this matrix with another.
-     * If this matrix is m × n and other is p × q, the result is mp × nq.
-     *
-     * @throws std::bad_alloc if memory allocation fails
+     * If this is m × n and other is p × q, the result is mp × nq.
      */
     Matrix<T>& Kronecker_product(const Matrix& other);
 
     /**
-     * @brief Swap two rows of the matrix
+     * @brief Swap rows i and j
      *
-     * @param i Index of first row to swap
-     * @param j Index of second row to swap
-     * @return Reference to this matrix after row swap
+     * @param i First row index
+     * @param j Second row index
+     * @return Reference to this matrix after the swap
      *
-     * Exchanges the contents of rows i and j.
-     *
-     * @throws std::invalid_argument if row indices are out of bounds
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @throws std::invalid_argument if either index is out of bounds
      */
     Matrix<T>& swap_rows(size_t i, size_t j);
 
     /**
-     * @brief Swap two columns of the matrix
+     * @brief Swap columns i and j
      *
-     * @param i Index of first column to swap
-     * @param j Index of second column to swap
-     * @return Reference to this matrix after column swap
+     * @param i First column index
+     * @param j Second column index
+     * @return Reference to this matrix after the swap
      *
-     * Exchanges the contents of columns i and j.
-     *
-     * @throws std::invalid_argument if column indices are out of bounds
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @throws std::invalid_argument if either index is out of bounds
      */
     Matrix<T>& swap_columns(size_t i, size_t j);
 
     /**
-     * @brief Scale a row by a scalar value
+     * @brief row[i] ← s · row[i]
      *
-     * @param s Scalar value to multiply the row by
-     * @param i Index of row to scale
-     * @return Reference to this matrix after row scaling
+     * @param s Scalar multiplier
+     * @param i Row index
+     * @return Reference to this matrix after the scaling
      *
-     * Multiplies all elements in row i by the scalar s.
-     *
-     * @throws std::invalid_argument if row index is out of bounds
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @throws std::invalid_argument if i is out of bounds
      */
     Matrix<T>& scale_row(const T& s, size_t i);
 
     /**
-     * @brief Scale a column by a scalar value
+     * @brief col[i] ← s · col[i]
      *
-     * @param s Scalar value to multiply the column by
-     * @param i Index of column to scale
-     * @return Reference to this matrix after column scaling
+     * @param s Scalar multiplier
+     * @param i Column index
+     * @return Reference to this matrix after the scaling
      *
-     * Multiplies all elements in column i by the scalar s.
-     *
-     * @throws std::invalid_argument if column index is out of bounds
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @throws std::invalid_argument if i is out of bounds
      */
     Matrix<T>& scale_column(const T& s, size_t i);
 
     /**
-     * @brief Add a scaled row to another row
+     * @brief row[j] ← row[j] + s · row[i]
      *
-     * @param s Scalar value to multiply row i by before adding
-     * @param i Index of source row to scale and add
-     * @param j Index of destination row to add to
-     * @return Reference to this matrix after row operation
+     * @param s Scalar multiplier on the source row
+     * @param i Source row index
+     * @param j Destination row index
+     * @return Reference to this matrix after the update
      *
-     * Performs the operation: row[j] += s * row[i].
-     *
-     * @throws std::invalid_argument if row indices are out of bounds
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @throws std::invalid_argument if either index is out of bounds
      */
     Matrix<T>& add_scaled_row(const T& s, size_t i, size_t j);
 
     /**
-     * @brief Add a scaled column to another column
+     * @brief col[j] ← col[j] + s · col[i]
      *
-     * @param s Scalar value to multiply column i by before adding
-     * @param i Index of source column to scale and add
-     * @param j Index of destination column to add to
-     * @return Reference to this matrix after column operation
+     * @param s Scalar multiplier on the source column
+     * @param i Source column index
+     * @param j Destination column index
+     * @return Reference to this matrix after the update
      *
-     * Performs the operation: column[j] += s * column[i].
-     *
-     * @throws std::invalid_argument if column indices are out of bounds
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @throws std::invalid_argument if either index is out of bounds
      */
     Matrix<T>& add_scaled_column(const T& s, size_t i, size_t j);
 
     /**
-     * @brief Add one row to another row
+     * @brief row[j] ← row[j] + row[i]
      *
-     * @param i Index of source row to add
-     * @param j Index of destination row to add to
-     * @return Reference to this matrix after row operation
+     * @param i Source row index
+     * @param j Destination row index
+     * @return Reference to this matrix after the update
      *
-     * Performs the operation: row[j] += row[i].
-     *
-     * @throws std::invalid_argument if row indices are out of bounds
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @throws std::invalid_argument if either index is out of bounds
      */
     Matrix<T>& add_row(size_t i, size_t j) {
         if (i >= m || j >= m)
@@ -1098,17 +703,13 @@ class Matrix {
     }
 
     /**
-     * @brief Add one column to another column
+     * @brief col[j] ← col[j] + col[i]
      *
-     * @param i Index of source column to add
-     * @param j Index of destination column to add to
-     * @return Reference to this matrix after column operation
+     * @param i Source column index
+     * @param j Destination column index
+     * @return Reference to this matrix after the update
      *
-     * Performs the operation: column[j] += column[i].
-     *
-     * @throws std::invalid_argument if column indices are out of bounds
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @throws std::invalid_argument if either index is out of bounds
      */
     Matrix<T>& add_column(size_t i, size_t j) {
         if (i >= n || j >= n)
@@ -1120,81 +721,59 @@ class Matrix {
     }
 
     /**
-     * @brief Delete specified columns from the matrix
+     * @brief Delete the columns whose indices appear in v
      *
-     * @param v Vector of column indices to delete (automatically deduplicated)
-     * @return Reference to this matrix after column deletion
+     * @param v Column indices (deduplicated internally)
+     * @return Reference to this matrix after deletion
      *
-     * Removes the specified columns from the matrix.
-     *
-     * @throws std::invalid_argument if any column index is out of bounds
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @throws std::invalid_argument if any index in v is out of bounds
      */
     Matrix<T>& delete_columns(const std::vector<size_t>& v);
 
     /**
-     * @brief Delete a single column from the matrix
+     * @brief Delete column i (single-index convenience for @ref delete_columns)
      *
-     * @param i Index of column to delete
-     * @return Reference to this matrix after column deletion
+     * @param i Column index
+     * @return Reference to this matrix after deletion
      *
-     * Removes the specified column from the matrix.
-     *
-     * @throws std::invalid_argument if column index is out of bounds
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @throws std::invalid_argument if i is out of bounds
      */
     Matrix<T>& delete_column(size_t i) { return delete_columns({i}); }
 
     /**
-     * @brief Delete specified rows from the matrix
+     * @brief Delete the rows whose indices appear in v
      *
-     * @param v Vector of row indices to delete (automatically deduplicated)
-     * @return Reference to this matrix after row deletion
+     * @param v Row indices (deduplicated internally)
+     * @return Reference to this matrix after deletion
      *
-     * Removes the specified rows from the matrix.
-     *
-     * @throws std::invalid_argument if any row index is out of bounds
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @throws std::invalid_argument if any index in v is out of bounds
      */
     Matrix<T>& delete_rows(const std::vector<size_t>& v);
 
     /**
-     * @brief Delete a single row from the matrix
+     * @brief Delete row i (single-index convenience for @ref delete_rows)
      *
-     * @param i Index of row to delete
-     * @return Reference to this matrix after row deletion
+     * @param i Row index
+     * @return Reference to this matrix after deletion
      *
-     * Removes the specified row from the matrix.
-     *
-     * @throws std::invalid_argument if row index is out of bounds
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @note Matrix type may change to @ref details::Generic after this operation
+     * @throws std::invalid_argument if i is out of bounds
      */
     Matrix<T>& delete_row(size_t i) { return delete_rows({i}); }
 
 #ifdef CECCO_ERASURE_SUPPORT
 
     /**
-     * @brief Erases specified component from the matrix (flags it as erasure)
+     * @brief Flag component (i, j) as erased
      *
-     * @param i row i
-     * @param j column j
+     * @param i Row index
+     * @param j Column index
      * @return Reference to this matrix after erasing
      *
-     * Erases the component at position (i, j), cf. @ref Field::erase
+     * Marks the component as erased; field arithmetic on erased elements is undefined — see
+     * @ref CECCO_ERASURE_SUPPORT and the erase()/unerase() interface in fields.hpp.
      *
-     * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased field
-     * elements is the responsibility of the user!
-     *
-     * @note Only available for field types (since erasure flag/erase() is required)
+     * @warning An erased element can no longer participate in field operations or property
+     * queries. Correct handling of erased elements is the caller's responsibility.
      *
      * @throws std::invalid_argument if (i, j) is out of bounds
      */
@@ -1202,15 +781,11 @@ class Matrix {
         requires FieldType<T>;
 
     /**
-     * @brief Un-erases specified component from the matrix (removes the erasure flag from it)
+     * @brief Clear the erasure flag on component (i, j)
      *
-     * @param i row i
-     * @param j column j
+     * @param i Row index
+     * @param j Column index
      * @return Reference to this matrix after un-erasing
-     *
-     * Un-erases the component at position (i, j), cf. @ref Field::erase
-     *
-     * @note Only available for field types (since erasure flag/unerase() is required)
      *
      * @throws std::invalid_argument if (i, j) is out of bounds
      */
@@ -1218,18 +793,12 @@ class Matrix {
         requires FieldType<T>;
 
     /**
-     * @brief Erases specified columns from the matrix (flags their components as erasures)
+     * @brief Flag every component of the specified columns as erased
      *
-     * @param v Vector of column indices to erase (automatically deduplicated)
+     * @param v Column indices (deduplicated internally)
      * @return Reference to this matrix after erasing
      *
-     * Erases the components of all specified columns, cf. @ref Field::erase
-     *
-     * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased field
-     * elements is the responsibility of the user!
-     *
-     * @note Only available for field types (since erasure flag/erase() is required)
+     * @warning See @ref erase_component for the semantics and caller obligations.
      *
      * @throws std::invalid_argument if any index in v is out of bounds
      */
@@ -1237,20 +806,12 @@ class Matrix {
         requires FieldType<T>;
 
     /**
-     * @brief Erases specified column from the matrix (flags its components as erasures)
+     * @brief Erase column i (single-index convenience for @ref erase_columns)
      *
-     * @param i Index of column to erase
+     * @param i Column index
      * @return Reference to this matrix after erasing
      *
-     * Erases all components of the specified column.
-     *
-     * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased field
-     * elements is the responsibility of the user!
-     *
-     * @note Only available for field types (since erasure flag/erase() is required)
-     *
-     * @throws std::invalid_argument if index i is out of bounds
+     * @throws std::invalid_argument if i is out of bounds
      */
     Matrix<T>& erase_column(size_t i)
         requires FieldType<T>
@@ -1259,14 +820,10 @@ class Matrix {
     }
 
     /**
-     * @brief Un-erases specified columns from the matrix (removes the erasure flag from their components)
+     * @brief Clear erasure flags on every component of the specified columns
      *
-     * @param v Vector of column indices to un-erase (automatically deduplicated)
+     * @param v Column indices (deduplicated internally)
      * @return Reference to this matrix after un-erasing
-     *
-     * Un-erases the components of all specified column.
-     *
-     * @note Only available for field types (since erasure flag/unerase() is required)
      *
      * @throws std::invalid_argument if any index in v is out of bounds
      */
@@ -1274,16 +831,12 @@ class Matrix {
         requires FieldType<T>;
 
     /**
-     * @brief Un-erases specified column from the matrix (removes the erasure flag from its components)
+     * @brief Un-erase column i (single-index convenience for @ref unerase_columns)
      *
-     * @param i Index of column to un-erase
+     * @param i Column index
      * @return Reference to this matrix after un-erasing
      *
-     * Un-erases all components of the specified column.
-     *
-     * @note Only available for field types (since erasure flag/unerase() is required)
-     *
-     * @throws std::invalid_argument if index i is out of bounds
+     * @throws std::invalid_argument if i is out of bounds
      */
     Matrix<T>& unerase_column(size_t i)
         requires FieldType<T>
@@ -1292,18 +845,12 @@ class Matrix {
     }
 
     /**
-     * @brief Erases specified rows from the matrix (flags their components as erasures)
+     * @brief Flag every component of the specified rows as erased
      *
-     * @param v Vector of row indices to erase (automatically deduplicated)
+     * @param v Row indices (deduplicated internally)
      * @return Reference to this matrix after erasing
      *
-     * Erases the components of all specified rows.
-     *
-     * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased field
-     * elements is the responsibility of the user!
-     *
-     * @note Only available for field types (since erasure flag/erase() is required)
+     * @warning See @ref erase_component for the semantics and caller obligations.
      *
      * @throws std::invalid_argument if any index in v is out of bounds
      */
@@ -1311,20 +858,12 @@ class Matrix {
         requires FieldType<T>;
 
     /**
-     * @brief Erases specified row from the matrix (flags its components as erasures)
+     * @brief Erase row i (single-index convenience for @ref erase_rows)
      *
-     * @param i Index of row to erase
+     * @param i Row index
      * @return Reference to this matrix after erasing
      *
-     * Erases all components of the specified row.
-     *
-     * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased field
-     * elements is the responsibility of the user!
-     *
-     * @note Only available for field types (since erasure flag/erase() is required)
-     *
-     * @throws std::invalid_argument if index i is out of bounds
+     * @throws std::invalid_argument if i is out of bounds
      */
     Matrix& erase_row(size_t i)
         requires FieldType<T>
@@ -1333,14 +872,10 @@ class Matrix {
     }
 
     /**
-     * @brief Un-erases specified rows from the matrix (removes the erasure flag from their components)
+     * @brief Clear erasure flags on every component of the specified rows
      *
-     * @param v Vector of row indices to un-erase (automatically deduplicated)
+     * @param v Row indices (deduplicated internally)
      * @return Reference to this matrix after un-erasing
-     *
-     * Un-erases the components of all specified row.
-     *
-     * @note Only available for field types (since erasure flag/unerase() is required)
      *
      * @throws std::invalid_argument if any index in v is out of bounds
      */
@@ -1348,16 +883,12 @@ class Matrix {
         requires FieldType<T>;
 
     /**
-     * @brief Un-erases specified row from the matrix (removes the erasure flag from its components)
+     * @brief Un-erase row i (single-index convenience for @ref unerase_rows)
      *
-     * @param i Index of row to un-erase
+     * @param i Row index
      * @return Reference to this matrix after un-erasing
      *
-     * Un-erases all components of the specified row.
-     *
-     * @note Only available for field types (since erasure flag/unerase() is required)
-     *
-     * @throws std::invalid_argument if index i is out of bounds
+     * @throws std::invalid_argument if i is out of bounds
      */
     Matrix& unerase_row(size_t i)
         requires FieldType<T>
@@ -1374,112 +905,71 @@ class Matrix {
      */
 
     /**
-     * @brief Reverse the order of matrix rows
+     * @brief Reverse the row order
      *
-     * @return Reference to this matrix after row reversal
-     *
-     * Reverses the order of rows: first row becomes last, second becomes
-     * second-to-last, etc.
+     * @return Reference to this matrix after the reversal
      */
     Matrix<T>& reverse_rows();
 
     /**
-     * @brief Reverse the order of matrix columns
+     * @brief Reverse the column order
      *
-     * @return Reference to this matrix after column reversal
-     *
-     * Reverses the order of columns: first column becomes last, second becomes
-     * second-to-last, etc.
+     * @return Reference to this matrix after the reversal
      */
     Matrix<T>& reverse_columns();
 
     /**
-     * @brief Fill all matrix elements with specified value
+     * @brief Set every component to s
      *
-     * @param s Value to assign to all elements
+     * @param s Value assigned to every component
      * @return Reference to this matrix after filling
      *
-     * Sets every element to the specified value.
-     *
-     * @note Matrix type is updated to @ref details::Zero if value is T(0), otherwise becomes @ref details::Generic.
+     * @note Tag becomes @ref details::Zero if s == T(0), otherwise @ref details::Generic.
      */
     constexpr Matrix<T>& fill(const T& s) noexcept;
 
     /**
-     * @brief Transpose the matrix in-place
+     * @brief Transpose in place
      *
      * @return Reference to this matrix after transposition
      *
-     * Transposes the matrix by swapping rows and columns. For an m × n matrix,
-     * the result is an n × m matrix where element (i, j) becomes element (j, i).
-     *
-     * @code{.cpp}
-     * Matrix<int> A = {{1, 2, 3}, {4, 5, 6}};  // 2 × 3 matrix
-     * A.transpose();                           // Now 3 × 2 matrix
-     * @endcode
+     * For an m × n matrix the result is n × m, with component (i, j) moved to (j, i).
      */
     constexpr Matrix<T>& transpose();
 
     /**
-     * @brief Row echelon form (REF) computation with binary field optimization
+     * @brief Row echelon form (REF), with a binary-field fast path
      *
-     * @param rank Optional pointer to store the computed rank
-     * @return Reference to this matrix after REF computation
+     * @param rank Optional out-parameter; if non-null, receives the rank
+     * @return Reference to this matrix after the reduction
      *
-     * Converts matrix to row echelon form using forward Gaussian elimination only.
-     * More efficient than RREF when only the rank is needed. Uses constexpr if to optimize
-     * binary field operations (Fp<2>) by eliminating unnecessary pivot scaling.
-     * If rank pointer is provided, stores the matrix rank and caches it for future use.
-     *
-     * @note Only available for field types
-     *
-     * @code{.cpp}
-     * Matrix<double> A = {{2, 1, 3}, {1, 0, 1}, {1, 1, 1}};
-     * size_t rank;
-     * A.ref(&rank);  // A is now in REF, rank contains the rank (and the rank is cached)
-     * @endcode
+     * Forward Gaussian elimination only — cheaper than RREF when only the rank or a
+     * triangularised form is needed. For Fp<2>, pivot scaling is skipped at compile time. Rank
+     * is cached when @p rank is non-null.
      */
     Matrix<T>& ref(size_t* rank = nullptr)
         requires FieldType<T>;
 
     /**
-     * @brief Reduced row echelon form (RREF) computation
+     * @brief Reduced row echelon form (RREF)
      *
-     * @param rank Optional pointer to store the computed rank
-     * @return Reference to this matrix after RREF computation
+     * @param rank Optional out-parameter; if non-null, receives the rank
+     * @return Reference to this matrix after the reduction
      *
-     * Converts matrix to reduced row echelon form using two-phase algorithm:
-     * forward elimination (REF) followed by backward elimination.
-     * If rank pointer is provided, stores the matrix rank. Always caches it for future use.
-     *
-     * @note Only available for field types
-     *
-     * @code{.cpp}
-     * Matrix<double> A = {{2, 1, 3}, {1, 0, 1}, {1, 1, 1}};
-     * size_t rank;
-     * A.rref(&rank);  // A is now in RREF, rank contains the rank, rank is cached
-     * @endcode
+     * Two phases: forward elimination (REF) followed by backward elimination. Rank is always
+     * cached.
      */
     Matrix<T>& rref(size_t* rank = nullptr)
         requires FieldType<T>;
 
     /**
-     * @brief Invert the matrix in-place
+     * @brief Invert in place
      *
      * @return Reference to this matrix after inversion
      *
-     * Computes the matrix inverse using Gaussian elimination with partial pivoting.
-     * The matrix must be square and non-singular (non-zero determinant).
+     * Gaussian elimination with partial pivoting. Requires a square non-singular matrix.
      *
-     * @note Only available for field types (requires division)
-     * @note Matrix type becomes details::Generic after inversion (except for @ref details::Identity)
-     *
-     * @throws std::invalid_argument if matrix is not square or singular
-     *
-     * @code{.cpp}
-     * Matrix<double> A = {{1, 2}, {3, 4}};
-     * A.invert();  // A is now its own inverse
-     * @endcode
+     * @throws std::invalid_argument if the matrix is not square or is singular
      */
     Matrix<T>& invert()
         requires FieldType<T>;
@@ -1491,61 +981,33 @@ class Matrix {
      */
 
     /**
-     * @brief Convert matrix to vector over superfield
+     * @brief Reinterpret the columns as elements of a superfield
      *
-     * @tparam S Superfield of T (in same construction tower)
-     * @return Vector representation of the rows over the superfield
+     * @tparam S Superfield of T (same construction tower)
+     * @return Vector over S, one component per column
      *
-     * Converts the matrix to a vector over a superfield by interpreting each
-     * matrix column as an element of the superfield.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @note Only available for finite field types in the same construction tower
-     *
-     * @code{.cpp}
-     * using F2 = Fp<2>;
-     * using F4 = Ext<F2, MOD{1, 1, 1}>;
-     * Matrix<F2> M = {{1, 0}, {1, 1}};
-     * auto vec = M.as_vector<F4>();  // Convert to vector over F4
-     * @endcode
+     * Each column is read as the coordinate representation of an element of S over T.
      */
     template <FiniteFieldType S>
     constexpr Vector<S> as_vector() const
         requires FiniteFieldType<T> && ExtensionOf<T, S> && (!std::is_same_v<T, S>);
 
     /**
-     * @brief Flatten matrix into a vector by row-major concatenation
+     * @brief Flatten in row-major order
      *
-     * @return Vector of length m × n containing all matrix elements
-     *
-     * Concatenates all rows of the matrix into a single vector. For an m × n matrix,
-     * element (i, j) maps to vector index i · n + j.
-     *
-     * @code{.cpp}
-     * Matrix<double> M = {{1, 2, 3}, {4, 5, 6}};
-     * auto v = M.to_vector();  // v = (1, 2, 3, 4, 5, 6)
-     * @endcode
+     * @return Vector of length m·n; component (i, j) maps to index i·n + j
      */
     Vector<T> to_vector() const;
 
     /**
-     * @brief Export matrix as a PPM image file
+     * @brief Export the matrix as a PPM (P3) image
      *
-     * @param filename Path to the output PPM file
+     * @param filename Output path
      *
-     * Writes the matrix to a PPM (P3) image file where each field element is mapped
-     * to an RGB color using a built-in 64-entry colormap (black → blue → green → yellow → white).
-     * The image has width n and height m.
+     * Each component is mapped through a built-in 64-entry colormap (black → blue → green →
+     * yellow → white). The image is n wide and m tall.
      *
-     * @note Only available for finite field types with field size at most 64
-     * @note When @c CECCO_ERASURE_SUPPORT is defined, erased elements are rendered in red
-     *
-     * @code{.cpp}
-     * using F4 = Ext<Fp<2>, MOD{1, 1, 1}>;
-     * Matrix<F4> M(8, 8);
-     * M.export_as_ppm("matrix.ppm");
-     * @endcode
+     * @note With @ref CECCO_ERASURE_SUPPORT, erased components render in red.
      */
     void export_as_ppm(const std::string& filename) const
         requires FiniteFieldType<T> && (T::get_size() <= 64);
@@ -1553,44 +1015,26 @@ class Matrix {
     /** @} */
 
    private:
-    /**
-     * @brief Matrix data storage
-     *
-     * Stores matrix elements in row-major order as a contiguous vector.
-     */
+    /// @brief Component storage, row-major
     std::vector<T> data;
 
-    /**
-     * @brief Number of rows
-     */
+    /// @brief Number of rows
     size_t m = 0;
-
-    /**
-     * @brief Number of columns
-     */
+    /// @brief Number of columns
     size_t n = 0;
 
-    /**
-     * @brief Transpose state flag
-     *
-     * When true, matrix operations interpret the storage as transposed
-     * for performance optimization without data movement.
-     */
+    /// @brief When true, accesses interpret storage as transposed (no data movement)
     bool transposed = false;
 
-    /**
-     * @brief Matrix type for optimization
-     *
-     * Tracks the structural type of the matrix to enable type-specific
-     * optimizations and algorithms.
-     */
+    /// @brief Structural tag — see @ref details::matrix_type_t
     details::matrix_type_t type = details::Zero;
 
-    /**
-     * @brief Cache system for expensive computations
-     */
-    enum CacheIds { Rank = 0 };
-    mutable details::Cache<details::CacheEntry<Rank, size_t>> cache;
+    /// @brief Cache for matrix rank and Hamming weight (invalidated by mutating operations)
+    enum CacheIds { Rank = 0, Weight = 1 };
+    mutable details::Cache<details::CacheEntry<Rank, size_t>, details::CacheEntry<Weight, size_t>> cache;
+
+    size_t calculate_weight() const
+        requires ReliablyComparableType<T>;
 
     /**
      * @brief Matrix multiplication kernel with compile-time transpose dispatch
@@ -1661,7 +1105,7 @@ class Matrix {
     }
 
     /**
-     * @brief High-performance REF elimination kernel with compile-time transpose dispatch
+     * @brief REF elimination kernel with compile-time transpose dispatch
      * @tparam transposed True if matrix is transposed, false otherwise
      * @param data Raw matrix data
      * @param m Number of rows
@@ -1720,7 +1164,7 @@ class Matrix {
     }
 
     /**
-     * @brief High-performance RREF backward elimination kernel with compile-time transpose dispatch
+     * @brief RREF backward elimination kernel with compile-time transpose dispatch
      * @tparam transposed True if matrix is transposed, false otherwise
      * @param data Raw matrix data
      * @param m Number of rows
@@ -1917,10 +1361,9 @@ constexpr Matrix<T>& Matrix<T>::operator=(Matrix&& rhs) noexcept {
 }
 
 template <ComponentType T>
-template <FieldType S>
-constexpr Matrix<T>& Matrix<T>::operator=(const Matrix<S>& other)
-    requires FiniteFieldType<S> && FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
-{
+template <FiniteFieldType S>
+    requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
+constexpr Matrix<T>& Matrix<T>::operator=(const Matrix<S>& other) {
     data.resize(other.get_m() * other.get_n());
     std::transform(other.data.cbegin(), other.data.cend(), data.begin(),
                    [&](const S& e) { return T(e); });  // Uses enhanced cross-field constructors
@@ -2123,22 +1566,21 @@ Matrix<T>& Matrix<T>::randomize() {
 }
 
 template <ComponentType T>
-constexpr size_t Matrix<T>::wH() const
+size_t Matrix<T>::calculate_weight() const
     requires ReliablyComparableType<T>
 {
-    if (type == details::Generic || type == details::Vandermonde || type == details::Toeplitz) {
-        return data.size() - std::count(data.cbegin(), data.cend(), T(0));
-    } else if (type == details::Zero) {
+    if (m == 0 || n == 0) return 0;
+
+    if (type == details::Zero) {
         return 0;
-    } else if (type == details::Diagonal) {
-        size_t count = 0;
-        for (size_t i = 0; i < m; ++i)
-            if ((*this)(i, i) != T(0)) ++count;
-        return count;
-    } else if (type == details::Identity) {
-        return m;
+    } else {
+        size_t res = data.size() - std::count(data.cbegin(), data.cend(), T(0));
+#ifdef CECCO_ERASURE_SUPPORT
+        if constexpr (FieldType<T>) res -= std::count_if(data.cbegin(), data.cend(), [](T x) { return x.is_erased(); });
+#endif
+        return res;
     }
-    throw std::logic_error("wH(): unhandled matrix type");
+    throw std::logic_error("calculate_weight(): unhandled matrix type");
 }
 
 template <ComponentType T>
@@ -2379,7 +1821,7 @@ Matrix<T>& Matrix<T>::set_component(size_t i, size_t j, U&& c)
             if (i == j && m == n)
                 type = details::Diagonal;
             else
-            type = details::Generic;
+                type = details::Generic;
             break;
 
         case details::Identity:
@@ -3861,16 +3303,12 @@ Matrix<T> inverse(Matrix<T>&& M) {
 }
 
 /**
- * @brief Matrix equality comparison operator
- * @ingroup matrix_arithmetic
+ * @brief Equality of two matrices
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
- * @param lhs Left-hand side matrix
- * @param rhs Right-hand side matrix
- * @return true if matrices are equal, false otherwise
+ * @return true iff dimensions match and all components are equal
  *
- * Two matrices are equal if they have the same dimensions and all corresponding
- * elements are equal. Uses optimized comparison algorithms for structured matrices.
+ * Tag-aware fast paths handle structured operands (e.g. two Toeplitz matrices compare only
+ * their first row and column).
  */
 template <ReliablyComparableType T>
 constexpr bool operator==(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
@@ -3914,16 +3352,9 @@ constexpr bool operator==(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
 }
 
 /**
- * @brief Matrix inequality comparison operator
- * @ingroup matrix_arithmetic
+ * @brief Negation of @ref operator==
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
- * @param lhs Left-hand side matrix
- * @param rhs Right-hand side matrix
- * @return true if matrices are not equal, false otherwise
- *
- * Equivalent to !(lhs == rhs). Two matrices are not equal if they have different
- * dimensions or any corresponding elements differ.
+ * @return true iff dimensions or any component differ
  */
 template <ReliablyComparableType T>
 constexpr bool operator!=(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
@@ -3931,18 +3362,11 @@ constexpr bool operator!=(const Matrix<T>& lhs, const Matrix<T>& rhs) noexcept {
 }
 
 /**
- * @brief Matrix output stream operator
- * @ingroup matrix_utilities
+ * @brief Pretty-print the matrix with column alignment and bracket borders
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
- * @param os Output stream to write to
- * @param rhs Matrix to output
- * @return Reference to the output stream
+ * @return Reference to @p os for chaining
  *
- * Outputs the matrix in a formatted mathematical notation with proper brackets
- * and alignment. Empty matrices are displayed as "(empty matrix)".
- *
- * @note This operation is noexcept
+ * An empty matrix is printed as "(empty matrix)".
  */
 template <ComponentType T>
 std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept {
@@ -3994,21 +3418,11 @@ std::ostream& operator<<(std::ostream& os, const Matrix<T>& rhs) noexcept {
  */
 
 /**
- * @brief Create a zero matrix of specified dimensions
- * @ingroup matrix_factories
+ * @brief m × n matrix of zeros (tag @ref details::Zero)
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
  * @param m Number of rows
  * @param n Number of columns
- * @return m×n matrix with all elements equal to T(0)
- *
- * Creates a zero matrix with all elements set to the additive identity.
- *
- * @throws std::bad_alloc if memory allocation fails
- *
- * @code{.cpp}
- * auto Z = ZeroMatrix<double>(3, 4);  // 3×4 zero matrix
- * @endcode
+ * @return Newly constructed zero matrix
  */
 template <ComponentType T>
 constexpr Matrix<T> ZeroMatrix(size_t m, size_t n) {
@@ -4016,21 +3430,10 @@ constexpr Matrix<T> ZeroMatrix(size_t m, size_t n) {
 }
 
 /**
- * @brief Create an identity matrix of specified size
- * @ingroup matrix_factories
+ * @brief m × m identity matrix I_m (tag @ref details::Identity)
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
- * @param m Dimension of the square identity matrix
- * @return m×m identity matrix with ones on diagonal and zeros elsewhere
- *
- * Creates an identity matrix I_m where element (i,j) equals 1 if i=j,
- * and 0 otherwise.
- *
- * @throws std::bad_alloc if memory allocation fails
- *
- * @code{.cpp}
- * auto I = IdentityMatrix<double>(4);  // 4×4 identity matrix
- * @endcode
+ * @param m Side length
+ * @return Newly constructed identity matrix
  */
 template <ComponentType T>
 constexpr Matrix<T> IdentityMatrix(size_t m) {
@@ -4040,6 +3443,14 @@ constexpr Matrix<T> IdentityMatrix(size_t m) {
     return res;
 }
 
+/**
+ * @brief Permutation matrix P with P_{i, perm[i]} = 1
+ *
+ * @param perm Permutation of {0, …, m-1}; m is inferred from `perm.size()`
+ * @return m × m permutation matrix; the identity permutation returns @ref IdentityMatrix
+ *
+ * @throws std::invalid_argument if perm contains out-of-range or duplicate indices
+ */
 template <ComponentType T>
 constexpr Matrix<T> PermutationMatrix(const std::vector<size_t>& perm) {
     const size_t m = perm.size();
@@ -4062,21 +3473,10 @@ constexpr Matrix<T> PermutationMatrix(const std::vector<size_t>& perm) {
 }
 
 /**
- * @brief Create an exchange matrix (anti-diagonal identity matrix)
- * @ingroup matrix_factories
+ * @brief m × m exchange matrix (ones on the anti-diagonal)
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
- * @param m Dimension of the square exchange matrix
- * @return m×m exchange matrix with ones on anti-diagonal and zeros elsewhere
- *
- * Creates an exchange matrix (also known as permutation matrix) with ones on the
- * anti-diagonal and zeros elsewhere. Element (i,j) equals 1 if i+j=m-1, and 0 otherwise.
- *
- * @throws std::bad_alloc if memory allocation fails
- *
- * @code{.cpp}
- * auto E = ExchangeMatrix<int>(3);  // [[0,0,1], [0,1,0], [1,0,0]]
- * @endcode
+ * @param m Side length
+ * @return Matrix with E_{i, j} = 1 iff i + j = m − 1
  */
 template <ComponentType T>
 constexpr Matrix<T> ExchangeMatrix(size_t m) {
@@ -4086,22 +3486,10 @@ constexpr Matrix<T> ExchangeMatrix(size_t m) {
 }
 
 /**
- * @brief Create a diagonal matrix from a vector
- * @ingroup matrix_factories
+ * @brief Diagonal matrix with diagonal v (tag @ref details::Diagonal)
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
- * @param v Vector containing the diagonal elements
- * @return n×n diagonal matrix with v[i] on position (i,i)
- *
- * Creates a diagonal matrix where element (i,j) equals v[i] if i=j,
- * and 0 otherwise.
- *
- * @throws std::bad_alloc if memory allocation fails
- *
- * @code{.cpp}
- * Vector<double> diag = {1, 2, 3};
- * auto D = DiagonalMatrix(diag);  // [[1,0,0], [0,2,0], [0,0,3]]
- * @endcode
+ * @param v Vector of diagonal entries; the result is `v.length()` × `v.length()`
+ * @return Diagonal matrix with v[i] on position (i, i), zeros elsewhere
  */
 template <ComponentType T>
 constexpr Matrix<T> DiagonalMatrix(const Vector<T>& v) {
@@ -4113,25 +3501,14 @@ constexpr Matrix<T> DiagonalMatrix(const Vector<T>& v) {
 }
 
 /**
- * @brief Create a Toeplitz matrix from a vector
- * @ingroup matrix_factories
+ * @brief m × n Toeplitz matrix from its diagonal entries (tag @ref details::Toeplitz)
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
- * @param v Vector containing the values for diagonals (length must be m+n-1)
+ * @param v Diagonal values, ordered so that v[i − j + n − 1] sits on entry (i, j); length m + n − 1
  * @param m Number of rows
  * @param n Number of columns
- * @return m×n Toeplitz matrix where element (i,j) = v[i-j+n-1]
+ * @return Toeplitz matrix; each descending diagonal is constant
  *
- * Creates a Toeplitz matrix where each descending diagonal contains identical elements.
- * The vector v must have length m+n-1, providing values for all diagonals.
- *
- * @throws std::invalid_argument if v.length() != m+n-1
- * @throws std::bad_alloc if memory allocation fails
- *
- * @code{.cpp}
- * Vector<int> diags = {1, 2, 3, 4, 5};  // For 3×3 matrix: 3+3-1=5
- * auto T = ToeplitzMatrix(diags, 3, 3); // details::Toeplitz with constant diagonals
- * @endcode
+ * @throws std::invalid_argument if `v.length() != m + n - 1`
  */
 template <ComponentType T>
 constexpr Matrix<T> ToeplitzMatrix(const Vector<T>& v, size_t m, size_t n) {
@@ -4155,25 +3532,16 @@ constexpr Matrix<T> ToeplitzMatrix(const Vector<T>& v, size_t m, size_t n) {
 }
 
 /**
- * @brief Create a Hankel matrix from a vector
- * @ingroup matrix_factories
+ * @brief m × n Hankel matrix from its anti-diagonal entries
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
- * @param v Vector containing the anti-diagonal values (length must be m+n-1)
+ * @param v Anti-diagonal values; length m + n − 1
  * @param m Number of rows
  * @param n Number of columns
- * @return m×n Hankel matrix where element (i,j) depends on i+j
+ * @return Hankel matrix; each ascending anti-diagonal is constant
  *
- * Creates a Hankel matrix where each ascending anti-diagonal contains identical elements.
- * A Hankel matrix is related to a details::Toeplitz matrix through matrix multiplication.
+ * Constructed as `ToeplitzMatrix(reverse(v), m, n) * ExchangeMatrix(n)`.
  *
- * @throws std::invalid_argument if v.length() != m+n-1
- * @throws std::bad_alloc if memory allocation fails
- *
- * @code{.cpp}
- * Vector<int> antidiags = {1, 2, 3, 4, 5};  // For 3×3 matrix
- * auto H = HankelMatrix(antidiags, 3, 3); // Hankel matrix
- * @endcode
+ * @throws std::invalid_argument if `v.length() != m + n - 1`
  */
 template <ComponentType T>
 constexpr Matrix<T> HankelMatrix(const Vector<T>& v, size_t m, size_t n) {
@@ -4181,25 +3549,13 @@ constexpr Matrix<T> HankelMatrix(const Vector<T>& v, size_t m, size_t n) {
 }
 
 /**
- * @brief Create a Vandermonde matrix from evaluation points
- * @ingroup matrix_factories
+ * @brief Vandermonde matrix V_{i, j} = v[j]^i (tag @ref details::Vandermonde)
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
- * @param v Vector of evaluation points (must have pairwise distinct elements)
- * @param m Number of rows (degree of polynomials)
- * @return m×n Vandermonde matrix where element (i,j) = v[j]^i
+ * @param v Evaluation points; must be pairwise distinct
+ * @param m Number of rows (i.e. the highest power is m − 1)
+ * @return m × `v.length()` Vandermonde matrix
  *
- * Creates a Vandermonde matrix used in polynomial interpolation and evaluation.
- * Element (i,j) contains the j-th evaluation point raised to the i-th power.
- *
- * @throws std::invalid_argument if v is empty or has duplicate elements
- * @throws std::invalid_argument if m is zero
- * @throws std::bad_alloc if memory allocation fails
- *
- * @code{.cpp}
- * Vector<double> points = {1, 2, 3, 4};  // Evaluation points
- * auto V = VandermondeMatrix(points, 3); // [[1,1,1,1], [1,2,3,4], [1,4,9,16]]
- * @endcode
+ * @throws std::invalid_argument if v is empty, has duplicates, or m is zero
  */
 template <ComponentType T>
 constexpr Matrix<T> VandermondeMatrix(const Vector<T>& v, size_t m) {
@@ -4232,21 +3588,10 @@ constexpr Matrix<T> VandermondeMatrix(const Vector<T>& v, size_t m) {
 }
 
 /**
- * @brief Create an upper shift matrix (superdiagonal matrix)
- * @ingroup matrix_factories
+ * @brief m × m upper shift matrix (ones on the superdiagonal)
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
- * @param m Dimension of the square shift matrix
- * @return m×m upper shift matrix with ones on the superdiagonal
- *
- * Creates a matrix with ones on the superdiagonal (elements (i,i+1) = 1) and zeros elsewhere.
- * Used in companion matrices and linear system representations.
- *
- * @throws std::bad_alloc if memory allocation fails
- *
- * @code{.cpp}
- * auto U = UpperShiftMatrix<int>(4);  // [[0,1,0,0], [0,0,1,0], [0,0,0,1], [0,0,0,0]]
- * @endcode
+ * @param m Side length
+ * @return Matrix with U_{i, i+1} = 1, all other entries 0
  */
 template <ComponentType T>
 constexpr Matrix<T> UpperShiftMatrix(size_t m) {
@@ -4256,21 +3601,10 @@ constexpr Matrix<T> UpperShiftMatrix(size_t m) {
 }
 
 /**
- * @brief Create a lower shift matrix (subdiagonal matrix)
- * @ingroup matrix_factories
+ * @brief m × m lower shift matrix (ones on the subdiagonal); transpose of @ref UpperShiftMatrix
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
- * @param m Dimension of the square shift matrix
- * @return m×m lower shift matrix with ones on the subdiagonal
- *
- * Creates a matrix with ones on the subdiagonal (elements (i+1,i) = 1) and zeros elsewhere.
- * Equivalent to the transpose of the upper shift matrix.
- *
- * @throws std::bad_alloc if memory allocation fails
- *
- * @code{.cpp}
- * auto L = LowerShiftMatrix<int>(4);  // [[0,0,0,0], [1,0,0,0], [0,1,0,0], [0,0,1,0]]
- * @endcode
+ * @param m Side length
+ * @return Matrix with L_{i+1, i} = 1, all other entries 0
  */
 template <ComponentType T>
 constexpr Matrix<T> LowerShiftMatrix(size_t m) {
@@ -4278,24 +3612,14 @@ constexpr Matrix<T> LowerShiftMatrix(size_t m) {
 }
 
 /**
- * @brief Create a companion matrix for a monic polynomial
- * @ingroup matrix_factories
+ * @brief Companion matrix of a monic polynomial p(x) = x^n + a_{n−1} x^{n−1} + … + a_0
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType
- * @param poly Monic polynomial p(x) = x^n + a_{n-1}x^{n-1} + ... + a_1x + a_0
- * @return n×n companion matrix with characteristic polynomial p(x)
+ * @param poly Monic polynomial of degree n
+ * @return n × n matrix whose characteristic polynomial is `poly`
  *
- * Creates a companion matrix whose characteristic polynomial equals the input polynomial.
- * The matrix has the form of a lower shift matrix with the last column containing
- * the negated polynomial coefficients.
+ * Built from a lower shift matrix; the last column holds the negated coefficients of `poly`.
  *
- * @throws std::invalid_argument if polynomial is not monic
- * @throws std::bad_alloc if memory allocation fails
- *
- * @code{.cpp}
- * Polynomial<double> p = {1, 2, 3, 1};  // 1 + 2x + 3x² + x³ (monic)
- * auto C = CompanionMatrix(p);  // 3×3 companion matrix
- * @endcode
+ * @throws std::invalid_argument if `poly` is not monic
  */
 template <ComponentType T>
 constexpr Matrix<T> CompanionMatrix(const Polynomial<T>& poly) {

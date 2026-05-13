@@ -2,7 +2,7 @@
  * @file vectors.hpp
  * @brief Vector arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.7
+ * @version 2.1.8
  * @date 2026
  *
  * @copyright
@@ -14,15 +14,10 @@
  *
  * @section Description
  *
- * This header file provides a complete implementation of vector arithmetic for
- * error control coding. It supports:
- *
- * - **Generic vector operations**: Over any @ref CECCO::ComponentType including finite fields,
- *   floating-point numbers, complex numbers, and signed integers
- * - **Cross-field constructors**: Safe conversions between vectors over related fields using
- *   @ref CECCO::SubfieldOf, @ref CECCO::ExtensionOf, and @ref CECCO::largest_common_subfield_t
- * - **Matrix integration**: Bidirectional conversion Vector -> Matrix -> Vector
- * - **Performance optimizations**: High-performance O(1) caching, move semantics, and STL algorithm utilization
+ * Vector arithmetic for error-control coding over any @ref CECCO::ComponentType (finite fields,
+ * floating-point, complex, signed integers including `InfInt`). Supports safe cross-field
+ * conversions via @ref CECCO::SubfieldOf / @ref CECCO::ExtensionOf / @ref CECCO::largest_common_subfield_t,
+ * bidirectional Vector ↔ Matrix integration, and lazy O(1) caching of Hamming weight / burst length.
  *
  * @section Usage_Example
  *
@@ -39,26 +34,12 @@
  * size_t weight = x.wH();                  // Hamming weight
  * size_t distance = dH(x, Vector<F4>(4));  // Hamming distance to zero vector
  *
- * // Cross-field operations (field tower compatibility)
- * using F2 = Fp<2>;                        // note: used in construction of F4
- * Vector<F2> y = {1, 0, 1, 1};
- * Vector<F4> z(y);                         // Safe upcast: F₂ ⊆ F₄ (construction tower)
- * auto M = extension_vec.as_matrix<F2>();  // Convert to matrix over subfield
+ * // Cross-field upcast (𝔽_2 ⊆ 𝔽_4 via construction tower)
+ * Vector<Fp<2>> y = {1, 0, 1, 1};
+ * Vector<F4> z(y);
  * @endcode
  *
- * @section Performance_Features
- *
- * - **Lazy evaluation**: Hamming weight and burst length computed on-demand with compile-time optimized caching
- * - **Move semantics**: Optimal performance for temporary vector operations
- * - **STL integration**: Uses standard algorithms for optimal compiler optimization
- * - **Type safety**: C++20 concepts prevent invalid operations:
- *   - @ref CECCO::ComponentType Ensures valid component types
- *   - @ref CECCO::SubfieldOf Validates field relationship for safe conversions
- *   - @ref CECCO::largest_common_subfield_t Enables generalized cross-field conversions
- *
- * @see @ref fields.hpp for fields and field arithmetic
- * @see @ref matrices.hpp for matrices and linear algebra
- * @see @ref field_concepts_traits.hpp for type constraints and field relationships (C++20 concepts)
+ * @see @ref fields.hpp, @ref matrices.hpp, @ref field_concepts_traits.hpp
  */
 
 #ifndef VECTORS_HPP
@@ -104,52 +85,31 @@ std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) noexcept;
 double dE(const Vector<std::complex<double>>& lhs, const Vector<std::complex<double>>& rhs);
 
 /**
- * @class Vector
- * @brief Generic vector class for error control coding (CECCO) and finite field applications
+ * @brief Vector v = (v₀, v₁, …, vₙ₋₁) over a @ref CECCO::ComponentType
  *
- * @tparam T Component type satisfying @ref CECCO::ComponentType concept. Supported types include:
- *   - **Finite field types**: @ref CECCO::Fp, @ref CECCO::Ext satisfying concept @ref CECCO::FiniteFieldType
- *   - **Floating-point types**: `double` etc.
- *   - **Complex types**: `std::complex<double>` etc.
- *   - **Signed integer types**: Signed integer types including `InfInt` satisfying concept @ref CECCO::SignedIntType
+ * @tparam T Component type satisfying @ref CECCO::ComponentType (finite field, `double`,
+ *           `std::complex<double>`, or signed integer including `InfInt`)
  *
- * This class provides comprehensive vector operations optimized for error control coding (CECCO),
- * with special support for finite field arithmetic and cross-field conversions. The design
- * emphasizes performance through caching, move semantics, and STL algorithm utilization.
+ * Components are stored contiguously; length is fixed except via the explicit resizers
+ * (@ref pad_front, @ref pad_back, @ref append, @ref prepend, @ref delete_components, …).
+ * Dimension mismatches in arithmetic throw `std::invalid_argument`. Hamming weight is
+ * computed lazily and cached; the cache is invalidated on any mutation. Methods that
+ * compare against zero (@ref wH, @ref supp, @ref burst_length, …) are gated by
+ * `requires ReliablyComparableType<T>`.
  *
- * @section Implementation_Notes
- *
- * - **Cross-field compatibility**: Safe conversions between related field types using concepts
- * - **CECCO-specific operations**: Hamming weight, Hamming distance, burst length calculations
- * - **Performance optimization**: Lazy evaluation with compile-time optimized O(1) caching for expensive operations
- * - **Type safety**: Compile-time validation of field relationships and operations
+ * Cross-field constructors and assignment operators between two finite fields of the same
+ * characteristic route through @ref CECCO::details::largest_common_subfield_t, so vectors
+ * over fields from disjoint construction towers can interoperate.
  *
  * @section Usage_Example
  *
  * @code{.cpp}
- * // Create vectors over finite fields
  * using F4 = Ext<Fp<2>, MOD{1, 1, 1}>;
  * Vector<F4> v = {0, 1, 2, 3};
- *
- * // CECCO operations
- * size_t weight = v.wH();           // Hamming weight
- * size_t burst = v.burst_length();  // Burst error length
- * // etc.
- *
- * // Cross-field operations (F₂ ⊆ F₄)
- * auto w = v.as_matrix<Fp<2>>();  // binary 4 x 2 matrix
- * // etc.
+ * size_t weight = v.wH();              // Hamming weight (cached)
+ * size_t burst  = v.burst_length();
+ * auto M = v.as_matrix<Fp<2>>();       // 2 × 4 matrix over 𝔽₂ (𝔽₂ ⊆ 𝔽₄)
  * @endcode
- *
- * @note Vector operations require compatible dimensions. Dimension mismatches
- *          throw std::invalid_argument exceptions.
- *
- * @note Additional methods:
- *       - **Finite fields and signed integers**: wH(), dH() (Hamming weight/distance)
- *
- * @see Concept @ref CECCO::ComponentType for supported component types
- * @see Concepts @ref CECCO::SubfieldOf, @ref CECCO::largest_common_subfield_t for cross-field operation constraints
- * @see @ref CECCO::Matrix for matrix representations and linear algebra operations
  */
 template <ComponentType T>
 class Vector {
@@ -166,160 +126,73 @@ class Vector {
     // Cache configuration for this class
     enum CacheIds { Weight = 0 };
 
-    /**
-     * @brief Default constructor creating an empty vector
+    /** @name Constructors
+     * @{
      */
+
+    /// @brief Default constructor: empty vector (length 0)
     constexpr Vector() noexcept : data(0) {}
 
-    /**
-     * @brief Constructs a vector of specified length with default-initialized components
-     *
-     * @param n Length of the vector to create
-     *
-     * Creates a vector with `n` components, each initialized to `T()` (zero for most types).
-     * For vectors over finite fields, components are initialized to the additive identity.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
+    /// @brief Length-`n` vector with default-initialised components (T() = 0)
     explicit Vector(size_t n) : data(n) {}
 
-    /**
-     * @brief Constructs a vector with all components set to a specific value
-     *
-     * @param n Length of the vector to create
-     * @param l Value to assign to all components
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
+    /// @brief Length-`n` vector with every component equal to `l`
     Vector(size_t n, const T& l);
 
-    /**
-     * @brief Constructs a vector from an initializer list
-     *
-     * @param l Initializer list containing the vector components
-     *
-     * Enables convenient vector initialization syntax:
-     * @code{.cpp}
-     * Vector<int> v{1, 2, 3, 4};
-     * Vector<Fp<2>> w{0, 1, 1, 0};
-     * @endcode
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
+    /// @brief From an initializer list of components, in order
     Vector(const std::initializer_list<T>& l) : data(l) {}
 
-    /**
-     * @brief Copy constructor
-     *
-     * @param other Vector to copy from
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
     Vector(const Vector& other);
-
-    /**
-     * @brief Move constructor
-     *
-     * @param other Vector to move from (left in valid but unspecified state)
-     */
     constexpr Vector(Vector&& other) noexcept;
 
     /**
-     * @brief Cross-field constructor from matrix over subfield
+     * @brief From a matrix over a subfield: each column becomes one T component
      *
-     * @tparam S Source field type that must be a subfield (from construction tower) of T
-     * @param mat Matrix over subfield S to convert to vector over extension field T
-     *
-     * Constructs a vector by interpreting each column of the matrix as an element
-     * of the extension field T. Requires that T().template as_vector<S>().get_n() == mat.get_m().
-     *
-     * @throws std::invalid_argument if matrix dimensions are incompatible with field structure
-     * @throws std::bad_alloc if memory allocation fails
+     * @tparam S Subfield of T (in the construction tower)
+     * @throws std::invalid_argument if `mat.get_m()` does not match `[T:S]` (the extension
+     *         degree of T over S)
      */
     template <FiniteFieldType S>
     Vector(const Matrix<S>& mat)
         requires FiniteFieldType<T> && ExtensionOf<S, T>;
 
     /**
-     * @brief Cross-field copy constructor between fields with the same characteristic
+     * @brief Cross-field conversion between two finite fields of the same characteristic
      *
-     * @tparam S Source field type that must have the same characteristic as T
-     * @param other Vector over field S to convert
+     * @tparam S Source field type (`Vector<S>`); must share characteristic with T
      *
-     * Safely converts vectors between any fields with the same characteristic using
-     * @ref largest_common_subfield_t as the conversion bridge. Supports conversions across
-     * different field towers, not just within the same construction hierarchy.
-     *
-     * @throws std::invalid_argument if field components cannot be represented in target field (downcasting not
-     * possible)
-     * @throws std::bad_alloc if memory allocation fails
+     * Converts component by component via T's cross-field constructor, which routes through
+     * @ref CECCO::details::largest_common_subfield_t and so handles disjoint construction towers.
+     * Propagates `std::invalid_argument` if any component is not representable in T.
      */
-    template <FieldType S>
-    Vector(const Vector<S>& other)
-        requires FiniteFieldType<S> && FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic());
+    template <FiniteFieldType S>
+        requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
+    Vector(const Vector<S>& other);
 
     /**
-     * @brief Constructs vector from polynomial coefficients
+     * @brief From polynomial coefficients: component `i` becomes `poly[i]`
      *
-     * @param poly Polynomial whose coefficients become vector components
-     *
-     * Creates a vector where component i contains the coefficient of x^i in the polynomial.
-     * The vector length equals poly.degree() + 1.
-     *
-     * @note If you need cross-field polynomial <-> vector conversion then first convert poly into the other field.
-     *
-     * @throws std::bad_alloc if memory allocation fails
+     * Resulting length is `poly.degree() + 1`. For cross-field conversion, convert the
+     * polynomial first.
      */
     Vector(const Polynomial<T>& poly);
+
+    /** @} */
 
     /** @name Assignment Operators
      * @{
      */
 
-    /**
-     * @brief Copy assignment operator
-     *
-     * @param rhs Vector to copy from
-     * @return Reference to this vector after assignment
-     */
     constexpr Vector& operator=(const Vector& rhs);
-
-    /**
-     * @brief Move assignment operator
-     *
-     * @param rhs Vector to move from (left in valid but unspecified state)
-     * @return Reference to this vector after assignment
-     */
     constexpr Vector& operator=(Vector&& rhs) noexcept;
 
-    /**
-     * @brief Scalar assignment operator
-     *
-     * @param rhs Value to assign to all components
-     * @return Reference to this vector after assignment
-     *
-     * Sets all vector components to the specified value.
-     */
+    /// @brief Set every component to `rhs`
     constexpr Vector& operator=(const T& rhs) noexcept;
 
-    /**
-     * @brief Cross-field assignment operator between fields with the same characteristic
-     *
-     * @tparam S Source field type that must have the same characteristic as T
-     * @param rhs Vector over field S to convert
-     * @return Reference to this vector after assignment
-     *
-     * Safely converts vectors between any fields with the same characteristic using
-     * @ref largest_common_subfield_t as the conversion bridge. Supports conversions across
-     * different field towers, not just within the same construction hierarchy.
-     *
-     * @throws std::invalid_argument if field components cannot be represented in target field (downcasting not
-     * possible)
-     * @throws std::bad_alloc if memory allocation fails
-     */
-    template <FieldType S>
-    Vector& operator=(const Vector<S>& other)
-        requires FiniteFieldType<S> && FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic());
+    /// @brief Cross-field assignment (same semantics as the cross-field constructor)
+    template <FiniteFieldType S>
+        requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
+    Vector& operator=(const Vector<S>& other);
 
     /** @} */
 
@@ -327,32 +200,14 @@ class Vector {
      * @{
      */
 
-    /**
-     * @brief Unary plus operator for lvalue references (identity)
-     *
-     * @return Copy of this vector (mathematical identity operation)
-     */
+    /// @brief Unary `+` (lvalue): returns a copy
     constexpr Vector operator+() const& noexcept { return *this; }
-
-    /**
-     * @brief Unary plus operator for rvalue references (move optimization)
-     *
-     * @return This vector moved (mathematical identity operation)
-     */
+    /// @brief Unary `+` (rvalue): returns the rvalue itself
     constexpr Vector operator+() && noexcept { return std::move(*this); }
 
-    /**
-     * @brief Unary minus operator for lvalue references
-     *
-     * @return New vector with all components negated
-     */
+    /// @brief Unary `−` (lvalue): returns a new vector with each component negated
     constexpr Vector operator-() const&;
-
-    /**
-     * @brief Unary minus operator for rvalue references (move optimization)
-     *
-     * @return This vector with all components negated in-place
-     */
+    /// @brief Unary `−` (rvalue): negates components in place
     constexpr Vector operator-() && noexcept;
 
     /** @} */
@@ -362,51 +217,28 @@ class Vector {
      */
 
     /**
-     * @brief Vector addition assignment
+     * @brief Component-wise addition `this[i] += rhs[i]`
      *
-     * @param rhs Vector to add to this vector
-     * @return Reference to this vector after addition
-     *
-     * Performs component-wise addition: this[i] += rhs[i] for all valid indices.
-     *
-     * @throws std::invalid_argument if vectors have different lengths
+     * @throws std::invalid_argument if `this->get_n() != rhs.get_n()`
      */
     Vector& operator+=(const Vector& rhs);
 
     /**
-     * @brief Vector subtraction assignment
+     * @brief Component-wise subtraction `this[i] -= rhs[i]`
      *
-     * @param rhs Vector to subtract from this vector
-     * @return Reference to this vector after subtraction
-     *
-     * Performs component-wise subtraction: this[i] -= rhs[i] for all valid indices.
-     *
-     * @throws std::invalid_argument if vectors have different lengths
+     * @throws std::invalid_argument if `this->get_n() != rhs.get_n()`
      */
     Vector& operator-=(const Vector& rhs);
 
-    /**
-     * @brief Scalar multiplication assignment
-     *
-     * @param s Scalar value to multiply with
-     * @return Reference to this vector after multiplication
-     *
-     * Multiplies each component by the scalar: this[i] *= s for all indices.
-     */
+    /// @brief Multiply every component by the scalar `s`
     constexpr Vector& operator*=(const T& s) noexcept;
 
     /**
-     * @brief Scalar division assignment
+     * @brief Divide every component by the scalar `s`
      *
-     * @param s Scalar value to divide by
-     * @return Reference to this vector after division
-     *
-     * Divides each component by the scalar: this[i] /= s for all indices.
-     *
-     * @throws std::invalid_argument if attempting to divide by zero
-     *
-     * @note Reliable results ((v / s) * s == v) for a vector v and nonzero scalar s are only guaranteed in case T
-     * fulfills concept FieldType<T>
+     * @throws std::invalid_argument if `s == T(0)`
+     * @note Round-trip `(v / s) * s == v` is only guaranteed when T satisfies @ref CECCO::FieldType
+     * (otherwise integer rounding may corrupt components).
      */
     Vector& operator/=(const T& s);
 
@@ -417,40 +249,21 @@ class Vector {
      */
 
     /**
-     * @brief Randomize all vector components
-     * @return Reference to this vector after randomization
+     * @brief Replace components with random values appropriate for T
      *
-     * Fills the vector with random values appropriate for the component type:
-     * - **Finite fields**: Using corresponding randomize member
-     * - **Signed integers**: Uniform random values in range [-100, 100]
-     * - **Complex numbers**: Real and imaginary part uniform random values in range [-1.0, 1.0]
-     * - **Double**: Uniform random values in range [-1.0, 1.0]
-     *
-     * Uses the global random number generator from helpers.hpp.
+     * Distribution per component: finite-field types draw uniformly from the field; signed
+     * integers from [−100, 100]; `double` and the parts of `std::complex<double>` from [−1, 1].
      */
     Vector& randomize() noexcept;
 
-    /**
-     * @brief Randomize all vector components to nonzero values
-     * @return Reference to this vector after randomization
-     *
-     * Sets each component to a uniformly random nonzero field element by first zeroing
-     * each component and then calling randomize_force_change().
-     *
-     * Uses the global random number generator from helpers.hpp.
-     */
+    /// @brief Like @ref randomize but every component is guaranteed non-zero
     Vector& randomize_nonzero() noexcept
         requires FieldType<T>;
 
     /**
-     * @brief Randomize vector components to pairwise distinct field elements
-     * @return Reference to this vector after randomization
-     * @throws std::invalid_argument if the vector length exceeds the field size
+     * @brief Fill with pairwise distinct field elements (shuffled labels 0, …, q − 1)
      *
-     * Fills the vector with n distinct elements chosen uniformly at random from the field,
-     * by shuffling the labels 0, ..., q-1 and taking the first n.
-     *
-     * Uses the global random number generator from helpers.hpp.
+     * @throws std::invalid_argument if the vector length exceeds the field cardinality q
      */
     Vector& randomize_pairwise_distinct()
         requires FiniteFieldType<T>;
@@ -461,50 +274,24 @@ class Vector {
      * @{
      */
 
-    /**
-     * @brief Get the vector length
-     *
-     * @return Number of components in the vector
-     */
+    /// @brief Vector length (number of components)
     constexpr size_t get_n() const noexcept { return data.size(); }
 
-    /**
-     * @brief Check if vector is empty
-     *
-     * @return true if vector has zero length, false otherwise
-     */
+    /// @brief True iff length is 0 (distinct from a non-empty all-zero vector)
     constexpr bool is_empty() const noexcept { return data.empty(); }
 
-    /**
-     * @brief Check if vector is the zero vector
-     *
-     * @return true if all components equal T(0), false otherwise
-     *
-     * @note Being the zero vector implies being non-empty.
-     *
-     * @note Only for types fulfilling CECCO::ReliablyComparableType.
-     */
+    /// @brief True iff every component equals T(0); also true for the empty vector
     constexpr bool is_zero() const noexcept
         requires ReliablyComparableType<T>;
 
-    /**
-     * @brief Check if all components are pairwise distinct
-     *
-     * @return true if no two components have the same value, false otherwise
-     *
-     * @note Only for types fulfilling CECCO::ReliablyComparableType.
-     */
+    /// @brief True iff no two components are equal
     constexpr bool is_pairwise_distinct() const
         requires ReliablyComparableType<T>;
 
     /**
-     * @brief Compute the support of the vector (set of indices of non-zero components)
+     * @brief Sorted indices of non-zero components (empty vector for an all-zero input)
      *
-     * @return Sorted vector of indices where the component is non-zero
-     *
-     * Returns an empty std::vector for a zero vector, throws for an empty vector.
-     *
-     * @note Only for types fulfilling CECCO::ReliablyComparableType.
+     * @throws std::invalid_argument if `*this` is empty (length 0)
      */
     std::vector<size_t> supp() const
         requires ReliablyComparableType<T>
@@ -516,39 +303,17 @@ class Vector {
         return supp;
     }
 
-    /**
-     * @brief Compute Hamming weight (number of non-zero and non-erased components) for discrete types
-     *
-     * @return Number of non-zero components
-     *
-     * Uses lazy evaluation with O(1) compile-time optimized caching for optimal performance on repeated calls.
-     *
-     * @note Only for types fulfilling CECCO::ReliablyComparableType.
-     */
+    /// @brief Hamming weight: number of non-zero, non-erased components; cached on first call
     size_t wH() const noexcept
         requires ReliablyComparableType<T>
     {
         return cache.template get_or_compute<Weight>([this] { return calculate_weight(); });
     }
 
-    /**
-     * @brief Compute burst length (minimum interval containing all non-zero components)
-     *
-     * @return Length of burst
-     *
-     * For a vector with first non-zero component at position L and last at position R,
-     * returns R - L + 1. Returns 0 for the empty vector and the zero vector.
-     */
+    /// @brief Burst length R − L + 1, where L, R are the first and last non-zero indices; 0 for an all-zero or empty vector
     constexpr size_t burst_length() const noexcept;
 
-    /**
-     * @brief Compute cyclic burst length (burst length with wraparound)
-     *
-     * @return Length of cyclic burst
-     *
-     * Considers the vector as circular, finding the shortest arc that contains all
-     * non-zero components. Returns 0 for the empty vector and the zero vector.
-     */
+    /// @brief Cyclic burst length: shortest circular arc covering all non-zero positions; 0 for an all-zero or empty vector
     constexpr size_t cyclic_burst_length() const noexcept;
 
     /** @} */
@@ -558,229 +323,91 @@ class Vector {
      */
 
     /**
-     * @brief Set component value using perfect forwarding
+     * @brief Set component `i` by perfect-forwarding `c`
      *
-     * @tparam U Type that can be converted to T
-     * @param i Index of component to set (0-based)
-     * @param c Value to forward into the component
-     * @return Reference to this vector after modification
-     *
-     * Efficiently forwards the value into the specified component position.
-     * Handles both lvalue and rvalue references optimally.
-     *
-     * @throws std::invalid_argument if index i is out of bounds
+     * @throws std::invalid_argument if `i` is out of bounds
      */
     template <typename U>
     Vector& set_component(size_t i, U&& c)
         requires std::convertible_to<std::decay_t<U>, T>;
 
     /**
-     * @brief Access component by index (const version)
+     * @brief Read access to component `i`
      *
-     * @param i Index of component to access
-     * @return Const reference to the component at position i
-     *
-     * Provides safe, bounds-checked (read-only) access to vector components.
-     *
-     * @throws std::invalid_argument if index is out of bounds
+     * @throws std::invalid_argument if `i` is out of bounds
      */
     const T& operator[](size_t i) const;
 
     /**
-     * @brief Extract subvector by copy (lvalue version)
+     * @brief Extract the contiguous subvector `[i, i + w)`
      *
-     * @param i Starting index for extraction
-     * @param w Width (number of components) to extract
-     * @return New vector containing components [i, i+w)
-     *
-     * Creates a new vector from a contiguous subsequence of this vector.
-     *
-     * @throws std::invalid_argument if [i, i+w) extends beyond vector bounds
-     * @throws std::bad_alloc if memory allocation fails
+     * @throws std::invalid_argument if `[i, i + w)` exceeds the vector
      */
     Vector get_subvector(size_t i, size_t w) const&;
 
-    /**
-     * @brief Extract subvector in-place (rvalue version)
-     *
-     * @param i Starting index for extraction
-     * @param w Width (number of components) to keep
-     * @return Reference to this vector, modified to contain only components [i, i+w)
-     *
-     * Efficient version that modifies this vector when called on temporaries.
-     *
-     * @throws std::invalid_argument if [i, i+w) extends beyond vector bounds
-     */
+    /// @brief In-place rvalue overload of @ref get_subvector (truncates to `[i, i + w)`)
     Vector& get_subvector(size_t i, size_t w) &&;
 
     /**
-     * @brief Replace subvector with another vector (copy version)
+     * @brief Overwrite components `[i, i + v.get_n())` with `v`
      *
-     * @param v Vector to copy into this vector
-     * @param i Starting position for replacement
-     * @return Reference to this vector after modification
-     *
-     * Replaces components [i, i+v.get_n()) with components from vector v.
-     *
-     * @throws std::invalid_argument if replacement would extend beyond vector bounds
+     * @throws std::invalid_argument if the replacement region exceeds the vector
      */
     Vector& set_subvector(const Vector& v, size_t i);
 
-    /**
-     * @brief Replace subvector with another vector (move version)
-     *
-     * @param v Vector to move into this vector
-     * @param i Starting position for replacement
-     * @return Reference to this vector after modification
-     *
-     * More efficient version for temporary vectors.
-     *
-     * @throws std::invalid_argument if replacement would extend beyond vector bounds
-     */
+    /// @brief Rvalue overload of @ref set_subvector (move-assigns components from `v`)
     Vector& set_subvector(Vector&& v, size_t i);
 
-    /**
-     * @brief Append another vector to the end of this vector
-     *
-     * @param rhs Vector to append
-     * @return Reference to this vector after appending
-     *
-     * Concatenates rhs to the end: [this | rhs].
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
+    /// @brief Append `rhs`: result becomes `[*this | rhs]`
     Vector& append(const Vector& rhs);
-
-    /**
-     * @brief Append another vector to the end of this vector (move version)
-     *
-     * @param rhs Vector to move-append
-     * @return Reference to this vector after appending
-     *
-     * More efficient version for temporary vectors.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
+    /// @brief Rvalue overload of @ref append (moves components from `rhs`)
     Vector& append(Vector&& rhs);
 
-    /**
-     * @brief Append a compatible object after converting it to a vector
-     *
-     * @tparam U Type constructible as Vector<T>
-     * @param rhs Object to convert and append
-     * @return Reference to this vector after appending
-     *
-     * Converts rhs to Vector<T> via its constructor, then appends.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
+    /// @brief Append after converting `rhs` to `Vector<T>`
     template <typename U>
     Vector& append(U&& rhs)
         requires std::constructible_from<Vector<T>, U>;
 
-    /**
-     * @brief Prepend another vector to the beginning of this vector
-     *
-     * @param rhs Vector to prepend
-     * @return Reference to this vector after prepending
-     *
-     * Concatenates rhs before this vector: [rhs | this].
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
+    /// @brief Prepend `rhs`: result becomes `[rhs | *this]`
     Vector& prepend(const Vector& rhs);
-
-    /**
-     * @brief Prepend another vector to the beginning of this vector (move version)
-     *
-     * @param rhs Vector to move-prepend
-     * @return Reference to this vector after prepending
-     *
-     * More efficient version for temporary vectors.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
+    /// @brief Rvalue overload of @ref prepend (moves components from `rhs`)
     Vector& prepend(Vector&& rhs);
 
-    /**
-     * @brief Prepend a compatible object after converting it to a vector
-     *
-     * @tparam U Type constructible as Vector<T>
-     * @param lhs Object to convert and prepend
-     * @return Reference to this vector after prepending
-     *
-     * Converts lhs to Vector<T> via its constructor, then prepends.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     */
+    /// @brief Prepend after converting `lhs` to `Vector<T>`
     template <typename U>
     Vector& prepend(U&& lhs)
         requires std::constructible_from<Vector<T>, U>;
 
     /**
-     * @brief Delete specified components from the vector
+     * @brief Delete the components whose indices appear in `v` and compact
      *
-     * @param v Vector of indices to delete (automatically deduplicated)
-     * @return Reference to this vector after deletion
-     *
-     * Removes components at the specified indices, compacting the remaining components.
-     *
-     * @throws std::invalid_argument if any index in v is out of bounds
-     * @throws std::bad_alloc if memory allocation fails during compaction
+     * @param v Indices (deduplicated internally)
+     * @throws std::invalid_argument if any index in `v` is out of bounds
      */
     Vector& delete_components(const std::vector<size_t>& v);
 
     /**
-     * @brief Delete specified component from the vector
+     * @brief Delete component `i` (single-index convenience for @ref delete_components)
      *
-     * @param i Index of component to delete
-     * @return Reference to this vector after deletion
-     *
-     * Removes component at the specified index, compacting the remaining components.
-     *
-     * @throws std::invalid_argument if any index i is out of bounds
-     * @throws std::bad_alloc if memory allocation fails during compaction
+     * @throws std::invalid_argument if `i` is out of bounds
      */
     Vector& delete_component(size_t i) { return delete_components({i}); }
 
 #ifdef CECCO_ERASURE_SUPPORT
 
     /**
-     * @brief Erases specified components from the vector (flags them as erasures)
+     * @brief Mark every component whose index appears in `v` as erased
      *
-     * @param v Vector of indices to erase (automatically deduplicated)
-     * @return Reference to this vector after erasing
+     * @param v Indices (deduplicated internally)
+     * @throws std::invalid_argument if any index in `v` is out of bounds
      *
-     * Erases components at the specified indices.
-     *
-     * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased field
-     * elements is the responsibility of the user!
-     *
-     * @note Only available for field types (since erasure flag/erase() is required)
-     *
-     * @throws std::invalid_argument if any index in v is out of bounds
+     * @warning Erased components must not participate in field arithmetic — see
+     * @ref CECCO_ERASURE_SUPPORT.
      */
     Vector& erase_components(const std::vector<size_t>& v)
         requires FieldType<T>;
 
-    /**
-     * @brief Erases specified component from the vector (flags it as erasure)
-     *
-     * @param i Index of component to erase
-     * @return Reference to this vector after erasing
-     *
-     * Erases component at the specified index.
-     *
-     * @warning Once a field element has been erased, it can no longer be used as a normal field element, i.e. field
-     * operations, property queries, etc. will return incorrect results or throw errors. The correct use of erased field
-     * elements is the responsibility of the user!
-     *
-     * @note Only available for field types (since erasure flag/erase() is required)
-     *
-     * @throws std::invalid_argument if index i is out of bounds
-     */
+    /// @brief Erase component `i` (single-index convenience for @ref erase_components)
     Vector& erase_component(size_t i)
         requires FieldType<T>
     {
@@ -788,32 +415,15 @@ class Vector {
     }
 
     /**
-     * @brief Un-erases specified components from the vector (removes the erasure flag))
+     * @brief Clear the erasure flag on every component whose index appears in `v` (resets to T(0))
      *
-     * @param v Vector of indices to un-erase (automatically deduplicated)
-     * @return Reference to this vector after un-erasing
-     *
-     * Un-erases components at the specified indices and sets them to 0.
-     *
-     * @note Only available for field types (since erasure flag/unerase() is required)
-     *
-     * @throws std::invalid_argument if any index in v is out of bounds
+     * @param v Indices (deduplicated internally)
+     * @throws std::invalid_argument if any index in `v` is out of bounds
      */
     Vector& unerase_components(const std::vector<size_t>& v)
         requires FieldType<T>;
 
-    /**
-     * @brief Un-erases specified component from the vector (removes erasure flag)
-     *
-     * @param i Index of component to un-erase
-     * @return Reference to this vector after un-erasing
-     *
-     * Un-erases component at the specified index and sets it to 0.
-     *
-     * @note Only available for field types (since erasure flag/unerase() is required)
-     *
-     * @throws std::invalid_argument if index i is out of bounds
-     */
+    /// @brief Un-erase component `i` (single-index convenience for @ref unerase_components)
     Vector& unerase_component(size_t i)
         requires FieldType<T>
     {
@@ -822,30 +432,10 @@ class Vector {
 
 #endif
 
-    /**
-     * @brief Pad vector to specified length with zeros at front
-     *
-     * @param n Target length for the vector
-     * @return Reference to this vector after padding
-     *
-     * If current length >= n, vector remains unchanged.
-     * If current length < n, zeros are prepended to reach target length.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
+    /// @brief Prepend zeros so the vector has length at least `n` (no-op if already ≥ `n`)
     Vector& pad_front(size_t n);
 
-    /**
-     * @brief Pad vector to specified length with zeros at back
-     *
-     * @param n Target length for the vector
-     * @return Reference to this vector after padding
-     *
-     * If current length >= n, vector remains unchanged.
-     * If current length < n, zeros are appended to reach target length.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     */
+    /// @brief Append zeros so the vector has length at least `n` (no-op if already ≥ `n`)
     Vector& pad_back(size_t n);
 
     /** @} */
@@ -854,42 +444,16 @@ class Vector {
      * @{
      */
 
-    /**
-     * @brief Rotate vector components to the left
-     *
-     * @param i Number of positions to rotate left
-     * @return Reference to this vector after rotation
-     *
-     * Performs circular left shift: component at position j moves to position (j-i) mod n.
-     */
+    /** @brief Circular left shift by `i` positions: `j ↦ (j − i) mod n`. */
     constexpr Vector& rotate_left(size_t i) noexcept;
 
-    /**
-     * @brief Rotate vector components to the right
-     *
-     * @param i Number of positions to rotate right
-     * @return Reference to this vector after rotation
-     *
-     * Performs circular right shift: component at position j moves to position (j+i) mod n.
-     * Equivalent to rotate_left(get_n() - i).
-     */
+    /** @brief Circular right shift by `i` positions: `j ↦ (j + i) mod n`. */
     constexpr Vector& rotate_right(size_t i) noexcept;
 
-    /**
-     * @brief Reverse the order of all components
-     *
-     * @return Reference to this vector after reversal
-     *
-     * Component at position i moves to position (n-1-i).
-     */
+    /** @brief Reverse component order: `i ↦ n − 1 − i`. */
     constexpr Vector& reverse() noexcept;
 
-    /**
-     * @brief Fill all vector components with specified value
-     *
-     * @param value Value to assign to all components
-     * @return Reference to this vector after filling
-     */
+    /** @brief Set every component to `value`. */
     constexpr Vector& fill(const T& value) noexcept;
 
     /** @} */
@@ -899,73 +463,46 @@ class Vector {
      */
 
     /**
-     * @brief Interpret vector as a single integer (finite fields only)
+     * @brief Interpret as a base-q integer, where q = T::get_size()
      *
-     * @return Integer representation treating vector components as base-q digits
+     * Component `data[n − 1 − i]` is the i-th digit (least-significant first), so the value
+     * is Σ data[n − 1 − i] · qⁱ.
      *
-     * Converts the vector to an integer using positional notation with base q = T::get_size().
-     * Component i contributes data[n-1-i] * q^i to the result.
-     *
-     * @note Result may overflow for large vectors; use with caution
-     * @note Available only for finite field types.
+     * @note May overflow `size_t` for large vectors over large fields.
      */
     size_t as_integer() const noexcept
         requires FiniteFieldType<T>;
 
     /**
-     * @brief Construct vector from an integer (finite fields only)
+     * @brief Replace `*this` with the length-`n` base-q encoding of `value`
      *
-     * @param value Integer to convert
-     * @param n     Desired vector length
+     * Left inverse of @ref as_integer: `v.from_integer(v.as_integer(), v.get_n()) == v`.
      *
-     * @return Vector whose base-q positional encoding equals @p value
-     *
-     * Interprets @p value in base q = T::get_size() and constructs a vector of length @p n
-     * such that component data[n-1-i] is set to the i-th least significant base-q digit
-     * of @p value.
-     *
-     * @note This function is the left inverse of as_integer() for values in the valid range:
-     *       from_integer(v.as_integer(), v.size()) == v.
-     * @note Available only for finite field types.
+     * @throws std::out_of_range if `value` does not fit into n base-q digits
      */
     Vector& from_integer(size_t value, size_t n)
         requires FiniteFieldType<T>;
 
     /**
-     * @brief Convert to matrix over subfield (finite fields only)
+     * @brief Expand each component into its S-coefficient column
      *
-     * @tparam S Subfield type satisfying SubfieldOf<T, S>
-     * @return Matrix where each column represents one vector component over the subfield
+     * @tparam S Subfield of T
+     * @return [T:S] × `get_n()` matrix whose column j is `data[j].as_vector<S>()`
      *
-     * Converts each extension field component to its vector representation over the subfield S,
-     * arranging these as columns of a matrix.
-     *
-     * @throws std::bad_alloc if memory allocation fails
-     *
-     * @note Matrix dimensions are [Ext : Fp<p>] * get_n(), where [Ext : Fp<p>] = extension degree of Ext over Fp<p>.
-     * @note If at the j-th component of this has the erasure flag, then the whole j-th column of the returned matrix
-     * has the erasure flag.
+     * @note Under @ref CECCO_ERASURE_SUPPORT, an erased component j produces an entirely
+     * erased column j.
      */
     template <FiniteFieldType S>
     Matrix<S> as_matrix() const
         requires FiniteFieldType<T> && SubfieldOf<T, S> && (!std::is_same_v<T, S>);
 
     /**
-     * @brief Reshape vector into a matrix by row-major order
+     * @brief Reshape into an `m × (n/m)` matrix, row-major
      *
-     * @param m Number of rows in the resulting matrix
-     * @return Matrix of dimensions m × (n / m) containing all vector elements
+     * Inverse of @ref Matrix::to_vector: index k of this vector lands at `(k/cols, k%cols)`
+     * with `cols = n/m`.
      *
-     * Distributes the vector elements into matrix rows. Vector index k maps to
-     * matrix element (k / cols, k % cols) where cols = n / m. This is the inverse
-     * of @ref Matrix::to_vector.
-     *
-     * @throws std::invalid_argument if m does not divide the vector length
-     *
-     * @code{.cpp}
-     * Vector<double> v = {1, 2, 3, 4, 5, 6};
-     * auto M = v.to_matrix(2);  // M = {{1, 2, 3}, {4, 5, 6}}
-     * @endcode
+     * @throws std::invalid_argument if `m` does not divide the vector length
      */
     Matrix<T> to_matrix(size_t m) const;
 
@@ -974,8 +511,7 @@ class Vector {
    private:
     std::vector<T> data;
 
-    /// High-performance O(1) cache for expensive operations (Hamming weight, etc.) - uses compile-time optimized array
-    /// storage
+    /// @brief Cache for Hamming weight (invalidated by mutating operations)
     mutable details::Cache<details::CacheEntry<Weight, size_t>> cache;
 
     constexpr size_t calculate_weight() const noexcept
@@ -1006,10 +542,9 @@ Vector<T>::Vector(const Matrix<S>& mat)
 }
 
 template <ComponentType T>
-template <FieldType S>
-Vector<T>::Vector(const Vector<S>& other)
-    requires FiniteFieldType<S> && FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
-{
+template <FiniteFieldType S>
+    requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
+Vector<T>::Vector(const Vector<S>& other) {
     data.resize(other.get_n());
     for (size_t i = 0; i < other.get_n(); ++i) {
         data[i] = T(other[i]);  // Uses enhanced cross-field constructors
@@ -1048,10 +583,9 @@ constexpr Vector<T>& Vector<T>::operator=(const T& rhs) noexcept {
 }
 
 template <ComponentType T>
-template <FieldType S>
-Vector<T>& Vector<T>::operator=(const Vector<S>& other)
-    requires FiniteFieldType<S> && FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
-{
+template <FiniteFieldType S>
+    requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
+Vector<T>& Vector<T>::operator=(const Vector<S>& other) {
     data.resize(other.get_n());
     for (size_t i = 0; i < other.get_n(); ++i) {
         data[i] = T(other[i]);  // Uses enhanced cross-field constructors
@@ -1246,13 +780,6 @@ Vector<T>& Vector<T>::unerase_components(const std::vector<size_t>& v)
 
 #endif
 
-/**
- * @brief Delete single component from vector
- * @tparam T Vector component type
- * @param v Source vector
- * @param i Index of component to delete
- * @return New vector with component at index i removed
- */
 template <ComponentType T>
 Vector<T> delete_component(const Vector<T>& lhs, size_t i) {
     Vector<T> res(lhs);
@@ -1735,6 +1262,7 @@ constexpr Vector<T> operator/(Vector<T>&& lhs, const T& rhs) {
     return res;
 }
 
+/// @brief Discrete linear convolution (= coefficients of `Polynomial(v) * Polynomial(w)`)
 template <ComponentType T>
 Vector<T> convolve(const Vector<T>& v, const Vector<T>& w) {
     return Vector(Polynomial(v) * Polynomial(w));
@@ -1975,17 +1503,11 @@ constexpr Vector<T> fill(Vector<T>&& v, const T& value) {
 }
 
 /**
- * @brief Compute inner product (dot product) of two vectors
+ * @brief Inner product ⟨lhs, rhs⟩ = Σᵢ lhs[i] · rhs[i]
  *
- * @tparam T Vector component type
- * @param lhs First vector
- * @param rhs Second vector
- * @return Inner product ⟨lhs, rhs⟩ = Σᵢ lhs[i] * rhs[i]
+ * For complex inputs this is the standard product (not the conjugate inner product).
  *
- * Computes the standard inner product. For finite fields, multiplication follows field arithmetic rules.
- * For complex numbers, uses standard complex multiplication (not conjugate).
- *
- * @throws std::invalid_argument if vectors have different lengths
+ * @throws std::invalid_argument if lengths differ
  */
 template <ComponentType T>
 T inner_product(const Vector<T>& lhs, const Vector<T>& rhs) {
@@ -1997,14 +1519,8 @@ T inner_product(const Vector<T>& lhs, const Vector<T>& rhs) {
 }
 
 /**
- * @brief Compute Schur product (pointwise product) of two vectors
- *
- * @tparam T Vector component type
- * @param lhs First vector
- * @param rhs Second vector
- * @return Vector containing the Schur product (pointwise product)
- *
- * @throws std::invalid_argument if vectors have different lengths
+ * @brief Schur (component-wise) product
+ * @throws std::invalid_argument if lengths differ
  */
 template <ComponentType T>
 Vector<T> Schur_product(const Vector<T>& lhs, const Vector<T>& rhs) {
@@ -2028,6 +1544,10 @@ constexpr bool operator!=(const Vector<T>& lhs, const Vector<T>& rhs) noexcept {
     return !(lhs == rhs);
 }
 
+/**
+ * @brief Length-`length` vector with `T(1)` at index `i` and zeros elsewhere
+ * @throws std::invalid_argument if `i >= length`
+ */
 template <ComponentType T>
 Vector<T> unit_vector(size_t length, size_t i) {
     if (i >= length) throw std::invalid_argument("trying to create invalid unit vector");
@@ -2037,6 +1557,7 @@ Vector<T> unit_vector(size_t length, size_t i) {
     return res;
 }
 
+/** @brief Stream output as `( c₀, c₁, …, cₙ₋₁ )`. */
 template <ComponentType T>
 std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) noexcept {
     os << "( ";
@@ -2054,54 +1575,26 @@ std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) noexcept {
  * @{
  */
 
-/**
- * @brief Compute Hamming weight of a vector
- *
- * @tparam T Vector component type (must satisfy @ref CECCO::FiniteFieldType or @ref CECCO::SignedIntType)
- * @param v Vector to analyze
- * @return Number of non-zero, non-erased components in the vector
- *
- * @note Erased positions (under CECCO_ERASURE_SUPPORT) are not counted.
- * @note Not available for types T, where precise comparison for zero is not possible (all floating point types,
- * Rationals<T> with T != InfInt.
- */
+/** @brief Hamming weight; see @ref Vector::wH for semantics. */
 template <ReliablyComparableType T>
 constexpr size_t wH(const Vector<T>& v) noexcept {
     return v.wH();
 }
 
-/**
- * @brief Compute the support of a vector
- *
- * @tparam T Vector component type (must satisfy @ref CECCO::ReliablyComparableType)
- * @param v Vector to analyze
- * @return Sorted vector of indices where the component is non-zero
- *
- * Returns an empty std::vector for a zero vector, throws for an empty vector.
- *
- * @note Only for types fulfilling CECCO::ReliablyComparableType.
- */
+/** @brief Support; see @ref Vector::supp for semantics. */
 template <ReliablyComparableType T>
 std::vector<size_t> supp(const Vector<T>& v) {
     return v.supp();
 }
 
 /**
- * @brief Compute Hamming distance between two vectors of discrete types
+ * @brief Hamming distance dₕ(lhs, rhs) = wₕ(lhs − rhs)
  *
- * @tparam T Vector component type (must satisfy @ref CECCO::FiniteFieldType or @ref CECCO::SignedIntType)
- * @param lhs First vector
- * @param rhs Second vector
- * @return Hamming distance dₕ(lhs, rhs) = wₕ(lhs - rhs)
+ * Number of positions in which `lhs` and `rhs` differ. Under @ref CECCO_ERASURE_SUPPORT,
+ * positions where either side is erased are not counted (subtraction propagates the
+ * erasure marker, and @ref wH skips erased components).
  *
- * The Hamming distance is the number of positions where the two vectors differ, counting only positions
- * where both components carry an actual field value/are not erased.
- *
- * @note Erased positions on either side (under CECCO_ERASURE_SUPPORT) are not counted, since subtraction
- *       propagates the erasure marker and wH() skips erased components.
- * @note Only for types fulfilling CECCO::ReliablyComparableType.
- *
- * @throws std::invalid_argument if vectors have different lengths
+ * @throws std::invalid_argument if lengths differ
  */
 template <ReliablyComparableType T>
 size_t dH(const Vector<T>& lhs, const Vector<T>& rhs) {
@@ -2112,6 +1605,7 @@ size_t dH(const Vector<T>& lhs, const Vector<T>& rhs) {
     return (lhs - rhs).wH();
 }
 
+// rvalue overloads of dH share semantics with the const&,const& version above.
 template <ReliablyComparableType T>
 size_t dH(Vector<T>&& lhs, const Vector<T>& rhs) {
     if (lhs.get_n() != rhs.get_n())
@@ -2138,50 +1632,21 @@ size_t dH(Vector<T>&& lhs, Vector<T>&& rhs) {
     return (std::move(lhs) - std::move(rhs)).wH();
 }
 
-/**
- * @brief Compute burst length of a vector
- *
- * @tparam T Vector component type (must satisfy @ref CECCO::ReliablyComparableType)
- * @param v Vector to analyze
- * @return Length of burst
- *
- * @note Not available for types T, where precise comparison for zero is not possible (all floating point types,
- * Rationals<T> with T != InfInt.
- *
- * @see Vector::burst_length() for detailed explanation
- */
+/** @brief Burst length; see @ref Vector::burst_length for semantics. */
 template <ReliablyComparableType T>
 constexpr size_t burst_length(const Vector<T>& v) noexcept {
     return v.burst_length();
 }
 
-/**
- * @brief Compute cyclic burst length of a vector
- *
- * @tparam T Vector component type (must satisfy @ref CECCO::ReliablyComparableType)
- * @param v Vector to analyze
- * @return Length of cyclic burst
- *
- * @note Not available for types T, where precise comparison for zero is not possible (all floating point types,
- * Rationals<T> with T != InfInt.
- *
- * @see Vector::cyclic_burst_length() for detailed explanation
- */
+/** @brief Cyclic burst length; see @ref Vector::cyclic_burst_length for semantics. */
 template <ReliablyComparableType T>
 constexpr size_t cyclic_burst_length(const Vector<T>& v) noexcept {
     return v.cyclic_burst_length();
 }
 
 /**
- * @brief Compute Euclidean distance between two complex vectors
- *
- * @param lhs First complex vector
- * @param rhs Second complex vector
- * @return Euclidean distance ||lhs - rhs||₂ = √(Σᵢ |lhs[i] - rhs[i]|²)
- *
- * Computes the standard L2 norm distance in the complex plane.
- *
- * @throws std::invalid_argument if vectors have different lengths
+ * @brief Euclidean distance ‖lhs − rhs‖₂ = √(Σᵢ |lhs[i] − rhs[i]|²) for complex vectors
+ * @throws std::invalid_argument if lengths differ
  */
 inline double dE(const Vector<std::complex<double>>& lhs, const Vector<std::complex<double>>& rhs) {
     if (lhs.get_n() != rhs.get_n())
