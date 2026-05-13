@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.11
+ * @version 2.3.12
  * @date 2026
  *
  * @copyright
@@ -1098,7 +1098,7 @@ constexpr auto compute_modular_multiplication_table()
 ///
 /// @throws std::invalid_argument if @p Modulus is not irreducible over the base field
 template <typename LabelType, LabelType FieldSize, typename LutCoeffType, uint8_t ExtensionDegree,
-          typename BaseFieldType, auto& Modulus>
+          typename BaseFieldType, auto Modulus>
 constexpr auto compute_polynomial_multiplication_table(const LutCoeffType& lut_coeff) {
     Lut2D<LabelType, FieldSize> lut_mul;
     constexpr auto q = BaseFieldType::get_size();
