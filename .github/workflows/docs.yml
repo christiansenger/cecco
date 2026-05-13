@@ -16,10 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Doxygen & Graphviz
+      - name: Install Doxygen
+        uses: ssciwr/doxygen-install@v2
+        with:
+          version: "1.16.1"
+
+      - name: Install Graphviz
         run: |
           sudo apt-get update
-          sudo apt-get install -y doxygen graphviz
+          sudo apt-get install -y graphviz
 
       - name: Build Doxygen
         run: doxygen Doxyfile
