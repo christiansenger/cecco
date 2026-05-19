@@ -3468,7 +3468,7 @@ constexpr Matrix<T> IdentityMatrix(size_t m) {
  * @throws std::invalid_argument if perm contains out-of-range or duplicate indices
  */
 template <ComponentType T>
-constexpr Matrix<T> PermutationMatrix(const std::vector<size_t>& perm) {
+Matrix<T> PermutationMatrix(const std::vector<size_t>& perm) {
     const size_t m = perm.size();
 
     std::vector<bool> seen(m, false);

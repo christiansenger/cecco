@@ -1582,7 +1582,7 @@ class Isomorphism {
     }
 
     /// @brief Inverse isomorphism φ⁻¹: B → A
-    constexpr Isomorphism<B, A> inverse() const;
+    Isomorphism<B, A> inverse() const;
 
    private:
     std::vector<size_t> iso;
@@ -1618,7 +1618,7 @@ Isomorphism<A, B>::Isomorphism() : iso(A::get_size()) {
 
 template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
-constexpr Isomorphism<B, A> Isomorphism<A, B>::inverse() const {
+Isomorphism<B, A> Isomorphism<A, B>::inverse() const {
     std::vector<size_t> iso_inv(A::get_size());
     for (size_t i = 0; i < A::get_size(); ++i) iso_inv[iso[i]] = i;
     return Isomorphism<B, A>(std::move(iso_inv));
@@ -2777,7 +2777,7 @@ Ext<B, modulus, mode>::Ext(const Iso<MAIN, OTHERS...>& other) {
 
         if constexpr (details::iso_info<CommonField>::is_iso) {
             // CommonField is an Iso, continue with its MAIN
-            using CommonMainField = details::iso_info<CommonField>::main_type;
+            using CommonMainField = typename details::iso_info<CommonField>::main_type;
             CommonMainField intermediate(other);  // Downcast other to CommonField's MAIN
             *this = OUT(intermediate);            // Use existing cross-field Ext->Ext constructor
         } else {
@@ -3124,7 +3124,7 @@ class Iso : public details::Base {
 
    public:
     using label_t = typename MAIN::label_t;
-    using BASE_FIELD = MAIN::BASE_FIELD;
+    using BASE_FIELD = typename MAIN::BASE_FIELD;
 
    private:
     MAIN main_;
@@ -3499,7 +3499,7 @@ Iso<MAIN, OTHERS...>::Iso(const Ext<B, modulus, mode>& other) {
 
         if constexpr (details::iso_info<CommonField>::is_iso) {
             // CommonField is an Iso, continue with its MAIN
-            using CommonMainField = details::iso_info<CommonField>::main_type;
+            using CommonMainField = typename details::iso_info<CommonField>::main_type;
             CommonMainField intermediate(other);  // Downcast other to CommonField's MAIN
             main_ = MAIN(intermediate);           // Use existing cross-field Ext->Ext constructor to convert to MAIN
         } else {
