@@ -7,6 +7,8 @@ A growing collecting of demos and examples is available on the <a href="https://
 
 Detailed Doxygen documentation is available <a href="https://christiansenger.github.io/cecco/">here</a>.
 
+CECCO requires C++20. It is developed and tested with GCC 15 and Apple Clang 21. Clang 14 and older are not supported.
+
 In case you want to use CECCO for your research or teaching: Please cite the following DOI (a BibTeX exporter is behind the DOI link, on the lower right).
 
 <a href="https://doi.org/10.5281/zenodo.15685869"><img src="https://zenodo.org/badge/1003774077.svg" alt="DOI"></a>
