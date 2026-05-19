@@ -45,20 +45,32 @@
 #ifndef VECTORS_HPP
 #define VECTORS_HPP
 
-// #include <algorithm> // transitive through matrices.hpp
-// #include <complex> // transitive through matrices.hpp
 #include <initializer_list>
-// #include <iostream> // transitive through matrices.hpp
 #include <numeric>
-// #include <ranges> // transitive through matrices.hpp
-// #include <set> // transitive through matrices.hpp
-#include <unordered_set>
-// #include <vector> // transitive through matrices.hpp
 
-// #include "InfInt.hpp" // transitive through matrices.hpp
-// #include "helpers.hpp" // transitive through matrices.hpp
-// #include "field_concepts_traits.hpp" // transitive through matrices.hpp
 #include "matrices.hpp"
+
+/*
+//transitive
+#include <algorithm>
+#include <complex>
+#include <concepts>
+#include <iostream>
+#include <iterator>
+#include <random>
+#include <ranges>
+#include <set>
+#include <stdexcept
+#include <functional>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include "InfInt.hpp"
+#include "field_concepts_traits.hpp"
+#include "helpers.hpp"
+*/
 
 namespace CECCO {
 
@@ -81,7 +93,7 @@ Vector<T> Schur_product(const Vector<T>& lhs, const Vector<T>& rhs);
 template <ComponentType T>
 Vector<T> unit_vector(size_t length, size_t i);
 template <ComponentType T>
-std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) noexcept;
+std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs);
 double dE(const Vector<std::complex<double>>& lhs, const Vector<std::complex<double>>& rhs);
 
 /**
@@ -114,11 +126,11 @@ double dE(const Vector<std::complex<double>>& lhs, const Vector<std::complex<dou
 template <ComponentType T>
 class Vector {
     template <ReliablyComparableType U>
-    friend constexpr bool operator==(const Vector<U>& lhs, const Vector<U>& rhs) noexcept;
+    friend constexpr bool operator==(const Vector<U>& lhs, const Vector<U>& rhs);
     friend constexpr T inner_product<>(const Vector<T>& lhs, const Vector<T>& rhs);
     friend constexpr Vector<T> Schur_product<>(const Vector<T>& lhs, const Vector<T>& rhs);
     friend Vector unit_vector<>(size_t length, size_t i);
-    friend std::ostream& operator<< <>(std::ostream& os, const Vector& rhs) noexcept;
+    friend std::ostream& operator<< <>(std::ostream& os, const Vector& rhs);
     friend double dE(const Vector<std::complex<double>>& lhs, const Vector<std::complex<double>>& rhs);
     friend class Matrix<T>;
 
@@ -131,7 +143,7 @@ class Vector {
      */
 
     /// @brief Default constructor: empty vector (length 0)
-    constexpr Vector() noexcept : data(0) {}
+    constexpr Vector() noexcept = default;
 
     /// @brief Length-`n` vector with default-initialised components (T() = 0)
     explicit Vector(size_t n) : data(n) {}
@@ -187,7 +199,7 @@ class Vector {
     constexpr Vector& operator=(Vector&& rhs) noexcept;
 
     /// @brief Set every component to `rhs`
-    constexpr Vector& operator=(const T& rhs) noexcept;
+    constexpr Vector& operator=(const T& rhs);
 
     /// @brief Cross-field assignment (same semantics as the cross-field constructor)
     template <FiniteFieldType S>
@@ -201,14 +213,14 @@ class Vector {
      */
 
     /// @brief Unary `+` (lvalue): returns a copy
-    constexpr Vector operator+() const& noexcept { return *this; }
+    constexpr Vector operator+() const& { return *this; }
     /// @brief Unary `+` (rvalue): returns the rvalue itself
     constexpr Vector operator+() && noexcept { return std::move(*this); }
 
     /// @brief Unary `−` (lvalue): returns a new vector with each component negated
     constexpr Vector operator-() const&;
     /// @brief Unary `−` (rvalue): negates components in place
-    constexpr Vector operator-() && noexcept;
+    constexpr Vector operator-() &&;
 
     /** @} */
 
@@ -231,7 +243,7 @@ class Vector {
     Vector& operator-=(const Vector& rhs);
 
     /// @brief Multiply every component by the scalar `s`
-    constexpr Vector& operator*=(const T& s) noexcept;
+    constexpr Vector& operator*=(const T& s);
 
     /**
      * @brief Divide every component by the scalar `s`
@@ -254,10 +266,10 @@ class Vector {
      * Distribution per component: finite-field types draw uniformly from the field; signed
      * integers from [−100, 100]; `double` and the parts of `std::complex<double>` from [−1, 1].
      */
-    Vector& randomize() noexcept;
+    Vector& randomize();
 
     /// @brief Like @ref randomize but every component is guaranteed non-zero
-    Vector& randomize_nonzero() noexcept
+    Vector& randomize_nonzero()
         requires FieldType<T>;
 
     /**
@@ -281,7 +293,7 @@ class Vector {
     constexpr bool is_empty() const noexcept { return data.empty(); }
 
     /// @brief True iff every component equals T(0); also true for the empty vector
-    constexpr bool is_zero() const noexcept
+    constexpr bool is_zero() const
         requires ReliablyComparableType<T>;
 
     /// @brief True iff no two components are equal
@@ -289,7 +301,7 @@ class Vector {
         requires ReliablyComparableType<T>;
 
     /**
-     * @brief Sorted indices of non-zero components (empty vector for an all-zero input)
+     * @brief Sorted indices of non-zero, non-erased components (empty vector for an input with only zeros and erasures)
      *
      * @throws std::invalid_argument if `*this` is empty (length 0)
      */
@@ -298,23 +310,30 @@ class Vector {
     {
         if (data.empty()) throw std::invalid_argument("Support of an empty (length zero) vector is undefined!");
         std::vector<size_t> supp;
-        for (size_t i = 0; i < data.size(); ++i)
+        for (size_t i = 0; i < data.size(); ++i) {
+#ifdef CECCO_ERASURE_SUPPORT
+            if constexpr (FieldType<T>)
+                if (data[i].is_erased()) continue;
+#endif
             if (data[i] != T(0)) supp.push_back(i);
+        }
         return supp;
     }
 
     /// @brief Hamming weight: number of non-zero, non-erased components; cached on first call
-    size_t wH() const noexcept
+    size_t wH() const
         requires ReliablyComparableType<T>
     {
         return cache.template get_or_compute<Weight>([this] { return calculate_weight(); });
     }
 
-    /// @brief Burst length R − L + 1, where L, R are the first and last non-zero indices; 0 for an all-zero or empty vector
-    constexpr size_t burst_length() const noexcept;
+    /// @brief Burst length R − L + 1, where L, R are the first and last non-zero indices; 0 for an all-zero or empty
+    /// vector
+    constexpr size_t burst_length() const;
 
-    /// @brief Cyclic burst length: shortest circular arc covering all non-zero positions; 0 for an all-zero or empty vector
-    constexpr size_t cyclic_burst_length() const noexcept;
+    /// @brief Cyclic burst length: shortest circular arc covering all non-zero positions; 0 for an all-zero or empty
+    /// vector
+    constexpr size_t cyclic_burst_length() const;
 
     /** @} */
 
@@ -445,16 +464,16 @@ class Vector {
      */
 
     /** @brief Circular left shift by `i` positions: `j ↦ (j − i) mod n`. */
-    constexpr Vector& rotate_left(size_t i) noexcept;
+    constexpr Vector& rotate_left(size_t i);
 
     /** @brief Circular right shift by `i` positions: `j ↦ (j + i) mod n`. */
-    constexpr Vector& rotate_right(size_t i) noexcept;
+    constexpr Vector& rotate_right(size_t i);
 
     /** @brief Reverse component order: `i ↦ n − 1 − i`. */
-    constexpr Vector& reverse() noexcept;
+    constexpr Vector& reverse();
 
     /** @brief Set every component to `value`. */
-    constexpr Vector& fill(const T& value) noexcept;
+    constexpr Vector& fill(const T& value);
 
     /** @} */
 
@@ -469,8 +488,9 @@ class Vector {
      * is Σ data[n − 1 − i] · qⁱ.
      *
      * @note May overflow `size_t` for large vectors over large fields.
+     * @throws std::invalid_argument if any component is erased.
      */
-    size_t as_integer() const noexcept
+    size_t as_integer() const
         requires FiniteFieldType<T>;
 
     /**
@@ -514,7 +534,7 @@ class Vector {
     /// @brief Cache for Hamming weight (invalidated by mutating operations)
     mutable details::Cache<details::CacheEntry<Weight, size_t>> cache;
 
-    constexpr size_t calculate_weight() const noexcept
+    constexpr size_t calculate_weight() const
         requires ReliablyComparableType<T>;
 };
 
@@ -576,7 +596,7 @@ constexpr Vector<T>& Vector<T>::operator=(Vector<T>&& rhs) noexcept {
 }
 
 template <ComponentType T>
-constexpr Vector<T>& Vector<T>::operator=(const T& rhs) noexcept {
+constexpr Vector<T>& Vector<T>::operator=(const T& rhs) {
     std::fill(data.begin(), data.end(), rhs);
     cache.invalidate();
     return *this;
@@ -602,7 +622,7 @@ constexpr Vector<T> Vector<T>::operator-() const& {
 }
 
 template <ComponentType T>
-constexpr Vector<T> Vector<T>::operator-() && noexcept {
+constexpr Vector<T> Vector<T>::operator-() && {
     std::ranges::for_each(data, [](T& v) { v = -v; });
     return std::move(*this);
 }
@@ -627,7 +647,7 @@ Vector<T>& Vector<T>::operator-=(const Vector<T>& rhs) {
 }
 
 template <ComponentType T>
-constexpr Vector<T>& Vector<T>::operator*=(const T& s) noexcept {
+constexpr Vector<T>& Vector<T>::operator*=(const T& s) {
     if (s == T(0)) {
         fill(T(0));
         cache.invalidate();
@@ -815,7 +835,7 @@ Vector<T>& Vector<T>::pad_back(size_t n) {
 }
 
 template <ComponentType T>
-constexpr Vector<T>& Vector<T>::fill(const T& value) noexcept {
+constexpr Vector<T>& Vector<T>::fill(const T& value) {
     std::fill(data.begin(), data.end(), value);
     if (value == T(0))
         cache.template set<Weight>(0);
@@ -826,19 +846,19 @@ constexpr Vector<T>& Vector<T>::fill(const T& value) noexcept {
 }
 
 template <ComponentType T>
-constexpr Vector<T>& Vector<T>::rotate_left(size_t i) noexcept {
+constexpr Vector<T>& Vector<T>::rotate_left(size_t i) {
     std::rotate(data.begin(), data.begin() + i, data.end());
     return *this;
 }
 
 template <ComponentType T>
-constexpr Vector<T>& Vector<T>::rotate_right(size_t i) noexcept {
+constexpr Vector<T>& Vector<T>::rotate_right(size_t i) {
     std::rotate(data.rbegin(), data.rbegin() + i, data.rend());
     return *this;
 }
 
 template <ComponentType T>
-constexpr Vector<T>& Vector<T>::reverse() noexcept {
+constexpr Vector<T>& Vector<T>::reverse() {
     std::reverse(data.begin(), data.end());
     return *this;
 }
@@ -917,7 +937,7 @@ Vector<T>& Vector<T>::set_subvector(Vector&& v, size_t i) {
 }
 
 template <ComponentType T>
-constexpr bool Vector<T>::is_zero() const noexcept
+constexpr bool Vector<T>::is_zero() const
     requires ReliablyComparableType<T>
 {
     return std::all_of(data.cbegin(), data.cend(), [](const T& x) { return x == T(0); });
@@ -937,7 +957,7 @@ constexpr bool Vector<T>::is_pairwise_distinct() const
 }
 
 template <ComponentType T>
-constexpr size_t Vector<T>::calculate_weight() const noexcept
+constexpr size_t Vector<T>::calculate_weight() const
     requires ReliablyComparableType<T>
 {
     size_t res = data.size() - std::count(data.cbegin(), data.cend(), T(0));
@@ -950,7 +970,7 @@ constexpr size_t Vector<T>::calculate_weight() const noexcept
 }
 
 template <ComponentType T>
-constexpr size_t Vector<T>::burst_length() const noexcept {
+constexpr size_t Vector<T>::burst_length() const {
     // Find first non-zero element
     auto first_nonzero = std::find_if(data.begin(), data.end(), [](const T& x) { return x != T(0); });
 
@@ -966,7 +986,7 @@ constexpr size_t Vector<T>::burst_length() const noexcept {
 }
 
 template <ComponentType T>
-constexpr size_t Vector<T>::cyclic_burst_length() const noexcept {
+constexpr size_t Vector<T>::cyclic_burst_length() const {
     if (data.empty()) return 0;
 
     // Handle all-zero vector
@@ -1010,7 +1030,7 @@ constexpr size_t Vector<T>::cyclic_burst_length() const noexcept {
 }
 
 template <ComponentType T>
-Vector<T>& Vector<T>::randomize() noexcept {
+Vector<T>& Vector<T>::randomize() {
     if constexpr (FieldType<T>) {
         std::ranges::for_each(data, std::mem_fn(&T::randomize));
     } else if constexpr (std::same_as<T, double>) {
@@ -1029,7 +1049,7 @@ Vector<T>& Vector<T>::randomize() noexcept {
 }
 
 template <ComponentType T>
-Vector<T>& Vector<T>::randomize_nonzero() noexcept
+Vector<T>& Vector<T>::randomize_nonzero()
     requires FieldType<T>
 {
     for (size_t i = 0; i < data.size(); ++i) {
@@ -1047,24 +1067,28 @@ Vector<T>& Vector<T>::randomize_pairwise_distinct()
     constexpr size_t q = T::get_size();
     const size_t n = data.size();
     if (n > q)
-        throw std::invalid_argument("Cannot generate pairwise distinct vector: length " +
-                                    std::to_string(n) + " exceeds field size " + std::to_string(q));
+        throw std::invalid_argument("Cannot generate pairwise distinct vector: length " + std::to_string(n) +
+                                    " exceeds field size " + std::to_string(q));
     std::vector<size_t> labels(q);
     std::iota(labels.begin(), labels.end(), 0);
     std::shuffle(labels.begin(), labels.end(), gen());
-    for (size_t i = 0; i < n; ++i)
-        data[i] = T(labels[i]);
+    for (size_t i = 0; i < n; ++i) data[i] = T(labels[i]);
     cache.invalidate();
     return *this;
 }
 
 template <ComponentType T>
-size_t Vector<T>::as_integer() const noexcept
+size_t Vector<T>::as_integer() const
     requires FiniteFieldType<T>
 {
     size_t result = 0;
-    for (size_t i = 0; i < data.size(); ++i)
-        result += data[data.size() - i - 1].get_label() * sqm<size_t>(T::get_size(), i);
+    for (size_t i = 0; i < data.size(); ++i) {
+        const auto& digit = data[data.size() - i - 1];
+#ifdef CECCO_ERASURE_SUPPORT
+        if (digit.is_erased()) throw std::invalid_argument("Cannot convert vector with erased component to integer");
+#endif
+        result += digit.get_label() * sqm<size_t>(T::get_size(), i);
+    }
     return result;
 }
 
@@ -1092,15 +1116,10 @@ template <FiniteFieldType S>
 Matrix<S> Vector<T>::as_matrix() const
     requires FiniteFieldType<T> && SubfieldOf<T, S> && (!std::is_same_v<T, S>)
 {
-    const auto v = data[0].template as_vector<S>();
-    const auto m = v.get_n();
+    const auto m = T().template as_vector<S>().get_n();
     Matrix<S> res(m, data.size());
 
-    Matrix<S> temp(v);
-    temp.transpose();
-    res.set_submatrix(0, 0, temp);
-
-    for (size_t i = 1; i < data.size(); ++i) {
+    for (size_t i = 0; i < data.size(); ++i) {
 #ifdef CECCO_ERASURE_SUPPORT
         if (data[i].is_erased()) {
             for (size_t j = 0; j < m; ++j) {
@@ -1213,14 +1232,14 @@ constexpr Vector<T> operator-(Vector<T>&& lhs, Vector<T>&& rhs) {
  */
 
 template <ComponentType T>
-constexpr Vector<T> operator*(const Vector<T>& lhs, const T& rhs) noexcept {
+constexpr Vector<T> operator*(const Vector<T>& lhs, const T& rhs) {
     Vector res(lhs);
     res *= rhs;
     return res;
 }
 
 template <ComponentType T>
-constexpr Vector<T> operator*(Vector<T>&& lhs, const T& rhs) noexcept {
+constexpr Vector<T> operator*(Vector<T>&& lhs, const T& rhs) {
     Vector res(std::move(lhs));
     res *= rhs;
     return res;
@@ -1231,14 +1250,14 @@ constexpr Vector<T> operator*(Vector<T>&& lhs, const T& rhs) noexcept {
  */
 
 template <ComponentType T>
-constexpr Vector<T> operator*(const T& lhs, const Vector<T>& rhs) noexcept {
+constexpr Vector<T> operator*(const T& lhs, const Vector<T>& rhs) {
     Vector res(rhs);
     res *= lhs;
     return res;
 }
 
 template <ComponentType T>
-constexpr Vector<T> operator*(const T& lhs, Vector<T>&& rhs) noexcept {
+constexpr Vector<T> operator*(const T& lhs, Vector<T>&& rhs) {
     Vector res(std::move(rhs));
     res *= lhs;
     return res;
@@ -1534,13 +1553,13 @@ Vector<T> Schur_product(const Vector<T>& lhs, const Vector<T>& rhs) {
 }
 
 template <ReliablyComparableType T>
-constexpr bool operator==(const Vector<T>& lhs, const Vector<T>& rhs) noexcept {
+constexpr bool operator==(const Vector<T>& lhs, const Vector<T>& rhs) {
     if (lhs.data.size() != rhs.data.size()) return false;
     return lhs.data == rhs.data;
 }
 
 template <ReliablyComparableType T>
-constexpr bool operator!=(const Vector<T>& lhs, const Vector<T>& rhs) noexcept {
+constexpr bool operator!=(const Vector<T>& lhs, const Vector<T>& rhs) {
     return !(lhs == rhs);
 }
 
@@ -1559,7 +1578,7 @@ Vector<T> unit_vector(size_t length, size_t i) {
 
 /** @brief Stream output as `( c₀, c₁, …, cₙ₋₁ )`. */
 template <ComponentType T>
-std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) noexcept {
+std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) {
     os << "( ";
     for (auto it = rhs.data.cbegin(); it != rhs.data.cend(); ++it) {
         os << *it;
@@ -1577,7 +1596,7 @@ std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) noexcept {
 
 /** @brief Hamming weight; see @ref Vector::wH for semantics. */
 template <ReliablyComparableType T>
-constexpr size_t wH(const Vector<T>& v) noexcept {
+constexpr size_t wH(const Vector<T>& v) {
     return v.wH();
 }
 
@@ -1634,13 +1653,13 @@ size_t dH(Vector<T>&& lhs, Vector<T>&& rhs) {
 
 /** @brief Burst length; see @ref Vector::burst_length for semantics. */
 template <ReliablyComparableType T>
-constexpr size_t burst_length(const Vector<T>& v) noexcept {
+constexpr size_t burst_length(const Vector<T>& v) {
     return v.burst_length();
 }
 
 /** @brief Cyclic burst length; see @ref Vector::cyclic_burst_length for semantics. */
 template <ReliablyComparableType T>
-constexpr size_t cyclic_burst_length(const Vector<T>& v) noexcept {
+constexpr size_t cyclic_burst_length(const Vector<T>& v) {
     return v.cyclic_burst_length();
 }
 
@@ -1658,7 +1677,7 @@ inline double dE(const Vector<std::complex<double>>& lhs, const Vector<std::comp
         lhs.data.begin(), lhs.data.end(), rhs.data.begin(), 0.0, std::plus<double>{},
         [](const std::complex<double>& l, const std::complex<double>& r) { return std::norm(l - r); });
 
-    return sqrt(sum_of_squares);
+    return std::sqrt(sum_of_squares);
 }
 
 /** @} */

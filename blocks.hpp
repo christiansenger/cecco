@@ -268,7 +268,7 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
         if (get_px() != 0.0)
             throw std::logic_error("Bhattacharyya parameter is not defined for channels with erasures");
         const long double pe = get_pe();
-        return 2.0L * std::sqrtl(pe * (1.0L - pe));
+        return 2.0L * std::sqrt(pe * (1.0L - pe));
     }
 
    private:
@@ -676,7 +676,7 @@ class BI_AWGN : public details::BlockProcessor<BI_AWGN, Fp<2>, std::complex<doub
     long double get_Bhattacharyya_param() const noexcept {
         const long double b = encoder.get_b();
         const long double sigma = transmission.get_standard_deviation();
-        return std::expl(-(b * b) / (8.0L * sigma * sigma));
+        return std::exp(-(b * b) / (8.0L * sigma * sigma));
     }
 
    private:

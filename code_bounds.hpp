@@ -45,7 +45,7 @@ long double HammingUpperBound(size_t n, size_t dmin) {
         for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
 
         return n -
-               std::log2l(static_cast<long double>(h.toUnsignedLongLong())) / std::log2l(static_cast<long double>(q));
+               std::log2(static_cast<long double>(h.toUnsignedLongLong())) / std::log2(static_cast<long double>(q));
     } catch (const InfIntException& e) {
         std::cerr << " [Hamming bound overflow]";
         return std::numeric_limits<long double>::infinity();
@@ -87,10 +87,10 @@ long double JohnsonUpperBound(size_t n, size_t dmin) {
 
         const InfInt denominator = details::A<T>(n, dmin, tmax + 1);
 
-        return n - std::log2l(static_cast<long double>(h.toUnsignedLongLong()) +
-                              static_cast<long double>(numerator.toUnsignedLongLong()) /
-                                  static_cast<long double>(denominator.toUnsignedLongLong())) /
-                       std::log2l(static_cast<long double>(q));
+        return n - std::log2(static_cast<long double>(h.toUnsignedLongLong()) +
+                             static_cast<long double>(numerator.toUnsignedLongLong()) /
+                                 static_cast<long double>(denominator.toUnsignedLongLong())) /
+                       std::log2(static_cast<long double>(q));
     } catch (const InfIntException& e) {
         std::cerr << " [Johnson bound overflow]";
         return std::numeric_limits<long double>::infinity();
@@ -107,15 +107,14 @@ long double PlotkinUpperBound(size_t n, size_t dmin) {
     try {
         const InfInt Q = q, N = n, D = dmin;
         if (Q * D > N * (Q - 1)) {  // conventional
-            return std::log2l(static_cast<long double>((Q * D).toUnsignedLongLong()) /
-                              static_cast<long double>((Q * D - N * (Q - 1)).toUnsignedLongLong())) /
-                   std::log2l(static_cast<long double>(q));
+            return std::log2(static_cast<long double>((Q * D).toUnsignedLongLong()) /
+                             static_cast<long double>((Q * D - N * (Q - 1)).toUnsignedLongLong())) /
+                   std::log2(static_cast<long double>(q));
         } else {  // improved
             const InfInt Delta = N - Q * D / (Q - 1) + 1;
             const InfInt M = sqm<InfInt>(q, Delta.toUnsignedLongLong() + 1) * D / (Q * D - (N - Delta) * (Q - 1));
 
-            return std::log2l(static_cast<long double>(M.toUnsignedLongLong())) /
-                   std::log2l(static_cast<long double>(q));
+            return std::log2(static_cast<long double>(M.toUnsignedLongLong())) / std::log2(static_cast<long double>(q));
         }
     } catch (const InfIntException& e) {
         std::cerr << " [Plotkin bound overflow]";
@@ -148,7 +147,7 @@ long double EliasUpperBound(size_t n, size_t dmin) {
             }
         }
 
-        return n + std::log2l(minimum) / std::log2l(static_cast<long double>(q));
+        return n + std::log2(minimum) / std::log2(static_cast<long double>(q));
     } catch (const InfIntException& e) {
         std::cerr << " [Elias bound overflow]";
         return std::numeric_limits<long double>::infinity();
@@ -239,7 +238,7 @@ size_t BurstUpperBound(size_t n, size_t ell) {
     return std::floor(n - ell - std::log2(1 + (q - 1) * (n - ell) / q) / std::log2(q));
 }
 
-inline size_t ReigerBurstUpperBound(size_t n, size_t ell) {
+constexpr size_t ReigerBurstUpperBound(size_t n, size_t ell) noexcept {
     if (2 * ell > n) return 0;
     return n - 2 * ell;
 }
