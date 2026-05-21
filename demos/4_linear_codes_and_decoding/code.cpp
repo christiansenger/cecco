@@ -5,7 +5,7 @@
 using namespace CECCO;
 
 int main(void) {
-    using F = Fp<2>;
+    using F = Fp<3>;
 
     const size_t n = 17;
     const size_t k = 9;
@@ -139,9 +139,7 @@ int main(void) {
         }
 
         {
-            auto output_LLRs = C.dec_BCJR(LLRs);
-            auto c_est = Vector<F>(C.get_n());
-            for (size_t i = 0; i < C.get_n(); ++i) c_est.set_component(i, output_LLRs[i] < 0 ? 1 : 0);
+            auto c_est = C.dec_BCJR(LLRs);
             auto u_est = c_est.get_subvector(0, k);
             std::cout << "Soft s/s MAP decoding message estimate: " << u_est << std::endl;
             if (u_est == u) {
