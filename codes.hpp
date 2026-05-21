@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.1
+ * @version 2.1.3
  * @date 2026
  *
  * @copyright
@@ -125,83 +125,84 @@ inline std::ostream& showspecial(std::ostream& os) {
 template <ComponentType T>
 class Code {
    public:
-    Code(size_t n) : n(n) {}
+    Code(size_t n) noexcept : n(n) {}
 
-    Code(const Code& other) : n(other.n) {}
+    Code(const Code& other) noexcept : n(other.n) {}
 
-    Code(Code&&) = default;
+    Code(Code&&) noexcept = default;
 
     virtual ~Code() = default;
 
-    Code& operator=(const Code& other) {
+    Code& operator=(const Code& other) noexcept {
         if (this != &other) {
             n = other.n;
         }
         return *this;
     }
 
-    Code& operator=(Code&&) = default;
+    Code& operator=(Code&&) noexcept = default;
 
     size_t get_n() const noexcept { return n; }
 
-    virtual void get_info(std::ostream& os) const {};
-    virtual Vector<T> enc(const Vector<T>& u) const { throw std::logic_error("Encoding not supported for this code!"); }
-    virtual Vector<T> encinv(const Vector<T>& c) const {
+    virtual void get_info(std::ostream&) const {};
+    virtual Vector<T> enc(const Vector<T>&) const { throw std::logic_error("Encoding not supported for this code!"); }
+    virtual Vector<T> encinv(const Vector<T>&) const {
         throw std::logic_error("Inverse encoding not supported for this code!");
     }
-    virtual Vector<T> dec_BD(const Vector<T>& r) const {
+    virtual Vector<T> dec_BD(const Vector<T>&) const {
         throw std::logic_error("Bounded distance decoding not supported for this code!");
     }
-    virtual Vector<T> dec_boosted_BD(const Vector<T>& r) const {
+    virtual Vector<T> dec_boosted_BD(const Vector<T>&) const {
         throw std::logic_error("Boosted bounded distance decoding not supported for this code!");
     }
-    virtual Vector<T> dec_ML(const Vector<T>& r) const {
+    virtual Vector<T> dec_ML(const Vector<T>&) const {
         throw std::logic_error("ML decoding not supported for this code!");
     }
-    virtual Vector<T> dec_Viterbi(const Vector<T>& r, const std::string& filename = "") const {
+    virtual Vector<T> dec_Viterbi(const Vector<T>&, const std::string& = "") const {
         throw std::logic_error("Viterbi decoding not supported for this code!");
     }
-    virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t cache_size) const {
+    virtual Vector<T> dec_ML_soft(const Vector<double>&, size_t) const {
         throw std::logic_error("Soft-input ML decoding not supported for this code!");
     }
-    virtual Vector<T> dec_Viterbi_soft(const Vector<double>& llrs, const std::string& filename = "") const {
+    virtual Vector<T> dec_Viterbi_soft(const Vector<double>&, const std::string& = "") const {
         throw std::logic_error("Soft-input Viterbi decoding not supported for this code!");
     }
-    virtual Vector<double> dec_BCJR(const Vector<double>& llrs, const std::string& filename = "") const {
+    // Documentation note: pass nullptr as Lambda when only the filename argument is needed.
+    virtual Vector<T> dec_BCJR(const Vector<double>&, Vector<double>* = nullptr, const std::string& = "") const {
         throw std::logic_error("BCJR decoding not supported for this code!");
     }
-    virtual Vector<T> dec_burst(const Vector<T>& r) const {
+    virtual Vector<T> dec_burst(const Vector<T>&) const {
         throw std::logic_error("Burst decoding not supported for this code!");
     }
-    virtual Vector<T> dec_recursive(const Vector<T>& r) const {
+    virtual Vector<T> dec_recursive(const Vector<T>&) const {
         throw std::logic_error("Recursive decoding not supported for this code!");
     }
-    virtual Vector<T> dec_Meggitt(const Vector<T>& r) const {
+    virtual Vector<T> dec_Meggitt(const Vector<T>&) const {
         throw std::logic_error("Meggitt decoding not supported for this code!");
     }
-    virtual Vector<T> dec_WBA(const Vector<T>& r) const {
+    virtual Vector<T> dec_WBA(const Vector<T>&) const {
         throw std::logic_error("Welch-Berlekamp decoding not supported for this code!");
     }
-    virtual Vector<T> dec_BMA(const Vector<T>& r) const {
+    virtual Vector<T> dec_BMA(const Vector<T>&) const {
         throw std::logic_error("Berlekamp-Massey decoding not supported for this code!");
     }
 #ifdef CECCO_ERASURE_SUPPORT
-    virtual Vector<T> dec_BD_EE(const Vector<T>& r) const {
+    virtual Vector<T> dec_BD_EE(const Vector<T>&) const {
         throw std::logic_error("BD error/erasure decoding not supported for this code!");
     }
-    virtual Vector<T> dec_ML_EE(const Vector<T>& r) const {
+    virtual Vector<T> dec_ML_EE(const Vector<T>&) const {
         throw std::logic_error("ML error/erasure decoding not supported for this code!");
     }
-    virtual Vector<T> dec_Viterbi_EE(const Vector<T>& r, const std::string& filename = "") const {
+    virtual Vector<T> dec_Viterbi_EE(const Vector<T>&, const std::string& = "") const {
         throw std::logic_error("Viterbi error/erasure decoding not supported for this code!");
     }
-    virtual Vector<T> dec_recursive_EE(const Vector<T>& r) const {
+    virtual Vector<T> dec_recursive_EE(const Vector<T>&) const {
         throw std::logic_error("Recursive error/erasure decoding not supported for this code!");
     }
-    virtual Vector<T> dec_WBA_EE(const Vector<T>& r) const {
+    virtual Vector<T> dec_WBA_EE(const Vector<T>&) const {
         throw std::logic_error("Welch-Berlekamp error/erasure decoding not supported for this code!");
     }
-    virtual Vector<T> dec_BMA_EE(const Vector<T>& r) const {
+    virtual Vector<T> dec_BMA_EE(const Vector<T>&) const {
         throw std::logic_error("Berlekamp-Massey error/erasure decoding not supported for this code!");
     }
 #endif
@@ -222,12 +223,12 @@ class Code {
 template <ComponentType T>
 class EmptyCode : public Code<T> {
    public:
-    EmptyCode(size_t n) : Code<T>(n) {}
+    EmptyCode(size_t n) noexcept : Code<T>(n) {}
 
-    EmptyCode(const EmptyCode&) = default;
-    EmptyCode(EmptyCode&&) = default;
-    EmptyCode& operator=(const EmptyCode&) = default;
-    EmptyCode& operator=(EmptyCode&&) = default;
+    EmptyCode(const EmptyCode&) noexcept = default;
+    EmptyCode(EmptyCode&&) noexcept = default;
+    EmptyCode& operator=(const EmptyCode&) noexcept = default;
+    EmptyCode& operator=(EmptyCode&&) noexcept = default;
 
     void get_info(std::ostream& os) const override {
         if (os.iword(details::index) > 0) {
@@ -384,6 +385,8 @@ class LinearCode : public Code<T> {
     } catch (const std::invalid_argument& e) {
         throw std::invalid_argument(std::string("Cannot construct linear code from polynomial: ") + e.what());
     }
+
+    LinearCode(const std::vector<Vector<T>>& codewords) : LinearCode(G_from_codewords(codewords)) {}
 
     LinearCode(const LinearCode& other)
         : Code<T>(other),
@@ -648,26 +651,26 @@ class LinearCode : public Code<T> {
         return gamma.value();
     }
 
-    void set_dmin(size_t d) const noexcept { dmin.emplace(d); }
+    void set_dmin(size_t d) const { dmin.emplace(d); }
 
-    void set_weight_enumerator(const Polynomial<InfInt>& p) const noexcept
+    void set_weight_enumerator(const Polynomial<InfInt>& p) const
         requires FiniteFieldType<T>
     {
         weight_enumerator.emplace(p);
     }
 
-    void set_weight_enumerator(Polynomial<InfInt>&& p) const noexcept
+    void set_weight_enumerator(Polynomial<InfInt>&& p) const
         requires FiniteFieldType<T>
     {
         weight_enumerator.emplace(std::move(p));
     }
 
-    void set_gamma(const Polynomial<T>& g) const noexcept {
+    void set_gamma(const Polynomial<T>& g) const {
         polynomial.emplace(true);
         gamma.emplace(g);
     }
 
-    void set_gamma(Polynomial<T>&& g) const noexcept {
+    void set_gamma(Polynomial<T>&& g) const {
         polynomial.emplace(true);
         gamma.emplace(std::move(g));
     }
@@ -838,7 +841,7 @@ class LinearCode : public Code<T> {
         return Meggitt_table.value();
     }
 
-    auto cbegin() const noexcept
+    auto cbegin() const
         requires FiniteFieldType<T>
     {
         if (k == 0)
@@ -847,7 +850,7 @@ class LinearCode : public Code<T> {
             return CodewordIterator<T>(*this, 0);
     }
 
-    auto cend() const noexcept
+    auto cend() const
         requires FiniteFieldType<T>
     {
         return CodewordIterator<T>(*this, get_size());
@@ -1557,22 +1560,34 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<double> dec_BCJR(const Vector<double>& llrs, const std::string& filename = "") const override {
+    // Documentation note: pass nullptr as Lambda when only the filename argument is needed.
+    virtual Vector<T> dec_BCJR(const Vector<double>& llrs, Vector<double>* Lambda = nullptr,
+                               const std::string& filename = "") const override {
         if constexpr (!std::is_same_v<T, Fp<2>>) {
             throw std::logic_error("BCJR decoding only available for codes over F_2!");
         } else {
             validate_length(llrs);
-            if (k == 0) return Vector<double>(this->n, 0.0);
+            const size_t n = this->n;
+
+            if (k == 0) {
+                if (Lambda != nullptr) *Lambda = Vector<double>(n, 0.0);
+                return Vector<T>(n);
+            }
 
             const auto& Tr = get_minimal_trellis();
             typename Trellis<T>::BCJR_Workspace ws(Tr);
             ws.calculate_edge_costs(Tr, llrs);
-            auto result = bcjr_forward_backward(Tr, ws);
+            auto Lambda_local = bcjr_forward_backward(Tr, ws);
             if (!filename.empty()) {
                 ws.v.emplace(llrs);
                 Tr.export_as_tikz(filename, &ws);
             }
-            return result;
+            if (Lambda != nullptr) *Lambda = Lambda_local;
+
+            Vector<T> c_est(n);
+            for (size_t i = 0; i < n; ++i)
+                if (Lambda_local[i] < 0.0) c_est.set_component(i, T(1));
+            return c_est;
         }
     }
 
@@ -1851,6 +1866,37 @@ class LinearCode : public Code<T> {
     mutable details::OnceCache<Trellis<T>> minimal_trellis;
 
    private:
+    explicit LinearCode(Matrix<T> G) : LinearCode(G.get_n(), G.get_m(), G) {}
+
+    static Matrix<T> G_from_codewords(const std::vector<Vector<T>>& codewords) {
+        if (codewords.empty())
+            throw std::invalid_argument("Cannot construct linear code from codewords: no codewords provided");
+
+        const size_t n = codewords.front().get_n();
+        Matrix<T> Gp(codewords.size(), n);
+
+        for (size_t i = 0; i < codewords.size(); ++i) {
+            if (codewords[i].get_n() != n)
+                throw std::invalid_argument(
+                    "Cannot construct linear code from codewords: codewords must have the same length");
+
+#ifdef CECCO_ERASURE_SUPPORT
+            for (size_t j = 0; j < n; ++j) {
+                if (codewords[i][j].is_erased())
+                    throw std::invalid_argument(
+                        "Cannot construct linear code from codewords: codewords must not contain erasures");
+            }
+#endif
+
+            Gp.set_submatrix(i, 0, Matrix<T>(codewords[i]));
+        }
+
+        size_t k;
+        Gp.rref(&k);
+        if (k == 0) return Matrix<T>(0, n);
+        return Gp.get_submatrix(0, 0, k, n);
+    }
+
     template <typename cost_t>
     Vector<T> viterbi_forward_pass_and_traceback(const Trellis<T>& Tr,
                                                  typename Trellis<T>::template Viterbi_Workspace<cost_t>& ws,
@@ -2029,7 +2075,7 @@ class LinearCode : public Code<T> {
     }
 #endif
 
-    InfInt N(size_t ell, size_t h, size_t s) const noexcept {
+    InfInt N(size_t ell, size_t h, size_t s) const {
         const size_t n = this->n;
 
         if constexpr (std::is_same_v<T, Fp<2>>) {
@@ -2103,7 +2149,7 @@ class UniverseCode : public LinearCode<T> {
         if (os.iword(details::index) > 0) os << "Universe code";
     }
 
-    ZeroCode<T> get_dual() const noexcept { return ZeroCode<T>(this->n); }
+    ZeroCode<T> get_dual() const { return ZeroCode<T>(this->n); }
     Vector<T> enc(const Vector<T>& u) const override { return u; }
     Vector<T> encinv(const Vector<T>& c) const override { return c; }
 
@@ -2247,7 +2293,7 @@ class HammingCode : public LinearCode<T> {
         if (os.iword(details::index) > 0) os << BOLD("Hamming code") " with properties: { s = " << s << " }";
     }
 
-    SimplexCode<T> get_dual() const noexcept { return SimplexCode<T>(s); }
+    SimplexCode<T> get_dual() const { return SimplexCode<T>(s); }
 
     Vector<T> dec_BD(const Vector<T>& r) const override {
 #ifdef CECCO_ERASURE_SUPPORT
@@ -2329,12 +2375,12 @@ class HammingCode : public LinearCode<T> {
    private:
     size_t s;
 
-    static size_t Hamming_n(size_t s) noexcept {
+    static size_t Hamming_n(size_t s) {
         constexpr size_t q = T::get_size();
         return (sqm<size_t>(q, s) - 1) / (q - 1);
     }
 
-    static size_t Hamming_k(size_t s) noexcept { return Hamming_n(s) - s; }
+    static size_t Hamming_k(size_t s) { return Hamming_n(s) - s; }
 
     static Matrix<T> Hamming_H(size_t s) {
         const size_t n = Hamming_n(s);
@@ -2404,7 +2450,7 @@ class SimplexCode : public LinearCode<T> {
         if (os.iword(details::index) > 0) os << BOLD("Simplex code") " with properties: { s = " << s << " }";
     }
 
-    HammingCode<T> get_dual() const noexcept { return HammingCode<T>(s); }
+    HammingCode<T> get_dual() const { return HammingCode<T>(s); }
     Vector<T> dec_BD(const Vector<T>& r) const override {
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
@@ -2570,7 +2616,7 @@ class RepetitionCode : public LinearCode<T> {
         if (os.iword(details::index) > 0) os << "Repetition code";
     }
 
-    SingleParityCheckCode<T> get_dual() const noexcept { return SingleParityCheckCode<T>(this->n); }
+    SingleParityCheckCode<T> get_dual() const { return SingleParityCheckCode<T>(this->n); }
     Vector<T> enc(const Vector<T>& u) const override { return Vector<T>(this->n, u[0]); }
     Vector<T> encinv(const Vector<T>& c) const override { return Vector<T>(1, c[0]); }
 
@@ -2708,7 +2754,7 @@ class SingleParityCheckCode : public LinearCode<T> {
         if (os.iword(details::index) > 0) os << "Single parity check code";
     }
 
-    RepetitionCode<T> get_dual() const noexcept { return RepetitionCode<T>(this->n); }
+    RepetitionCode<T> get_dual() const { return RepetitionCode<T>(this->n); }
     Vector<T> dec_BD(const Vector<T>& r) const override {
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
@@ -2827,14 +2873,14 @@ class GolayCode : public LinearCode<T> {
     }
 
    private:
-    static constexpr size_t Golay_n() {
+    static constexpr size_t Golay_n() noexcept {
         if constexpr (std::is_same_v<T, Fp<2>>)
             return 23;
         else
             return 11;
     }
 
-    static constexpr size_t Golay_k() {
+    static constexpr size_t Golay_k() noexcept {
         if constexpr (std::is_same_v<T, Fp<2>>)
             return 12;
         else
@@ -3186,7 +3232,7 @@ class RSCode : public GRSCode<T> {
     RSCode& operator=(const RSCode&) = default;
     RSCode& operator=(RSCode&&) = default;
 
-    T get_alpha() const noexcept { return alpha; }
+    T get_alpha() const { return alpha; }
     size_t get_b() const noexcept { return b; }
 
     RSCode<T> get_equivalent_code_in_standard_form() const {
@@ -3931,7 +3977,7 @@ class BCHCode : public AlternantCode<B> {
     BCHCode& operator=(const BCHCode&) = default;
     BCHCode& operator=(BCHCode&&) = default;
 
-    SUPER get_alpha() const noexcept { return this->get_SuperCode().get_alpha(); }
+    SUPER get_alpha() const { return this->get_SuperCode().get_alpha(); }
     size_t get_b() const noexcept { return this->get_SuperCode().get_b(); }
 
     virtual void get_info(std::ostream& os) const override {
@@ -3970,7 +4016,7 @@ class GoppaCode : public AlternantCode<GRSCode<SUPER>> {
     const Polynomial<SUPER>& get_g() const noexcept { return g; }
     bool is_squarefree() const noexcept { return squarefree; }
 
-    size_t get_delta() const noexcept override {
+    size_t get_delta() const override {
         if constexpr (std::is_same_v<SUB, Fp<2>>)
             if (squarefree) return 2 * g.degree() + 1;
         return Base::get_delta();
@@ -4677,7 +4723,7 @@ std::ostream& operator<<(std::ostream& os, const Code<T>& rhs) {
 template <FieldType T>
 class Enc {
    public:
-    Enc(const Code<T>& C) : C(C) {}
+    Enc(const Code<T>& C) noexcept : C(C) {}
 
     Vector<T> operator()(const Vector<T>& in) const { return C.enc(in); }
 
@@ -4772,14 +4818,10 @@ class Dec {
     }
 
     Vector<T> operator()(const Vector<double>& in) const {
-        if (method == method_t::Viterbi || method == method_t::Viterbi_soft) return C.dec_Viterbi_soft(in);
-        if (method == method_t::BCJR) {
-            const auto llrs = C.dec_BCJR(in);
-            Vector<T> c_est(llrs.get_n());
-            for (size_t i = 0; i < llrs.get_n(); ++i)
-                if (llrs[i] < 0.0) c_est.set_component(i, T(1));
-            return c_est;
-        }
+        if (method == method_t::Viterbi || method == method_t::Viterbi_soft)
+            return C.dec_Viterbi_soft(in);
+        else if (method == method_t::BCJR)
+            return C.dec_BCJR(in);
         return C.dec_ML_soft(in, cache_limit);
     }
 
@@ -4793,7 +4835,7 @@ class Dec {
 template <FiniteFieldType T>
 class Encinv {
    public:
-    Encinv(const Code<T>& C) : C(C) {}
+    Encinv(const Code<T>& C) noexcept : C(C) {}
 
     Vector<T> operator()(const Vector<T>& in) const { return C.encinv(in); }
 

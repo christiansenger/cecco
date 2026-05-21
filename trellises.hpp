@@ -2,7 +2,7 @@
  * @file trellises.hpp
  * @brief Trellis representation for code decoding
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.2
+ * @version 2.1.3
  * @date 2026
  *
  * @copyright
@@ -558,12 +558,18 @@ void Trellis<T>::tikz_header(std::ostream& file) const {
 
     if constexpr (WS::is_soft) {
         file << R"(
-\tikzstyle{trellisvertexprev}=[trellisvertex, inner sep=1pt, left color=blue!80, right color=blue!20, text width=4ex, align=center]
-\tikzstyle{trellisvertexcurr}=[trellisvertex, inner sep=1pt, left color=green!80, right color=green!20, text width=4ex, align=center])";
+\tikzstyle{trellisvertexprev}=[trellisvertex, font=\tiny, inner sep=1pt, left color=blue!80, right color=blue!20, text width=4ex, align=center]
+\tikzstyle{trellisvertexcurr}=[trellisvertex, font=\tiny, inner sep=1pt, left color=green!80, right color=green!20, text width=4ex, align=center])";
     } else {
         file << R"(
-\tikzstyle{trellisvertexprev}=[trellisvertex, inner sep=2pt, left color=blue!80, right color=blue!20]
-\tikzstyle{trellisvertexcurr}=[trellisvertex, inner sep=2pt, left color=green!80, right color=green!20])";
+\tikzstyle{trellisvertexprev}=[trellisvertex, font=\footnotesize, inner sep=2pt, left color=blue!80, right color=blue!20]
+\tikzstyle{trellisvertexcurr}=[trellisvertex, font=\footnotesize, inner sep=2pt, left color=green!80, right color=green!20])";
+    }
+
+    if constexpr (std::is_same_v<WS, BCJR_Workspace>) {
+        file << R"(
+\tikzstyle{trellisvertexsplit}=[trellisvertexprev, inner sep=1pt, circle split, font=\tiny, inner sep=1pt])";
+    } else {
     }
 
     file << R"(
@@ -587,7 +593,7 @@ void Trellis<T>::tikz_picture(std::ostream& file, const WS* ws, size_t frontier)
             bool labeled = false;
             if (ws) {
                 if constexpr (std::is_same_v<WS, BCJR_Workspace>) {
-                    style = "trellisvertexprev";
+                    style = "trellisvertexsplit";
                     labeled = true;
                 } else {
                     if (s == frontier) {
@@ -599,21 +605,27 @@ void Trellis<T>::tikz_picture(std::ostream& file, const WS* ws, size_t frontier)
                     }
                 }
             }
-            file << "\n    \\node[" << style << "] (" << s << "_" << V[s][i].id << ") at (" << s << ", "
-                 << -static_cast<int>(V[s][i].id) << ") {\\tiny$";
-            if (labeled) {
+            if (!labeled) {
+                file << "\n    \\node[" << style << "] (" << s << "_" << V[s][i].id << ") at (" << s << ", "
+                     << -static_cast<int>(V[s][i].id) << ") {};";
+            } else {
                 if constexpr (WS::is_soft) {
                     file << std::fixed << std::setprecision(2);
                     if constexpr (std::is_same_v<WS, BCJR_Workspace>) {
-                        file << ws->alpha[s][i] << "\\mid " << ws->beta[s][i];
+                        file << "\n    \\node[" << style << "] (" << s << "_" << V[s][i].id << ") at (" << s << ", "
+                             << -static_cast<int>(V[s][i].id) << ") {$" << ws->alpha[s][i] << "$\\nodepart{lower} $"
+                             << ws->beta[s][i] << "$};";
                     } else {
-                        file << ((s == frontier) ? ws->path_costs_prev[i] : ws->path_costs_curr[i]);
+                        file << "\n    \\node[" << style << "] (" << s << "_" << V[s][i].id << ") at (" << s << ", "
+                             << -static_cast<int>(V[s][i].id) << ") {$"
+                             << ((s == frontier) ? ws->path_costs_prev[i] : ws->path_costs_curr[i]) << "$};";
                     }
                 } else {
-                    file << ((s == frontier) ? ws->path_costs_prev[i] : ws->path_costs_curr[i]);
+                    file << "\n    \\node[" << style << "] (" << s << "_" << V[s][i].id << ") at (" << s << ", "
+                         << -static_cast<int>(V[s][i].id) << ") {$"
+                         << ((s == frontier) ? ws->path_costs_prev[i] : ws->path_costs_curr[i]) << "$};";
                 }
             }
-            file << "$};";
         }
     }
 

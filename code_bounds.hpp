@@ -44,8 +44,7 @@ long double HammingUpperBound(size_t n, size_t dmin) {
         InfInt h = 0;
         for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
 
-        return n -
-               std::log2(static_cast<long double>(h.toUnsignedLongLong())) / std::log2(static_cast<long double>(q));
+        return n - std::log2(static_cast<long double>(h.toUnsignedLongLong())) / std::log2(static_cast<long double>(q));
     } catch (const InfIntException& e) {
         std::cerr << " [Hamming bound overflow]";
         return std::numeric_limits<long double>::infinity();

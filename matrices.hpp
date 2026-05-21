@@ -1103,8 +1103,8 @@ class Matrix {
      * @param f Scaling factor
      */
     template <bool transposed>
-    static void eliminate_row_kernel(T* data, size_t m, size_t n, size_t target_row, size_t pivot_row,
-                                     size_t start_col, const T& f) {
+    static void eliminate_row_kernel(T* data, size_t m, size_t n, size_t target_row, size_t pivot_row, size_t start_col,
+                                     const T& f) {
         if constexpr (!transposed) {
             // Row-major access
             T* target_data = data + target_row * n;

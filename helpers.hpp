@@ -175,7 +175,7 @@ constexpr bool is_prime(T a) noexcept {
  * If @p s and @p t are non-null, stores coefficients satisfying `a*s + b*t = gcd(a,b)`.
  */
 template <class T>
-constexpr T GCD(T a, T b, T* s = nullptr, T* t = nullptr) noexcept {
+constexpr T GCD(T a, T b, T* s = nullptr, T* t = nullptr) {
     static_assert((std::is_integral_v<T> && std::is_signed_v<T>) || std::is_same_v<T, InfInt>,
                   "GCD requires signed integral type or InfInt");
     if (s != nullptr && t != nullptr) {  // extended EA
@@ -216,7 +216,7 @@ constexpr T GCD(T a, T b, T* s = nullptr, T* t = nullptr) noexcept {
  * Uses the extended Euclidean algorithm.
  */
 template <uint16_t p, class T>
-constexpr T modinv(T a) noexcept {
+constexpr T modinv(T a) {
     static_assert(is_prime(p), "p is not a prime");
     T s, t;
     GCD<T>(std::move(a), T(p), &s, &t);  // don't actually need the gcd
@@ -231,7 +231,7 @@ constexpr T modinv(T a) noexcept {
  * @return `a! = a * (a-1) * ... * 2 * 1`
  */
 template <class T>
-T fac(T a) noexcept {
+T fac(T a) {
     T res = 1;
     while (a > 1) {
         res *= a;
@@ -250,7 +250,7 @@ T fac(T a) noexcept {
  * Uses the multiplicative formula and the symmetry `C(n,k) = C(n,n-k)`.
  */
 template <class T>
-T bin(const T& n, T k) noexcept {
+T bin(const T& n, T k) {
     if (k > n) return 0;
     if (k == 0 || n == k) return 1;
     if (k > n - k) k = n - k;  // symmetry
@@ -268,7 +268,7 @@ T bin(const T& n, T k) noexcept {
  * Builds numerator and denominator separately, then performs one division.
  */
 template <>
-inline InfInt bin(const InfInt& n, InfInt k) noexcept {
+inline InfInt bin(const InfInt& n, InfInt k) {
     if (k > n) return 0;
     if (k == 0 || n == k) return 1;
     if (n == 0) return 0;
