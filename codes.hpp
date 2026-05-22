@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.3
+ * @version 2.1.4
  * @date 2026
  *
  * @copyright
@@ -633,9 +633,9 @@ class LinearCode : public Code<T> {
             return res;
     }
 
-    long double Bhattacharyya_bound(long double gamma) const {
-        if constexpr (!std::is_same_v<T, Fp<2>>)
-            throw std::logic_error("Bhattacharyya bound can only be calculated for binary codes!");
+    long double Bhattacharyya_bound(long double gamma) const
+        requires FiniteFieldType<T>
+    {
         const auto& A = get_weight_enumerator();
         const size_t dmin = get_dmin();
 

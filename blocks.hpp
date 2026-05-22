@@ -2,7 +2,7 @@
  * @file blocks.hpp
  * @brief Communication system blocks library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.5
+ * @version 2.2.6
  * @date 2026
  *
  * @copyright
@@ -241,11 +241,11 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
      */
     T operator()(const T& in);
 
-    /** @brief Observed symbol error probability pe. */
-    double get_pe() const noexcept { return error_dist.p(); }
+    /** @brief Symbol error probability pe (erroneous and not erased). */
+    double get_pe() const noexcept { return pe; }
 
-    /** @brief Observed symbol erasure probability px. */
-    double get_px() const noexcept { return erasure_dist.p(); }
+    /** @brief Symbol erasure probability px. */
+    double get_px() const noexcept { return px; }
 
     /**
      * @brief Shannon capacity in bits per symbol
@@ -256,32 +256,38 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
         requires(FiniteFieldType<T>);
 
     /**
-     * @brief Bhattacharyya parameter γ = 2·√(pe·(1 − pe))
+     * @brief Pairwise Bhattacharyya parameter
      *
-     * @throws std::logic_error if px ≠ 0 (γ is undefined for channels with erasures)
+     * Uses γ = px + 2·√((1 − pe − px)·pe/(q − 1)) + (q − 2)·pe/(q − 1),
+     * with q = |T| and pe the probability of an erroneous, non-erased output.
      *
-     * @note Defined only for binary channels (q = 2).
+     * @return Common pairwise Bhattacharyya parameter γ for distinct input symbols
      */
-    long double get_Bhattacharyya_param() const
-        requires(std::is_same_v<T, Fp<2>>)
+    long double get_Bhattacharyya_param() const noexcept
+        requires(FiniteFieldType<T>)
     {
-        if (get_px() != 0.0)
-            throw std::logic_error("Bhattacharyya parameter is not defined for channels with erasures");
+        const long double q = T::get_size();
         const long double pe = get_pe();
-        return 2.0L * std::sqrt(pe * (1.0L - pe));
+        const long double px = get_px();
+
+        return px + 2.0L * std::sqrt((1.0L - pe - px) * pe / (q - 1.0L)) + (q - 2.0L) * pe / (q - 1.0L);
     }
 
    private:
+    double pe;
+    double px;
     std::geometric_distribution<unsigned long long> error_dist;
     unsigned long long error_trials{0};
     unsigned long long error_failures_before_hit;
+#ifdef CECCO_ERASURE_SUPPORT
     std::geometric_distribution<unsigned long long> erasure_dist;
     unsigned long long erasure_trials{0};
     unsigned long long erasure_failures_before_hit;
+#endif
 };
 
 template <FieldType T>
-SDMEC<T>::SDMEC(double pe, double px) {
+SDMEC<T>::SDMEC(double pe, double px) : pe(pe), px(px) {
 #ifndef CECCO_ERASURE_SUPPORT
     if (px != 0.0) throw std::invalid_argument("px != 0 requires CECCO_ERASURE_SUPPORT");
 #endif
@@ -291,17 +297,20 @@ SDMEC<T>::SDMEC(double pe, double px) {
         throw std::out_of_range("SDMEC erasure probability must be in [0," + std::to_string(1.0 - pe) +
                                 "], got: " + std::to_string(px));
 
-    error_dist = std::geometric_distribution<unsigned long long>(pe / (1.0 - px));
+    const double p_error_given_not_erased = (px == 1.0) ? 0.0 : pe / (1.0 - px);
+    error_dist = std::geometric_distribution<unsigned long long>(p_error_given_not_erased);
     error_failures_before_hit = error_dist(gen());
+#ifdef CECCO_ERASURE_SUPPORT
     erasure_dist = std::geometric_distribution<unsigned long long>(px);
     if (px > 0.0) {
         erasure_failures_before_hit = erasure_dist(gen());
     }
+#endif
 }
 
 template <FieldType T>
 T SDMEC<T>::operator()(const T& in) {
-    if (error_dist.p() == 0.0 && erasure_dist.p() == 0.0) return in;
+    if (error_dist.p() == 0.0 && px == 0.0) return in;
     T res(in);
     if (error_trials == error_failures_before_hit) {
         res.randomize_force_change();
@@ -311,7 +320,7 @@ T SDMEC<T>::operator()(const T& in) {
         ++error_trials;
     }
 #ifdef CECCO_ERASURE_SUPPORT
-    if (erasure_dist.p() == 0.0) return res;
+    if (px == 0.0) return res;
     if (erasure_trials == erasure_failures_before_hit) {
         res.erase();
         erasure_trials = 0;
@@ -327,18 +336,13 @@ template <FieldType T>
 double SDMEC<T>::get_capacity() const noexcept
     requires(FiniteFieldType<T>)
 {
-    const double pe = error_dist.p();
+    const double ptilde = error_dist.p();
     const double q = static_cast<double>(T::get_size());
 
-    const double term1 = (pe > 0.0 && pe < 1.0) ? pe * std::log2(pe) : 0.0;
-    const double term2 = (pe > 0.0 && pe < 1.0) ? (1 - pe) * std::log2(1 - pe) : 0.0;
+    const double term1 = (ptilde > 0.0 && ptilde < 1.0) ? ptilde * std::log2(ptilde) : 0.0;
+    const double term2 = (ptilde > 0.0 && ptilde < 1.0) ? (1.0 - ptilde) * std::log2(1.0 - ptilde) : 0.0;
 
-    double res = std::log2(q) + term2 + term1 - pe * std::log2(q - 1);
-
-    const double px = erasure_dist.p();
-    res *= (1 - px);
-
-    return res;
+    return (std::log2(q) + term2 + term1 - ptilde * std::log2(q - 1.0)) * (1.0 - px);
 }
 
 /**
