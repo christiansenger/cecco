@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.4
+ * @version 2.2.0
  * @date 2026
  *
  * @copyright
@@ -161,13 +161,19 @@ class Code {
     virtual Vector<T> dec_Viterbi(const Vector<T>&, const std::string& = "") const {
         throw std::logic_error("Viterbi decoding not supported for this code!");
     }
+    // Documentation note: soft-input decoders take [T:F_p]·(p−1) channel LLRs per code symbol,
+    // coordinate blocks in as_vector()/DEMUX order (highest level of the construction tower
+    // first), cf. details::symbol_costs_from_llrs in trellises.hpp; for binary codes one LLR
+    // per bit.
     virtual Vector<T> dec_ML_soft(const Vector<double>&, size_t) const {
         throw std::logic_error("Soft-input ML decoding not supported for this code!");
     }
     virtual Vector<T> dec_Viterbi_soft(const Vector<double>&, const std::string& = "") const {
         throw std::logic_error("Soft-input Viterbi decoding not supported for this code!");
     }
-    // Documentation note: pass nullptr as Lambda when only the filename argument is needed.
+    // Documentation note: pass nullptr as Lambda when only the filename argument is needed. Lambda
+    // receives n·(q−1) a-posteriori LLRs; position i holds L_i(a) = ln(P(c_i=0|r)/P(c_i=a|r)) for
+    // a = 1, …, q−1 by label. For binary codes this is the usual length-n LLR vector.
     virtual Vector<T> dec_BCJR(const Vector<double>&, Vector<double>* = nullptr, const std::string& = "") const {
         throw std::logic_error("BCJR decoding not supported for this code!");
     }
@@ -397,6 +403,7 @@ class LinearCode : public Code<T> {
           infoset(other.infoset),
           dmin(other.dmin),
           weight_enumerator(other.weight_enumerator),
+          p_ary_image_weight_enumerator(other.p_ary_image_weight_enumerator),
           codewords(other.codewords),
           standard_array(other.standard_array),
           tainted(other.tainted),
@@ -420,6 +427,7 @@ class LinearCode : public Code<T> {
           infoset(std::move(other.infoset)),
           dmin(std::move(other.dmin)),
           weight_enumerator(std::move(other.weight_enumerator)),
+          p_ary_image_weight_enumerator(std::move(other.p_ary_image_weight_enumerator)),
           codewords(std::move(other.codewords)),
           standard_array(std::move(other.standard_array)),
           tainted(std::move(other.tainted)),
@@ -444,6 +452,7 @@ class LinearCode : public Code<T> {
             infoset = other.infoset;
             dmin = other.dmin;
             weight_enumerator = other.weight_enumerator;
+            p_ary_image_weight_enumerator = other.p_ary_image_weight_enumerator;
             codewords = other.codewords;
             standard_array = other.standard_array;
             tainted = other.tainted;
@@ -470,6 +479,7 @@ class LinearCode : public Code<T> {
             infoset = std::move(other.infoset);
             dmin = std::move(other.dmin);
             weight_enumerator = std::move(other.weight_enumerator);
+            p_ary_image_weight_enumerator = std::move(other.p_ary_image_weight_enumerator);
             codewords = std::move(other.codewords);
             standard_array = std::move(other.standard_array);
             tainted = std::move(other.tainted);
@@ -522,8 +532,8 @@ class LinearCode : public Code<T> {
                 }
 
                 // if less than 100 codewords calculate weight enumerator (even when not required)
-                if (get_size() < 100) {
-                    if constexpr (FiniteFieldType<T>) {
+                if constexpr (FiniteFieldType<T>) {
+                    if (get_size() < 100) {
                         get_weight_enumerator();
                         for (size_t i = 1; i <= weight_enumerator.value().degree(); ++i) {
                             if (weight_enumerator.value()[i] != 0) {
@@ -597,6 +607,45 @@ class LinearCode : public Code<T> {
         }
     }
 
+    // Documentation note: weight enumerator of the p-ary image code (length n·[T:F_p], dimension
+    // k·[T:F_p] over F_p, p the characteristic), i.e. codeword weights counted in prime-field
+    // coordinates of the as_vector()/DEMUX expansion. For codes over prime fields image and code
+    // coincide.
+    const Polynomial<InfInt>& get_p_ary_image_weight_enumerator() const
+        requires FiniteFieldType<T>
+    {
+        constexpr size_t m = details::degree_over_prime_v<T>;
+        if constexpr (m == 1) {
+            return get_weight_enumerator();
+        } else {
+            p_ary_image_weight_enumerator.call_once([this] {
+                if (p_ary_image_weight_enumerator.has_value()) return;
+                constexpr uint16_t p = T::get_characteristic();
+                const size_t n = this->n;
+
+                if (k == 0) {
+                    p_ary_image_weight_enumerator.emplace(Polynomial<InfInt>(1));
+                    return;
+                }
+
+                std::clog << "--> Calculating p-ary image weight enumerator for:" << std::endl;
+                Matrix<Fp<p>> Gp(k * m, n * m);
+                for (size_t i = 0; i < k; ++i) {
+                    for (size_t j = 0; j < m; ++j) {
+                        const T beta(static_cast<int>(sqm<size_t>(p, j)));
+                        for (size_t pos = 0; pos < n; ++pos) {
+                            const auto image = (beta * G(i, pos)).template as_vector<Fp<p>>();
+                            Gp.set_submatrix(i * m + j, pos * m, Matrix<Fp<p>>(image));
+                        }
+                    }
+                }
+                p_ary_image_weight_enumerator.emplace(LinearCode<Fp<p>>(n * m, k * m, Gp).get_weight_enumerator());
+            });
+
+            return p_ary_image_weight_enumerator.value();
+        }
+    }
+
     long double P_word(double pe) const {
         const size_t tmax = get_tmax();
         long double res = 0.0;
@@ -633,10 +682,14 @@ class LinearCode : public Code<T> {
             return res;
     }
 
+    // Documentation note: union-Bhattacharyya bound on ML decoding for transmission of the p-ary
+    // image (cf. DEMUX/as_vector()) over a channel with prime-field input, gamma e.g. from
+    // BI_AWGN::get_Bhattacharyya_param(). For codes over prime fields this is the classical
+    // symbol-level bound.
     long double Bhattacharyya_bound(long double gamma) const
         requires FiniteFieldType<T>
     {
-        const auto& A = get_weight_enumerator();
+        const auto& A = get_p_ary_image_weight_enumerator();
         const size_t dmin = get_dmin();
 
         long double res = 0;
@@ -1217,8 +1270,11 @@ class LinearCode : public Code<T> {
         }
         LinearCode<T> res(this->n, k, Gp);
         if (dmin.has_value()) res.set_dmin(*dmin);
-        if constexpr (FiniteFieldType<T>)
+        if constexpr (FiniteFieldType<T>) {
             if (weight_enumerator.has_value()) res.set_weight_enumerator(*weight_enumerator);
+            if (p_ary_image_weight_enumerator.has_value())
+                res.p_ary_image_weight_enumerator = p_ary_image_weight_enumerator;
+        }
         return res;
     }
 
@@ -1227,6 +1283,8 @@ class LinearCode : public Code<T> {
         if (dmin.has_value()) res.set_dmin(*dmin);
         if constexpr (FiniteFieldType<T>) {
             if (weight_enumerator.has_value()) res.set_weight_enumerator(*weight_enumerator);
+            if (p_ary_image_weight_enumerator.has_value())
+                res.p_ary_image_weight_enumerator = p_ary_image_weight_enumerator;
             if (minimal_trellis.has_value()) res.minimal_trellis = minimal_trellis;
             if (codewords.has_value()) res.codewords = codewords;
         }
@@ -1335,7 +1393,7 @@ class LinearCode : public Code<T> {
     {
         minimal_trellis.call_once([this] {
             if (minimal_trellis.has_value()) return;
-            const size_t q = T::get_size();
+            constexpr size_t q = T::get_size();
             const size_t n = this->n;
             const auto Gp = get_G_in_trellis_oriented_form();
 
@@ -1545,10 +1603,12 @@ class LinearCode : public Code<T> {
     }
 
     virtual Vector<T> dec_Viterbi_soft(const Vector<double>& llrs, const std::string& filename = "") const override {
-        if constexpr (!std::is_same_v<T, Fp<2>>) {
-            throw std::logic_error("Soft-input Viterbi decoding only available for codes over F_2!");
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Soft-input Viterbi decoding only available for codes over finite fields!");
         } else {
-            validate_length(llrs);
+            validate_length_soft(llrs);
+            if (!filename.empty() && T::get_size() > 2)
+                throw std::invalid_argument("Soft-input Viterbi trellis TikZ export only supported for binary codes!");
             if (k == 0) return Vector<T>(this->n);
 
             const auto& Tr = get_minimal_trellis();
@@ -1560,17 +1620,27 @@ class LinearCode : public Code<T> {
         }
     }
 
+    Vector<T> dec_Viterbi_soft(const Matrix<double>& llrs, const std::string& filename = "") const
+        requires FiniteFieldType<T>
+    {
+        return dec_Viterbi_soft(flatten_llrs(llrs), filename);
+    }
+
     // Documentation note: pass nullptr as Lambda when only the filename argument is needed.
     virtual Vector<T> dec_BCJR(const Vector<double>& llrs, Vector<double>* Lambda = nullptr,
                                const std::string& filename = "") const override {
-        if constexpr (!std::is_same_v<T, Fp<2>>) {
-            throw std::logic_error("BCJR decoding only available for codes over F_2!");
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("BCJR decoding only available for codes over finite fields!");
         } else {
-            validate_length(llrs);
+            validate_length_soft(llrs);
+            if (!filename.empty() && T::get_size() > 2)
+                throw std::invalid_argument("BCJR trellis TikZ export only supported for binary codes!");
+
+            constexpr size_t q = T::get_size();
             const size_t n = this->n;
 
             if (k == 0) {
-                if (Lambda != nullptr) *Lambda = Vector<double>(n, 0.0);
+                if (Lambda != nullptr) *Lambda = Vector<double>(n * (q - 1), std::numeric_limits<double>::infinity());
                 return Vector<T>(n);
             }
 
@@ -1578,26 +1648,49 @@ class LinearCode : public Code<T> {
             typename Trellis<T>::BCJR_Workspace ws(Tr);
             ws.calculate_edge_costs(Tr, llrs);
             auto Lambda_local = bcjr_forward_backward(Tr, ws);
-            if (!filename.empty()) {
-                ws.v.emplace(llrs);
-                Tr.export_as_tikz(filename, &ws);
+            if constexpr (T::get_size() == 2) {
+                if (!filename.empty()) {
+                    ws.v.emplace(llrs);
+                    Tr.export_as_tikz(filename, &ws);
+                }
             }
             if (Lambda != nullptr) *Lambda = Lambda_local;
 
             Vector<T> c_est(n);
-            for (size_t i = 0; i < n; ++i)
-                if (Lambda_local[i] < 0.0) c_est.set_component(i, T(1));
+            for (size_t i = 0; i < n; ++i) {
+                size_t label = 0;
+                double min_LLR = 0.0;
+                for (size_t a = 1; a < q; ++a) {
+                    const double L = Lambda_local[i * (q - 1) + (a - 1)];
+                    if (L < min_LLR) {
+                        min_LLR = L;
+                        label = a;
+                    }
+                }
+                c_est.set_component(i, T(label));
+            }
             return c_est;
         }
     }
 
+    Vector<T> dec_BCJR(const Matrix<double>& llrs, Vector<double>* Lambda = nullptr,
+                       const std::string& filename = "") const
+        requires FiniteFieldType<T>
+    {
+        return dec_BCJR(flatten_llrs(llrs), Lambda, filename);
+    }
+
     virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t cache_limit) const override {
-        if constexpr (!std::is_same_v<T, Fp<2>>) {
-            throw std::logic_error("Soft-input ML decoding only available for codes over F_2!");
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Soft-input ML decoding only available for codes over finite fields!");
         } else {
-            validate_length(llrs);
+            validate_length_soft(llrs);
 
             if (k == 0) return Vector<T>(this->n);
+
+            std::vector<std::array<double, T::get_size()>> costs;
+            costs.reserve(this->n);
+            for (size_t i = 0; i < this->n; ++i) costs.push_back(details::symbol_costs_from_llrs<T>(llrs, i));
 
             Vector<T> c_est;
             double best = std::numeric_limits<double>::max();
@@ -1610,9 +1703,7 @@ class LinearCode : public Code<T> {
 
                 for (auto it = codewords.value().cbegin(); it != codewords.value().cend(); ++it) {
                     double val = 0.0;
-                    for (size_t i = 0; i < this->n; ++i) {
-                        if ((*it)[i] != T(0)) val += llrs[i];
-                    }
+                    for (size_t i = 0; i < this->n; ++i) val += costs[i][(*it)[i].get_label()];
                     if (val < best) {
                         c_est = *it;
                         best = val;
@@ -1621,9 +1712,7 @@ class LinearCode : public Code<T> {
             } else {
                 for (auto it = cbegin(); it != cend(); ++it) {
                     double val = 0.0;
-                    for (size_t i = 0; i < this->n; ++i) {
-                        if ((*it)[i] != T(0)) val += llrs[i];
-                    }
+                    for (size_t i = 0; i < this->n; ++i) val += costs[i][(*it)[i].get_label()];
                     if (val < best) {
                         c_est = *it;
                         best = val;
@@ -1633,6 +1722,12 @@ class LinearCode : public Code<T> {
 
             return c_est;
         }
+    }
+
+    Vector<T> dec_ML_soft(const Matrix<double>& llrs, size_t cache_limit) const
+        requires FiniteFieldType<T>
+    {
+        return dec_ML_soft(flatten_llrs(llrs), cache_limit);
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
@@ -1845,6 +1940,15 @@ class LinearCode : public Code<T> {
             throw std::invalid_argument(std::string("Received vector length must be ") + std::to_string(this->n));
     }
 
+    void validate_length_soft(const Vector<double>& llrs) const
+        requires FiniteFieldType<T>
+    {
+        constexpr size_t llrs_per_symbol = details::degree_over_prime_v<T> * (T::get_characteristic() - 1);
+        if (llrs.get_n() != llrs_per_symbol * this->n)
+            throw std::invalid_argument(std::string("LLR vector length must be ") +
+                                        std::to_string(llrs_per_symbol * this->n));
+    }
+
     size_t k;
     Matrix<T> G;
     Matrix<T> HT;
@@ -1852,6 +1956,7 @@ class LinearCode : public Code<T> {
     std::vector<size_t> infoset{};
     mutable details::OnceCache<size_t> dmin;
     mutable details::OnceCache<Polynomial<InfInt>> weight_enumerator;
+    mutable details::OnceCache<Polynomial<InfInt>> p_ary_image_weight_enumerator;
     mutable details::OnceCache<std::vector<Vector<T>>> codewords;
     mutable details::OnceCache<std::vector<Vector<T>>> standard_array;
     mutable details::OnceCache<std::vector<bool>> tainted;
@@ -1895,6 +2000,22 @@ class LinearCode : public Code<T> {
         Gp.rref(&k);
         if (k == 0) return Matrix<T>(0, n);
         return Gp.get_submatrix(0, 0, k, n);
+    }
+
+    // Documentation note: column j of the LLR matrix holds the [T:F_p]·(p−1) LLRs of code symbol j,
+    // rows in as_vector() coordinate order (highest level of the construction tower first); for
+    // characteristic 2 this is the LLRCalculator output on the DEMUXed/as_matrix'ed codeword.
+    Vector<double> flatten_llrs(const Matrix<double>& llrs) const
+        requires FiniteFieldType<T>
+    {
+        constexpr size_t rows = details::degree_over_prime_v<T> * (T::get_characteristic() - 1);
+        if (llrs.get_m() != rows || llrs.get_n() != this->n)
+            throw std::invalid_argument("LLR matrix must have " + std::to_string(rows) + " rows and " +
+                                        std::to_string(this->n) + " columns");
+        Vector<double> res(rows * this->n);
+        for (size_t j = 0; j < this->n; ++j)
+            for (size_t i = 0; i < rows; ++i) res.set_component(j * rows + i, llrs(i, j));
+        return res;
     }
 
     template <typename cost_t>
@@ -1965,9 +2086,10 @@ class LinearCode : public Code<T> {
     }
 
     Vector<double> bcjr_forward_backward(const Trellis<T>& Tr, typename Trellis<T>::BCJR_Workspace& ws) const
-        requires std::is_same_v<T, Fp<2>>
+        requires FiniteFieldType<T>
     {
         constexpr double neg_inf = -std::numeric_limits<double>::infinity();
+        constexpr size_t q = T::get_size();
         const size_t n = this->n;
 
         auto max_star = [](double a, double b) noexcept {
@@ -1995,19 +2117,17 @@ class LinearCode : public Code<T> {
             }
         }
 
-        Vector<double> res(n);
+        Vector<double> res(n * (q - 1));
+        std::array<double, q> Lambda;
         for (size_t s = 0; s < n; ++s) {
-            double L0 = neg_inf;
-            double L1 = neg_inf;
+            Lambda.fill(neg_inf);
             for (size_t j = 0; j < Tr.E[s].size(); ++j) {
                 const auto& e = Tr.E[s][j];
                 const double val = ws.alpha[s][e.from_id] - ws.edge_costs[s][j] + ws.beta[s + 1][e.to_id];
-                if (e.value == T(0))
-                    L0 = max_star(L0, val);
-                else
-                    L1 = max_star(L1, val);
+                const size_t a = e.value.get_label();
+                Lambda[a] = max_star(Lambda[a], val);
             }
-            res.set_component(s, L0 - L1);
+            for (size_t a = 1; a < q; ++a) res.set_component(s * (q - 1) + (a - 1), Lambda[0] - Lambda[a]);
         }
 
         return res;
@@ -2979,8 +3099,11 @@ class GRSCode : public LinearCode<T> {
         Gp.rref();
         GRSCode res(a, d, this->k, std::move(Gp));
         if (this->dmin.has_value()) res.set_dmin(*(this->dmin));
-        if constexpr (FiniteFieldType<T>)
+        if constexpr (FiniteFieldType<T>) {
             if (this->weight_enumerator.has_value()) res.set_weight_enumerator(*(this->weight_enumerator));
+            if (this->p_ary_image_weight_enumerator.has_value())
+                res.p_ary_image_weight_enumerator = this->p_ary_image_weight_enumerator;
+        }
         return res;
     }
 
@@ -3241,6 +3364,8 @@ class RSCode : public GRSCode<T> {
         RSCode<T> res(std::make_pair(this->get_a(), this->get_d()), this->k, alpha, b, std::move(Gp));
         if (this->dmin.has_value()) res.set_dmin(*(this->dmin));
         if (this->weight_enumerator.has_value()) res.set_weight_enumerator(*(this->weight_enumerator));
+        if (this->p_ary_image_weight_enumerator.has_value())
+            res.p_ary_image_weight_enumerator = this->p_ary_image_weight_enumerator;
         return res;
     }
 
@@ -3249,6 +3374,8 @@ class RSCode : public GRSCode<T> {
                       this->get_G_in_polynomial_form());
         if (this->dmin.has_value()) res.set_dmin(*(this->dmin));
         if (this->weight_enumerator.has_value()) res.set_weight_enumerator(*(this->weight_enumerator));
+        if (this->p_ary_image_weight_enumerator.has_value())
+            res.p_ary_image_weight_enumerator = this->p_ary_image_weight_enumerator;
         if (this->minimal_trellis.has_value()) res.minimal_trellis = this->minimal_trellis;
         if (this->codewords.has_value()) res.codewords = this->codewords;
         return res;

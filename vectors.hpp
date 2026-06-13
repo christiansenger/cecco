@@ -662,6 +662,7 @@ template <ComponentType T>
 Vector<T>& Vector<T>::operator/=(const T& s) {
     if (s == T(0)) throw std::invalid_argument("trying to divide components of vector by zero");
     std::ranges::for_each(data, [&s](T& v) { v /= s; });
+    if constexpr (!FieldType<T>) cache.invalidate();
     return *this;
 }
 
@@ -717,7 +718,10 @@ Vector<T>& Vector<T>::append(U&& rhs)
     requires std::constructible_from<Vector<T>, U>
 {
     if constexpr (std::same_as<std::remove_cvref_t<U>, Vector<T>>) {
-        return append(std::forward<U>(rhs));
+        if constexpr (std::is_lvalue_reference_v<U&&>)
+            return append(static_cast<const Vector&>(rhs));
+        else
+            return append(std::move(rhs));
     } else {
         Vector<T> tmp(std::forward<U>(rhs));
         return append(std::move(tmp));
@@ -730,7 +734,10 @@ Vector<T>& Vector<T>::prepend(U&& lhs)
     requires std::constructible_from<Vector<T>, U>
 {
     if constexpr (std::same_as<std::remove_cvref_t<U>, Vector<T>>) {
-        return prepend(std::forward<U>(lhs));
+        if constexpr (std::is_lvalue_reference_v<U&&>)
+            return prepend(static_cast<const Vector&>(lhs));
+        else
+            return prepend(std::move(lhs));
     } else {
         Vector<T> tmp(std::forward<U>(lhs));
         return prepend(std::move(tmp));

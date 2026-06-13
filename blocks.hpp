@@ -2,7 +2,7 @@
  * @file blocks.hpp
  * @brief Communication system blocks library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.6
+ * @version 2.2.8
  * @date 2026
  *
  * @copyright
@@ -20,7 +20,9 @@
  * - **Channels**: SDMEC (errors-and-erasures over any 𝔽_q), SDMC, BSC, BEC, BAC, AWGN, BI-AWGN.
  * - **Modulation**: NRZ and BPSK with configurable constellation.
  * - **Demodulation**: hard-decision (NRZDemapper, BPSKDemapper) and soft-decision (LLRCalculator).
- * - **Field multiplexing**: DEMUX/MUX between an extension field and a subfield.
+ * - **Field multiplexing**: DEMUX/MUX between an extension field and a subfield; chained with
+ *   BI_AWGN and LLRCalculator this realizes transmission of the binary image of a code over
+ *   𝔽_{2^m} for the soft-input decoders in codes.hpp.
  * - **Chaining**: `operator>>` for left-to-right block composition.
  *
  * All blocks expose element-wise, vector, and matrix overloads via the @ref CECCO::details::BlockProcessor
@@ -71,6 +73,11 @@ namespace details {
  * Catch-all overloads accept any other @ref CECCO::FiniteFieldType and throw at runtime —
  * useful inside `if constexpr (std::is_same_v<F, InputType>)` guards in non-template
  * contexts, where the discarded branch must still compile.
+ *
+ * Blocks are movable but non-copyable (@ref CECCO::details::NonCopyable, also inherited
+ * directly by @ref CECCO::DEMUX / @ref CECCO::MUX): channels carry stochastic state such as
+ * distribution caches and geometric countdowns, so copies would be statistically entangled —
+ * construct blocks once and reference them in chains.
  *
  * @code{.cpp}
  * Vector<Fp<2>> message = {1, 0, 1, 1};
@@ -158,19 +165,22 @@ class BlockProcessor : private NonCopyable {
     template <FiniteFieldType U>
         requires(!std::is_same_v<U, InputType>)
     OutputType operator()(const U&) {
-        throw std::logic_error("BlockProcessor can only accept inputs from " + InputType::get_info());
+        throw std::logic_error("Instance of BlockProcessor can only accept inputs from " + InputType::get_info() +
+                               ", got " + U::get_info());
     }
 
     template <FiniteFieldType U>
         requires(!std::is_same_v<U, InputType>)
     Vector<OutputType> operator()(const Vector<U>&) {
-        throw std::logic_error("BlockProcessor can only accept inputs from " + InputType::get_info());
+        throw std::logic_error("Instance of BlockProcessor can only accept inputs from " + InputType::get_info() +
+                               ", got " + U::get_info());
     }
 
     template <FiniteFieldType U>
         requires(!std::is_same_v<U, InputType>)
     Matrix<OutputType> operator()(const Matrix<U>&) {
-        throw std::logic_error("BlockProcessor can only accept inputs from " + InputType::get_info());
+        throw std::logic_error("Instance of BlockProcessor can only accept inputs from " + InputType::get_info() +
+                               ", got " + U::get_info());
     }
 };
 
@@ -625,7 +635,9 @@ double AWGN::calculate_pe(double EbNodB, double Eb, double b) noexcept {
  *
  * Maps binary inputs through an internal NRZMapper and then through AWGN, yielding noisy
  * complex symbols ready for hard decision (@ref NRZDemapper) or soft decision
- * (@ref LLRCalculator). Default parameters give BPSK (a = 0, b = 2).
+ * (@ref LLRCalculator). Default parameters give BPSK (a = 0, b = 2). For codes over 𝔽_{2^m}
+ * each code symbol occupies m channel uses via its binary image (cf. @ref CECCO::DEMUX);
+ * energy accounting remains per transmitted bit.
  *
  * @code{.cpp}
  * BI_AWGN channel(6.0);                                       // BPSK at 6 dB
@@ -798,6 +810,10 @@ class BPSKDemapper : public NRZDemapper {
  * negative ⇒ bit 1; magnitude indicates reliability. Output suitable for belief
  * propagation, LDPC, turbo, and other soft-decision decoders.
  *
+ * For a code over 𝔽_{2^m}, apply it to the @ref CECCO::DEMUX'ed binary image; the resulting
+ * m × n LLR matrix (column j = LLRs of code symbol j, rows in `as_vector()` coordinate order)
+ * is accepted directly by the soft-input decoders in codes.hpp.
+ *
  * Construct from a matching @ref NRZMapper + @ref AWGN pair, or directly from a
  * @ref BI_AWGN. See the @ref BI_AWGN class doc for an end-to-end chain example.
  *
@@ -843,17 +859,24 @@ class LLRCalculator : public details::LLRProcessor<LLRCalculator> {
  * @tparam E Extension field
  * @tparam S Subfield of E (S ⊆ E)
  *
- * Each E element decomposes into [E:S] coefficients over S via the polynomial basis of the
- * extension. For a `Vector<E>` of length n, the resulting `Matrix<S>` has [E:S] rows and n
- * columns; column j holds the coefficients of element j.
+ * Each E element decomposes into [E:S] coefficients over S via `as_vector()`. For a `Vector<E>`
+ * of length n, the resulting `Matrix<S>` has [E:S] rows and n columns; column j holds the
+ * coefficients of element j in `as_vector()` order (highest level of the construction tower
+ * first). For S = 𝔽_2 the output is the binary image of the input; chained with
+ * @ref CECCO::BI_AWGN and @ref CECCO::LLRCalculator it produces the LLR matrix expected by the
+ * soft-input decoders in codes.hpp.
  *
  * @code{.cpp}
  * using F2 = Fp<2>;
  * using F4 = Ext<F2, {1, 1, 1}>;          // 𝔽_4 = 𝔽_2[x]/(x² + x + 1)
  * DEMUX<F4, F2> demux;
  *
- * Vector<F4> v = {F4(0), F4(1), F4(2), F4(3)};
- * Matrix<F2> M = v >> demux;              // 2×4 matrix over 𝔽_2
+ * Vector<F4> c = {F4(0), F4(1), F4(2), F4(3)};
+ * Matrix<F2> M = c >> demux;              // 2×4 binary image of c
+ *
+ * BI_AWGN channel(6.0);
+ * LLRCalculator llr(channel);
+ * Matrix<double> L = c >> demux >> channel >> llr;   // 2×4 bit-LLR matrix, column per symbol
  * @endcode
  *
  * @see @ref CECCO::MUX for the inverse

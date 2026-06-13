@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.12
+ * @version 2.3.13
  * @date 2026
  *
  * @copyright
@@ -486,7 +486,7 @@ class Rationals : public details::Field<Rationals<T>> {
     constexpr Rationals& operator=(int l);
 
     constexpr Rationals& operator=(const Rationals& rhs) = default;
-    Rationals& operator=(Rationals&& rhs) = default;
+    Rationals& operator=(Rationals&& rhs);
 
     /// @brief Cross-multiplication equality
     constexpr bool operator==(const Rationals<T>& rhs) const {
@@ -582,6 +582,14 @@ template <SignedIntType T>
 constexpr Rationals<T>& Rationals<T>::operator=(int l) {
     numerator = l;
     denominator = 1;
+    return *this;
+}
+
+template <SignedIntType T>
+Rationals<T>& Rationals<T>::operator=(Rationals&& rhs) {
+    if (this == &rhs) return *this;
+    numerator = std::move(rhs.numerator);
+    denominator = std::move(rhs.denominator);
     return *this;
 }
 
@@ -989,7 +997,7 @@ constexpr auto compute_modular_addition_table()
 /// equals 1. Evaluated at compile time via F's constexpr `operator*=`.
 template <typename F>
 constexpr typename F::label_t compute_primitive_root() {
-    constexpr auto p = F::get_p();
+    constexpr size_t p = F::get_p();
     if constexpr (p == 2) return typename F::label_t{1};
 
     for (uint16_t g_int = 2; g_int < p; ++g_int) {
@@ -1101,8 +1109,8 @@ template <typename LabelType, LabelType FieldSize, typename LutCoeffType, uint8_
           typename BaseFieldType, auto Modulus>
 constexpr auto compute_polynomial_multiplication_table(const LutCoeffType& lut_coeff) {
     Lut2D<LabelType, FieldSize> lut_mul;
-    constexpr auto q = BaseFieldType::get_size();
-    constexpr auto m = ExtensionDegree;
+    constexpr size_t q = BaseFieldType::get_size();
+    constexpr uint8_t m = ExtensionDegree;
 
     for (LabelType i = 0; i < FieldSize; ++i) {
         lut_mul(0, i) = 0;
@@ -1450,7 +1458,7 @@ struct IsomorphismPair {
     /// @brief Compute and cache both maps on first call (no-op afterwards)
     static void compute_if_needed() {
         std::call_once(computed_flag, []() {
-            const size_t size = A::get_size();
+            constexpr size_t size = A::get_size();
             forward_iso.resize(size);
             reverse_iso.resize(size);
 

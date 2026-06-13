@@ -2,7 +2,7 @@
  * @file trellises.hpp
  * @brief Trellis representation for code decoding
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.3
+ * @version 2.2.0
  * @date 2026
  *
  * @copyright
@@ -15,8 +15,10 @@
  * @section Description
  *
  * Trellis storage and workspaces used by Viterbi and BCJR decoding. A trellis stores vertices
- * in layers and edges between adjacent layers. Edge labels are field elements. The class also
- * provides trellis products, segment merging, text output, and TikZ export for finite fields.
+ * in layers and edges between adjacent layers. Edge labels are field elements; soft decoding
+ * workspaces derive their edge costs from channel LLRs of the prime-field coordinates of each
+ * symbol. The class also provides trellis products, segment merging, text output, and TikZ
+ * export for finite fields.
  */
 
 #ifndef TRELLISES_HPP
@@ -30,6 +32,7 @@
 /*
 // transitive
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <concepts>
 #include <cstddef>
@@ -93,6 +96,44 @@ struct Edge {
     /// @brief Edge label
     T value;
 };
+
+/**
+ * @brief Per-segment symbol costs from prime-field channel LLRs
+ *
+ * @tparam T Finite field of the trellis edge labels
+ * @param llrs Channel LLRs, [T:𝔽_p]·(p−1) consecutive values per trellis segment
+ * @param s Segment index
+ * @return Cost of every symbol of T, indexed by label
+ *
+ * A symbol is transmitted as its 𝔽_p coordinate vector over [T:𝔽_p] uses of a p-ary-input
+ * channel, where p is the characteristic. Per channel use the soft input consists of the p−1
+ * LLRs ln(P(r|0)/P(r|b)), b = 1, …, p−1. The channel uses are independent, so the cost of a
+ * symbol — its LLR relative to the zero element — is the sum of the LLRs selected by its
+ * nonzero coordinates. The LLR blocks follow the coordinate order of `as_vector()` and
+ * @ref CECCO::DEMUX (highest level of the construction tower first), while labels encode the
+ * coordinates as base-p digits low-to-high, hence the digit decomposition runs through the
+ * per-segment LLR slots in reverse. For p = 2 this is one LLR per coordinate as produced by
+ * @ref CECCO::LLRCalculator.
+ */
+template <FiniteFieldType T>
+std::array<double, T::get_size()> symbol_costs_from_llrs(const Vector<double>& llrs, size_t s) {
+    constexpr size_t q = T::get_size();
+    constexpr size_t p = T::get_characteristic();
+    constexpr size_t m = degree_over_prime_v<T>;
+
+    std::array<double, q> costs;
+    for (size_t a = 0; a < q; ++a) {
+        double cost = 0.0;
+        size_t digits = a;
+        for (size_t i = 0; i < m; ++i) {
+            const size_t digit = digits % p;
+            if (digit != 0) cost += llrs[(s * m + (m - 1 - i)) * (p - 1) + digit - 1];
+            digits /= p;
+        }
+        costs[a] = cost;
+    }
+    return costs;
+}
 
 }  // namespace details
 
@@ -208,14 +249,19 @@ struct Trellis {
             requires std::integral<cost_t>;
 
         /**
-         * @brief Set soft edge costs from binary LLRs
+         * @brief Set soft edge costs from prime-field channel LLRs
          *
-         * @param tr Binary trellis whose edges define candidate bits
-         * @param llrs Log-likelihood ratios; length must equal the number of segments
-         * @throws std::invalid_argument if `llrs.get_n() != tr.E.size()`
+         * @param trellis Trellis whose edges define candidate symbols
+         * @param llrs Log-likelihood ratios, [T:𝔽_p]·(p−1) per segment
+         * @throws std::invalid_argument if `llrs.get_n()` does not equal the number of segments
+         *         times [T:𝔽_p]·(p−1)
+         *
+         * Edge costs are the symbol LLRs of @ref CECCO::details::symbol_costs_from_llrs. For
+         * codes over Fp<2> this gives cost 0 on 0-labelled edges and the channel LLR on
+         * 1-labelled edges.
          */
-        void calculate_edge_costs(const Trellis& tr, const Vector<double>& llrs)
-            requires std::floating_point<cost_t> && std::is_same_v<T, Fp<2>>;
+        void calculate_edge_costs(const Trellis& trellis, const Vector<double>& llrs)
+            requires std::floating_point<cost_t> && FiniteFieldType<T>;
 
         /// @brief Path costs from the previous layer
         std::vector<cost_t> path_costs_prev;
@@ -232,10 +278,10 @@ struct Trellis {
     };
 
     /**
-     * @brief Workspace for binary BCJR forward-backward decoding
+     * @brief Workspace for BCJR forward-backward decoding
      *
      * Stores α and β metrics by layer and edge costs by segment. It is used by
-     * `LinearCode<Fp<2>>::dec_BCJR`.
+     * `LinearCode<T>::dec_BCJR`.
      */
     struct BCJR_Workspace {
         /// @brief BCJR uses floating-point soft metrics
@@ -249,14 +295,17 @@ struct Trellis {
         explicit BCJR_Workspace(const Trellis& tr);
 
         /**
-         * @brief Set BCJR edge costs from binary LLRs
+         * @brief Set BCJR edge costs from prime-field channel LLRs
          *
-         * @param tr Binary trellis whose edges define candidate bits
-         * @param llrs Log-likelihood ratios; length must equal the number of segments
-         * @throws std::invalid_argument if `llrs.get_n() != tr.E.size()`
+         * @param trellis Trellis whose edges define candidate symbols
+         * @param llrs Log-likelihood ratios, [T:𝔽_p]·(p−1) per segment
+         * @throws std::invalid_argument if `llrs.get_n()` does not equal the number of segments
+         *         times [T:𝔽_p]·(p−1)
+         *
+         * Edge costs are the symbol LLRs of @ref CECCO::details::symbol_costs_from_llrs.
          */
-        void calculate_edge_costs(const Trellis& tr, const Vector<double>& llrs)
-            requires std::is_same_v<T, Fp<2>>;
+        void calculate_edge_costs(const Trellis& trellis, const Vector<double>& llrs)
+            requires FiniteFieldType<T>;
 
         /// @brief Forward metrics by layer and vertex id
         std::vector<std::vector<double>> alpha;
@@ -480,14 +529,19 @@ template <FieldType T>
 template <typename cost_t>
     requires std::integral<cost_t> ||
              std::floating_point<cost_t>
-             void Trellis<T>::Viterbi_Workspace<cost_t>::calculate_edge_costs(const Trellis& tr,
+             void Trellis<T>::Viterbi_Workspace<cost_t>::calculate_edge_costs(const Trellis& trellis,
                                                                               const Vector<double>& llrs)
-                 requires std::floating_point<cost_t> && std::is_same_v<T, Fp<2>>
+                 requires std::floating_point<cost_t> && FiniteFieldType<T>
 {
-    if (llrs.get_n() != tr.E.size())
-        throw std::invalid_argument("Vector length must match number of trellis segments!");
-    for (size_t s = 0; s < tr.E.size(); ++s)
-        for (size_t j = 0; j < tr.E[s].size(); ++j) edge_costs[s][j] = (tr.E[s][j].value == T(0)) ? cost_t{0} : llrs[s];
+    constexpr size_t p = T::get_characteristic();
+    constexpr size_t m = details::degree_over_prime_v<T>;
+    if (llrs.get_n() != m * (p - 1) * trellis.E.size())
+        throw std::invalid_argument("Vector length must match number of trellis segments times LLRs per symbol!");
+    for (size_t s = 0; s < trellis.E.size(); ++s) {
+        const auto symbol_costs = details::symbol_costs_from_llrs<T>(llrs, s);
+        for (size_t j = 0; j < trellis.E[s].size(); ++j)
+            edge_costs[s][j] = symbol_costs[trellis.E[s][j].value.get_label()];
+    }
 }
 
 template <FieldType T>
@@ -503,13 +557,18 @@ Trellis<T>::BCJR_Workspace::BCJR_Workspace(const Trellis& tr) {
 }
 
 template <FieldType T>
-void Trellis<T>::BCJR_Workspace::calculate_edge_costs(const Trellis& tr, const Vector<double>& llrs)
-    requires std::is_same_v<T, Fp<2>>
+void Trellis<T>::BCJR_Workspace::calculate_edge_costs(const Trellis& trellis, const Vector<double>& llrs)
+    requires FiniteFieldType<T>
 {
-    if (llrs.get_n() != tr.E.size())
-        throw std::invalid_argument("Vector length must match number of trellis segments!");
-    for (size_t s = 0; s < tr.E.size(); ++s)
-        for (size_t j = 0; j < tr.E[s].size(); ++j) edge_costs[s][j] = (tr.E[s][j].value != T(0)) ? llrs[s] : 0.0;
+    constexpr size_t p = T::get_characteristic();
+    constexpr size_t m = details::degree_over_prime_v<T>;
+    if (llrs.get_n() != m * (p - 1) * trellis.E.size())
+        throw std::invalid_argument("Vector length must match number of trellis segments times LLRs per symbol!");
+    for (size_t s = 0; s < trellis.E.size(); ++s) {
+        const auto symbol_costs = details::symbol_costs_from_llrs<T>(llrs, s);
+        for (size_t j = 0; j < trellis.E[s].size(); ++j)
+            edge_costs[s][j] = symbol_costs[trellis.E[s][j].value.get_label()];
+    }
 }
 
 template <FieldType T>

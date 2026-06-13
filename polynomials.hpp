@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.9
+ * @version 2.2.10
  * @date 2026
  *
  * @copyright
@@ -409,7 +409,7 @@ class Polynomial {
         if (d == 0) return false;
         if (d == 1) return true;
 
-        const size_t q = T::get_size();
+        constexpr size_t q = T::get_size();
 
         for (size_t i = 1; i <= d / 2; ++i) {
             size_t count = 1;
@@ -755,6 +755,7 @@ Polynomial<T>& Polynomial<T>::differentiate(size_t s)
     if (d == 0 || s > d) {
         data.resize(1);
         data[0] = T(0);
+        cache.template set<Weight>(0);
         return *this;
     }
     if constexpr (requires { typename T::BASE_FIELD; }) {
@@ -788,6 +789,7 @@ Polynomial<T>& Polynomial<T>::Hasse_differentiate(size_t s)
     if (d == 0 || s > d) {
         data.resize(1);
         data[0] = T(0);
+        cache.template set<Weight>(0);
         return *this;
     }
     for (size_t i = 0; i <= d - s; ++i) data[i] = bin<size_t>(i + s, s) * data[i + s];
