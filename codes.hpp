@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.0
+ * @version 2.2.1
  * @date 2026
  *
  * @copyright
@@ -2246,7 +2246,8 @@ class UniverseCode : public LinearCode<T> {
    public:
     UniverseCode(size_t n) : LinearCode<T>(n, n, IdentityMatrix<T>(n)) {
         auto weight_enumerator = Polynomial<InfInt>();
-        for (size_t i = 0; i <= n; ++i) weight_enumerator.set_coefficient(i, bin<InfInt>(n, i));
+        for (size_t i = 0; i <= n; ++i)
+            weight_enumerator.set_coefficient(i, bin<InfInt>(n, i) * sqm<InfInt>(T::get_size() - 1, i));
         this->set_weight_enumerator(std::move(weight_enumerator));
     }
 
@@ -4135,15 +4136,39 @@ class GoppaCode : public AlternantCode<GRSCode<SUPER>> {
         throw std::invalid_argument(std::string("Cannot construct Goppa code: ") + e.what());
     }
 
-    GoppaCode(const GoppaCode&) = default;
-    GoppaCode(GoppaCode&&) = default;
-    GoppaCode& operator=(const GoppaCode&) = default;
-    GoppaCode& operator=(GoppaCode&&) = default;
+    GoppaCode(const GoppaCode& other)
+        : Base(other), g(other.g), squarefree(other.squarefree), Patterson_inv_cache(other.Patterson_inv_cache) {}
+
+    GoppaCode(GoppaCode&& other)
+        : Base(std::move(other)),
+          g(std::move(other.g)),
+          squarefree(other.squarefree),
+          Patterson_inv_cache(std::move(other.Patterson_inv_cache)) {}
+
+    GoppaCode& operator=(const GoppaCode& other) {
+        if (this != &other) {
+            Base::operator=(other);
+            g = other.g;
+            squarefree = other.squarefree;
+            Patterson_inv_cache = other.Patterson_inv_cache;
+        }
+        return *this;
+    }
+
+    GoppaCode& operator=(GoppaCode&& other) {
+        if (this != &other) {
+            Base::operator=(std::move(other));
+            g = std::move(other.g);
+            squarefree = other.squarefree;
+            Patterson_inv_cache = std::move(other.Patterson_inv_cache);
+        }
+        return *this;
+    }
 
     const Polynomial<SUPER>& get_g() const noexcept { return g; }
     bool is_squarefree() const noexcept { return squarefree; }
 
-    size_t get_delta() const override {
+    size_t get_delta() const noexcept override {
         if constexpr (std::is_same_v<SUB, Fp<2>>)
             if (squarefree) return 2 * g.degree() + 1;
         return Base::get_delta();
@@ -4186,15 +4211,15 @@ class GoppaCode : public AlternantCode<GRSCode<SUPER>> {
             if (r[i] == SUB(1)) S = (S + inv[i]) % g;
         if (S.is_zero()) return r;
 
-        Polynomial<SUPER> u;
-        const auto d = GCD(S, g, &u);
-        if (d.is_zero() || d.degree() != 0)
+        Polynomial<SUPER> v, u;
+        const auto d = GCD(g, S, &v, &u);
+        if (d.is_empty() || d.is_zero() || d.degree() != 0)
             throw decoding_failure("Patterson decoder failed (syndrome not invertible modulo g)");
         const auto h = (((SUPER(1) / d[0]) * u) + x) % g;
 
         Polynomial<SUPER> sigma;
         if (h.is_zero()) {
-            sigma = one;
+            sigma = x;
         } else {
             auto R = h;
             const size_t squarings = std::bit_width(SUPER::get_size() - 1) * t - 1;
@@ -4240,9 +4265,9 @@ class GoppaCode : public AlternantCode<GRSCode<SUPER>> {
             const auto& a = this->get_a();
             std::vector<Polynomial<SUPER>> inv(n);
             for (size_t i = 0; i < n; ++i) {
-                Polynomial<SUPER> u;
-                const auto d = GCD(Polynomial<SUPER>({a[i], SUPER(1)}), g, &u);
-                if (d.is_zero() || d.degree() != 0)
+                Polynomial<SUPER> v, u;
+                const auto d = GCD(g, Polynomial<SUPER>({a[i], SUPER(1)}), &v, &u);
+                if (d.is_empty() || d.is_zero() || d.degree() != 0)
                     throw std::invalid_argument("Goppa locator a[" + std::to_string(i) + "] is a root of g");
                 inv[i] = ((SUPER(1) / d[0]) * u) % g;
             }
