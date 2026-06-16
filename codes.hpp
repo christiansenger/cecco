@@ -177,6 +177,15 @@ class Code {
     virtual Vector<T> dec_BCJR(const Vector<double>&, Vector<double>* = nullptr, const std::string& = "") const {
         throw std::logic_error("BCJR decoding not supported for this code!");
     }
+    virtual Vector<T> dec_ML_soft(const Matrix<double>&, size_t) const {
+        throw std::logic_error("Soft-input ML decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_Viterbi_soft(const Matrix<double>&, const std::string& = "") const {
+        throw std::logic_error("Soft-input Viterbi decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_BCJR(const Matrix<double>&, Vector<double>* = nullptr, const std::string& = "") const {
+        throw std::logic_error("BCJR decoding not supported for this code!");
+    }
     virtual Vector<T> dec_burst(const Vector<T>&) const {
         throw std::logic_error("Burst decoding not supported for this code!");
     }
@@ -1620,10 +1629,12 @@ class LinearCode : public Code<T> {
         }
     }
 
-    Vector<T> dec_Viterbi_soft(const Matrix<double>& llrs, const std::string& filename = "") const
-        requires FiniteFieldType<T>
-    {
-        return dec_Viterbi_soft(flatten_llrs(llrs), filename);
+    virtual Vector<T> dec_Viterbi_soft(const Matrix<double>& llrs, const std::string& filename = "") const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Soft-input Viterbi decoding only available for codes over finite fields!");
+        } else {
+            return dec_Viterbi_soft(flatten_llrs(llrs), filename);
+        }
     }
 
     // Documentation note: pass nullptr as Lambda when only the filename argument is needed.
@@ -1673,11 +1684,13 @@ class LinearCode : public Code<T> {
         }
     }
 
-    Vector<T> dec_BCJR(const Matrix<double>& llrs, Vector<double>* Lambda = nullptr,
-                       const std::string& filename = "") const
-        requires FiniteFieldType<T>
-    {
-        return dec_BCJR(flatten_llrs(llrs), Lambda, filename);
+    virtual Vector<T> dec_BCJR(const Matrix<double>& llrs, Vector<double>* Lambda = nullptr,
+                               const std::string& filename = "") const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("BCJR decoding only available for codes over finite fields!");
+        } else {
+            return dec_BCJR(flatten_llrs(llrs), Lambda, filename);
+        }
     }
 
     virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t cache_limit) const override {
@@ -1724,10 +1737,12 @@ class LinearCode : public Code<T> {
         }
     }
 
-    Vector<T> dec_ML_soft(const Matrix<double>& llrs, size_t cache_limit) const
-        requires FiniteFieldType<T>
-    {
-        return dec_ML_soft(flatten_llrs(llrs), cache_limit);
+    virtual Vector<T> dec_ML_soft(const Matrix<double>& llrs, size_t cache_limit) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Soft-input ML decoding only available for codes over finite fields!");
+        } else {
+            return dec_ML_soft(flatten_llrs(llrs), cache_limit);
+        }
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
@@ -2009,11 +2024,15 @@ class LinearCode : public Code<T> {
         requires FiniteFieldType<T>
     {
         constexpr size_t rows = details::degree_over_prime_v<T> * (T::get_characteristic() - 1);
-        if (llrs.get_m() != rows || llrs.get_n() != this->n)
+     
+        const size_t n = this->n;
+
+        if (llrs.get_m() != rows || llrs.get_n() != n)
             throw std::invalid_argument("LLR matrix must have " + std::to_string(rows) + " rows and " +
-                                        std::to_string(this->n) + " columns");
-        Vector<double> res(rows * this->n);
-        for (size_t j = 0; j < this->n; ++j)
+                                        std::to_string(n) + " columns");
+
+        Vector<double> res(rows * n);
+        for (size_t j = 0; j < n; ++j)
             for (size_t i = 0; i < rows; ++i) res.set_component(j * rows + i, llrs(i, j));
         return res;
     }
@@ -4975,6 +4994,16 @@ class Dec {
         else if (method == method_t::BCJR)
             return C.dec_BCJR(in);
         return C.dec_ML_soft(in, cache_limit);
+    }
+
+    Vector<T> operator()(const Matrix<double>& in) const {
+        if (method == method_t::Viterbi || method == method_t::Viterbi_soft)
+            return C.dec_Viterbi_soft(in);
+        else if (method == method_t::BCJR)
+            return C.dec_BCJR(in);
+        else if (method == method_t::ML_soft)
+            return C.dec_ML_soft(in, cache_limit);
+        throw std::logic_error("Matrix soft input requires a soft method (Viterbi_soft, BCJR, or ML_soft)!");
     }
 
    private:
