@@ -351,6 +351,26 @@ constexpr T daa(T b, int m) {
 namespace details {
 
 /**
+ * @brief Reservoir-sampling acceptance test for randomized tie-breaking
+ * @param count Number of candidates tied for best so far, including the current one (≥ 1)
+ * @return true with probability 1/count
+ *
+ * Reservoir sampling with a reservoir of size one — Algorithm R (Wikipedia, "Reservoir
+ * sampling"): for the i-th stream item draw `randomInteger(1, i)` and keep it iff the draw is 1,
+ * i.e. with probability 1/i. Passing the running tie count (incremented for the current
+ * candidate) thus leaves every tied candidate equally likely to be the one finally kept. Used by
+ * the Viterbi, BCJR, and standard-array tie-breaks.
+ *
+ * @code{.cpp}
+ * if (metric < best) { best = metric; choice = cand; ties = 1; }
+ * else if (metric == best && details::reservoir_accept(++ties)) choice = cand;
+ * @endcode
+ */
+inline bool reservoir_accept(size_t count) {
+    return std::uniform_int_distribution<size_t>(1, count)(gen()) == 1;
+}
+
+/**
  * @brief Constexpr floor function
  * @param x Floating-point value
  * @return Floor of x (largest integer ≤ x)

@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.1
+ * @version 2.3.0
  * @date 2026
  *
  * @copyright
@@ -19,7 +19,7 @@
 #include <bit>
 
 #include "code_bounds.hpp"
-#include "trellises.hpp"
+#include "graphs.hpp"
 /*
 // transitive
 #include <algorithm>
@@ -55,6 +55,13 @@
 */
 
 #define BOLD(x) "\033[1m" x "\033[0m"
+
+// Docu note: default cap on the number of belief-propagation iterations. It is the default
+// value of the max_iterations parameter on the base-class dec_BP virtuals in Code, hence also the
+// cap used when decoding through Dec with method_t::BP. Override with -DBP_MAX_ITERATIONS=<value>.
+#ifndef BP_MAX_ITERATIONS
+#define BP_MAX_ITERATIONS 100
+#endif
 
 namespace CECCO {
 
@@ -161,34 +168,6 @@ class Code {
     virtual Vector<T> dec_Viterbi(const Vector<T>&, const std::string& = "") const {
         throw std::logic_error("Viterbi decoding not supported for this code!");
     }
-    // Documentation note: soft-input decoders take [T:F_p]·(p−1) channel LLRs per code symbol,
-    // coordinate blocks in as_vector()/DEMUX order (highest level of the construction tower
-    // first), cf. details::symbol_costs_from_llrs in trellises.hpp; for binary codes one LLR
-    // per bit.
-    virtual Vector<T> dec_ML_soft(const Vector<double>&, size_t) const {
-        throw std::logic_error("Soft-input ML decoding not supported for this code!");
-    }
-    virtual Vector<T> dec_Viterbi_soft(const Vector<double>&, const std::string& = "") const {
-        throw std::logic_error("Soft-input Viterbi decoding not supported for this code!");
-    }
-    // Documentation note: pass nullptr as Lambda when only the filename argument is needed. Lambda
-    // receives n·(q−1) a-posteriori LLRs; position i holds L_i(a) = ln(P(c_i=0|r)/P(c_i=a|r)) for
-    // a = 1, …, q−1 by label. For binary codes this is the usual length-n LLR vector.
-    virtual Vector<T> dec_BCJR(const Vector<double>&, Vector<double>* = nullptr, const std::string& = "") const {
-        throw std::logic_error("BCJR decoding not supported for this code!");
-    }
-    virtual Vector<T> dec_ML_soft(const Matrix<double>&, size_t) const {
-        throw std::logic_error("Soft-input ML decoding not supported for this code!");
-    }
-    virtual Vector<T> dec_Viterbi_soft(const Matrix<double>&, const std::string& = "") const {
-        throw std::logic_error("Soft-input Viterbi decoding not supported for this code!");
-    }
-    virtual Vector<T> dec_BCJR(const Matrix<double>&, Vector<double>* = nullptr, const std::string& = "") const {
-        throw std::logic_error("BCJR decoding not supported for this code!");
-    }
-    virtual Vector<T> dec_burst(const Vector<T>&) const {
-        throw std::logic_error("Burst decoding not supported for this code!");
-    }
     virtual Vector<T> dec_recursive(const Vector<T>&) const {
         throw std::logic_error("Recursive decoding not supported for this code!");
     }
@@ -200,6 +179,45 @@ class Code {
     }
     virtual Vector<T> dec_BMA(const Vector<T>&) const {
         throw std::logic_error("Berlekamp-Massey decoding not supported for this code!");
+    }
+    // Docu note: soft-input decoders take an LLR matrix with [T:F_p]·(p−1) rows and one
+    // column per code symbol, coordinate rows in as_vector()/DEMUX order (highest level of the
+    // construction tower first), cf. details::symbol_costs_from_llrs in graphs.hpp; for binary
+    // codes a single row. The Vector<double> overloads are the binary special case.
+    virtual Vector<T> dec_ML_soft(const Vector<double>&, size_t) const {
+        throw std::logic_error("Soft-input ML decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_ML_soft(const Matrix<double>&, size_t) const {
+        throw std::logic_error("Soft-input ML decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_Viterbi_soft(const Vector<double>&, const std::string& = "") const {
+        throw std::logic_error("Soft-input Viterbi decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_Viterbi_soft(const Matrix<double>&, const std::string& = "") const {
+        throw std::logic_error("Soft-input Viterbi decoding not supported for this code!");
+    }
+    // Docu note: pass nullptr as Lambda when only the filename argument is needed. Lambda
+    // receives the (q−1)×n a-posteriori LLR matrix; entry (a−1, i) holds L_i(a) =
+    // ln(P(c_i=0|r)/P(c_i=a|r)) for a = 1, …, q−1 by label. For binary codes this is a single row.
+    virtual Vector<T> dec_BCJR(const Vector<double>&, Matrix<double>* = nullptr, const std::string& = "") const {
+        throw std::logic_error("BCJR decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_BCJR(const Matrix<double>&, Matrix<double>* = nullptr, const std::string& = "") const {
+        throw std::logic_error("BCJR decoding not supported for this code!");
+    }
+    // Docu note: belief propagation runs exact log-domain sum-product on the Tanner graph
+    // (via details::max_star), not min-sum or any other approximation. With max_iterations = 0 it
+    // returns the intrinsic (channel-only) hard decision and posterior LLRs.
+    // Docu note: the max_iterations default BP_MAX_ITERATIONS (defined at the top of this
+    // file) lives only on these base virtuals. Virtual default arguments are bound from the static
+    // type of the call, so this is the value Dec uses, as it decodes through a Code reference.
+    virtual Vector<T> dec_BP(const Vector<double>&, size_t = BP_MAX_ITERATIONS, Matrix<double>* = nullptr,
+                             const std::string& = "", size_t* = nullptr) const {
+        throw std::logic_error("Belief-propagation decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_BP(const Matrix<double>&, size_t = BP_MAX_ITERATIONS, Matrix<double>* = nullptr,
+                             const std::string& = "", size_t* = nullptr) const {
+        throw std::logic_error("Belief-propagation decoding not supported for this code!");
     }
 #ifdef CECCO_ERASURE_SUPPORT
     virtual Vector<T> dec_BD_EE(const Vector<T>&) const {
@@ -338,7 +356,7 @@ class LinearCode : public Code<T> {
     // expose base field (used by the extend() factories)
     using FIELD = T;
 
-    // NOTE for documentation: X is interpreted as generator matrix G if it has k rows, or as
+    // Docu note: X is interpreted as generator matrix G if it has k rows, or as
     // parity-check matrix H if it has n-k rows. If k == n-k, the ambiguity is resolved in favor
     // of G; callers who mean H must pass the dual code's generator instead.
     LinearCode(size_t n, size_t k, const Matrix<T>& X) : Code<T>(n), k(k), MI(k, k) {
@@ -416,7 +434,6 @@ class LinearCode : public Code<T> {
           codewords(other.codewords),
           standard_array(other.standard_array),
           tainted(other.tainted),
-          tainted_burst(other.tainted_burst),
           Meggitt_table(other.Meggitt_table),
 #ifdef CECCO_ERASURE_SUPPORT
           punctured_codes_BD(other.punctured_codes_BD),
@@ -424,7 +441,8 @@ class LinearCode : public Code<T> {
 #endif
           polynomial(other.polynomial),
           gamma(other.gamma),
-          minimal_trellis(other.minimal_trellis) {
+          minimal_trellis(other.minimal_trellis),
+          tanner_graph(other.tanner_graph) {
     }
 
     LinearCode(LinearCode&& other)
@@ -440,7 +458,6 @@ class LinearCode : public Code<T> {
           codewords(std::move(other.codewords)),
           standard_array(std::move(other.standard_array)),
           tainted(std::move(other.tainted)),
-          tainted_burst(std::move(other.tainted_burst)),
           Meggitt_table(std::move(other.Meggitt_table)),
 #ifdef CECCO_ERASURE_SUPPORT
           punctured_codes_BD(std::move(other.punctured_codes_BD)),
@@ -448,7 +465,8 @@ class LinearCode : public Code<T> {
 #endif
           polynomial(std::move(other.polynomial)),
           gamma(std::move(other.gamma)),
-          minimal_trellis(std::move(other.minimal_trellis)) {
+          minimal_trellis(std::move(other.minimal_trellis)),
+          tanner_graph(std::move(other.tanner_graph)) {
     }
 
     LinearCode& operator=(const LinearCode& other) {
@@ -465,7 +483,6 @@ class LinearCode : public Code<T> {
             codewords = other.codewords;
             standard_array = other.standard_array;
             tainted = other.tainted;
-            tainted_burst = other.tainted_burst;
             Meggitt_table = other.Meggitt_table;
 #ifdef CECCO_ERASURE_SUPPORT
             punctured_codes_BD = other.punctured_codes_BD;
@@ -474,6 +491,7 @@ class LinearCode : public Code<T> {
             polynomial = other.polynomial;
             gamma = other.gamma;
             minimal_trellis = other.minimal_trellis;
+            tanner_graph = other.tanner_graph;
         }
         return *this;
     }
@@ -492,7 +510,6 @@ class LinearCode : public Code<T> {
             codewords = std::move(other.codewords);
             standard_array = std::move(other.standard_array);
             tainted = std::move(other.tainted);
-            tainted_burst = std::move(other.tainted_burst);
             Meggitt_table = std::move(other.Meggitt_table);
 #ifdef CECCO_ERASURE_SUPPORT
             punctured_codes_BD = std::move(other.punctured_codes_BD);
@@ -501,6 +518,7 @@ class LinearCode : public Code<T> {
             polynomial = std::move(other.polynomial);
             gamma = std::move(other.gamma);
             minimal_trellis = std::move(other.minimal_trellis);
+            tanner_graph = std::move(other.tanner_graph);
         }
         return *this;
     }
@@ -616,7 +634,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    // Documentation note: weight enumerator of the p-ary image code (length n·[T:F_p], dimension
+    // Docu note: weight enumerator of the p-ary image code (length n·[T:F_p], dimension
     // k·[T:F_p] over F_p, p the characteristic), i.e. codeword weights counted in prime-field
     // coordinates of the as_vector()/DEMUX expansion. For codes over prime fields image and code
     // coincide.
@@ -691,7 +709,7 @@ class LinearCode : public Code<T> {
             return res;
     }
 
-    // Documentation note: union-Bhattacharyya bound on ML decoding for transmission of the p-ary
+    // Docu note: union-Bhattacharyya bound on ML decoding for transmission of the p-ary
     // image (cf. DEMUX/as_vector()) over a channel with prime-field input, gamma e.g. from
     // BI_AWGN::get_Bhattacharyya_param(). For codes over prime fields this is the classical
     // symbol-level bound.
@@ -754,17 +772,13 @@ class LinearCode : public Code<T> {
             try {
                 standard_array.emplace(std::vector<Vector<T>>(nof_cosets));
                 tainted.emplace(std::vector<bool>(nof_cosets, false));
-                tainted_burst.emplace(std::vector<bool>(nof_cosets, false));
             } catch (const std::bad_alloc& e) {
                 std::cerr << "Memory allocation failed, standard array would be too large!" << std::endl;
                 throw e;
             }
 
             std::vector<size_t> leader_wH(standard_array.value().size(), std::numeric_limits<size_t>::max());
-            std::vector<size_t> leader_cyclic_burst_length(standard_array.value().size(),
-                                                           std::numeric_limits<size_t>::max());
             std::vector<size_t> leader_tie_count(standard_array.value().size(), 0);
-            std::uniform_real_distribution<double> uniform(0.0, 1.0);
 
             for (size_t wt = 0; wt <= this->n; ++wt) {
                 std::vector<bool> mask(this->n, false);
@@ -790,7 +804,6 @@ class LinearCode : public Code<T> {
                             standard_array.value()[i] = v;
 
                             leader_wH[i] = wt;
-                            leader_cyclic_burst_length[i] = cyclic_burst_length(v);
                             leader_tie_count[i] = 1;
 
                             ++count;
@@ -798,14 +811,8 @@ class LinearCode : public Code<T> {
                         } else {
                             if (wt == leader_wH[i]) {
                                 tainted.value()[i] = true;
-                                ++leader_tie_count[i];
-                                if (uniform(gen()) < 1.0 / leader_tie_count[i]) {
+                                if (details::reservoir_accept(++leader_tie_count[i])) {
                                     standard_array.value()[i] = v;
-                                    leader_cyclic_burst_length[i] = cyclic_burst_length(v);
-                                }
-                                if (!tainted_burst.value()[i]) {
-                                    const size_t cbl = cyclic_burst_length(v);
-                                    if (cbl == leader_cyclic_burst_length[i]) tainted_burst.value()[i] = true;
                                 }
                             }
                         }
@@ -861,6 +868,7 @@ class LinearCode : public Code<T> {
 
                 for (size_t wt = 1; wt <= t; ++wt) {
                     std::vector<bool> mask(n, false);
+                    // Docu note: we trap only error patterns with nonzero first component
                     std::fill(mask.begin(), mask.begin() + wt, true);
 
                     do {
@@ -1527,31 +1535,6 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_burst(const Vector<T>& r) const override {
-        if constexpr (!FiniteFieldType<T>) {
-            throw std::logic_error("Burst decoding only available for codes over finite fields!");
-        } else {
-#ifdef CECCO_ERASURE_SUPPORT
-            if (LinearCode<T>::erasures_present(r))
-                throw std::invalid_argument("Trying to correct erasures with a burst decoder!");
-#endif
-            validate_length(r);
-
-            if (k == 0) return Vector<T>(this->n);
-
-            get_standard_array();
-            const auto s = r * HT;  // calculate syndrome...
-            if (s.is_zero()) return r;
-            const size_t i = s.as_integer();  // ... and interpret it as q-ary number
-            if (tainted_burst.value()[i]) {   // decoding failure
-                throw decoding_failure(
-                    "Linear code burst error decoder failed, coset of syndrome empty or tainted (ambiguous leader)!");
-            } else {  // correct decoding or decoding error
-                return r - standard_array.value()[i];
-            }
-        }
-    }
-
     virtual Vector<T> dec_Meggitt(const Vector<T>& r) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Meggitt BD decoding only available for codes over finite fields!");
@@ -1614,8 +1597,20 @@ class LinearCode : public Code<T> {
     virtual Vector<T> dec_Viterbi_soft(const Vector<double>& llrs, const std::string& filename = "") const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Soft-input Viterbi decoding only available for codes over finite fields!");
+        } else if constexpr (T::get_size() != 2) {
+            throw std::logic_error(
+                "Soft-input Viterbi vector decoding only available for binary codes; use the "
+                "Matrix<double> overload!");
         } else {
-            validate_length_soft(llrs);
+            return dec_Viterbi_soft(Matrix<double>(llrs), filename);
+        }
+    }
+
+    virtual Vector<T> dec_Viterbi_soft(const Matrix<double>& llrs, const std::string& filename = "") const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Soft-input Viterbi decoding only available for codes over finite fields!");
+        } else {
+            validate_length(llrs);
             if (!filename.empty() && T::get_size() > 2)
                 throw std::invalid_argument("Soft-input Viterbi trellis TikZ export only supported for binary codes!");
             if (k == 0) return Vector<T>(this->n);
@@ -1624,80 +1619,48 @@ class LinearCode : public Code<T> {
             typename Trellis<T>::template Viterbi_Workspace<double> ws(Tr);
             ws.calculate_edge_costs(Tr, llrs);
             if (!filename.empty()) ws.v.emplace(llrs);
-            auto c_est = viterbi_forward_pass_and_traceback<double>(Tr, ws, filename);
-            return c_est;
+            return viterbi_forward_pass_and_traceback<double>(Tr, ws, filename);
         }
     }
 
-    virtual Vector<T> dec_Viterbi_soft(const Matrix<double>& llrs, const std::string& filename = "") const override {
+    // Docu note: pass nullptr as Lambda when only the filename argument is needed.
+    virtual Vector<T> dec_BCJR(const Vector<double>& llrs, Matrix<double>* Lambda = nullptr,
+                               const std::string& filename = "") const override {
         if constexpr (!FiniteFieldType<T>) {
-            throw std::logic_error("Soft-input Viterbi decoding only available for codes over finite fields!");
+            throw std::logic_error("BCJR decoding only available for codes over finite fields!");
+        } else if constexpr (T::get_size() != 2) {
+            throw std::logic_error(
+                "Soft-input BCJR vector decoding only available for binary codes; use the Matrix<double> overload!");
         } else {
-            return dec_Viterbi_soft(flatten_llrs(llrs), filename);
+            return bcjr_decode(Matrix<double>(llrs), Lambda, filename);
         }
     }
 
-    // Documentation note: pass nullptr as Lambda when only the filename argument is needed.
-    virtual Vector<T> dec_BCJR(const Vector<double>& llrs, Vector<double>* Lambda = nullptr,
+    virtual Vector<T> dec_BCJR(const Matrix<double>& llrs, Matrix<double>* Lambda = nullptr,
                                const std::string& filename = "") const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("BCJR decoding only available for codes over finite fields!");
         } else {
-            validate_length_soft(llrs);
-            if (!filename.empty() && T::get_size() > 2)
-                throw std::invalid_argument("BCJR trellis TikZ export only supported for binary codes!");
-
-            constexpr size_t q = T::get_size();
-            const size_t n = this->n;
-
-            if (k == 0) {
-                if (Lambda != nullptr) *Lambda = Vector<double>(n * (q - 1), std::numeric_limits<double>::infinity());
-                return Vector<T>(n);
-            }
-
-            const auto& Tr = get_minimal_trellis();
-            typename Trellis<T>::BCJR_Workspace ws(Tr);
-            ws.calculate_edge_costs(Tr, llrs);
-            auto Lambda_local = bcjr_forward_backward(Tr, ws);
-            if constexpr (T::get_size() == 2) {
-                if (!filename.empty()) {
-                    ws.v.emplace(llrs);
-                    Tr.export_as_tikz(filename, &ws);
-                }
-            }
-            if (Lambda != nullptr) *Lambda = Lambda_local;
-
-            Vector<T> c_est(n);
-            for (size_t i = 0; i < n; ++i) {
-                size_t label = 0;
-                double min_LLR = 0.0;
-                for (size_t a = 1; a < q; ++a) {
-                    const double L = Lambda_local[i * (q - 1) + (a - 1)];
-                    if (L < min_LLR) {
-                        min_LLR = L;
-                        label = a;
-                    }
-                }
-                c_est.set_component(i, T(label));
-            }
-            return c_est;
-        }
-    }
-
-    virtual Vector<T> dec_BCJR(const Matrix<double>& llrs, Vector<double>* Lambda = nullptr,
-                               const std::string& filename = "") const override {
-        if constexpr (!FiniteFieldType<T>) {
-            throw std::logic_error("BCJR decoding only available for codes over finite fields!");
-        } else {
-            return dec_BCJR(flatten_llrs(llrs), Lambda, filename);
+            return bcjr_decode(llrs, Lambda, filename);
         }
     }
 
     virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t cache_limit) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Soft-input ML decoding only available for codes over finite fields!");
+        } else if constexpr (T::get_size() != 2) {
+            throw std::logic_error(
+                "Soft-input ML vector decoding only available for binary codes; use the Matrix<double> overload!");
         } else {
-            validate_length_soft(llrs);
+            return dec_ML_soft(Matrix<double>(llrs), cache_limit);
+        }
+    }
+
+    virtual Vector<T> dec_ML_soft(const Matrix<double>& llrs, size_t cache_limit) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Soft-input ML decoding only available for codes over finite fields!");
+        } else {
+            validate_length(llrs);
 
             if (k == 0) return Vector<T>(this->n);
 
@@ -1707,6 +1670,7 @@ class LinearCode : public Code<T> {
 
             Vector<T> c_est;
             double best = std::numeric_limits<double>::max();
+            uint16_t ties = 1;
 
             if (this->get_size() <= cache_limit) {
                 codewords.call_once([this] {
@@ -1720,6 +1684,9 @@ class LinearCode : public Code<T> {
                     if (val < best) {
                         c_est = *it;
                         best = val;
+                        ties = 1;
+                    } else if (val == best) {
+                        if (details::reservoir_accept(++ties)) c_est = *it;
                     }
                 }
             } else {
@@ -1729,6 +1696,9 @@ class LinearCode : public Code<T> {
                     if (val < best) {
                         c_est = *it;
                         best = val;
+                        ties = 1;
+                    } else if (val == best) {
+                        if (details::reservoir_accept(++ties)) c_est = *it;
                     }
                 }
             }
@@ -1737,11 +1707,42 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_ML_soft(const Matrix<double>& llrs, size_t cache_limit) const override {
+    const TannerGraph<T>& get_tanner_graph() const
+        requires FiniteFieldType<T>
+    {
+        tanner_graph.call_once([this] {
+            if (tanner_graph.has_value()) return;
+            const size_t n = this->n;
+            const size_t redundancy = n - k;
+            TannerGraph<T> g(n);
+            for (size_t i = 0; i < redundancy; ++i)
+                for (size_t j = 0; j < n; ++j)
+                    if (!HT(j, i).is_zero()) g.add_edge(i, static_cast<uint32_t>(j), HT(j, i));
+            tanner_graph.emplace(std::move(g));
+        });
+        return tanner_graph.value();
+    }
+
+    virtual Vector<T> dec_BP(const Vector<double>& llrs, size_t max_iterations = BP_MAX_ITERATIONS,
+                             Matrix<double>* Lambda = nullptr, const std::string& filename = "",
+                             size_t* nof_iterations = nullptr) const override {
         if constexpr (!FiniteFieldType<T>) {
-            throw std::logic_error("Soft-input ML decoding only available for codes over finite fields!");
+            throw std::logic_error("Belief-propagation decoding only available for codes over finite fields!");
+        } else if constexpr (T::get_size() != 2) {
+            throw std::logic_error(
+                "Soft-input BP vector decoding only available for binary codes; use the Matrix<double> overload!");
         } else {
-            return dec_ML_soft(flatten_llrs(llrs), cache_limit);
+            return bp_decode(Matrix<double>(llrs), max_iterations, Lambda, filename, nof_iterations);
+        }
+    }
+
+    virtual Vector<T> dec_BP(const Matrix<double>& llrs, size_t max_iterations = BP_MAX_ITERATIONS,
+                             Matrix<double>* Lambda = nullptr, const std::string& filename = "",
+                             size_t* nof_iterations = nullptr) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Belief-propagation decoding only available for codes over finite fields!");
+        } else {
+            return bp_decode(llrs, max_iterations, Lambda, filename, nof_iterations);
         }
     }
 
@@ -1955,13 +1956,13 @@ class LinearCode : public Code<T> {
             throw std::invalid_argument(std::string("Received vector length must be ") + std::to_string(this->n));
     }
 
-    void validate_length_soft(const Vector<double>& llrs) const
+    void validate_length(const Matrix<double>& llrs) const
         requires FiniteFieldType<T>
     {
-        constexpr size_t llrs_per_symbol = details::degree_over_prime_v<T> * (T::get_characteristic() - 1);
-        if (llrs.get_n() != llrs_per_symbol * this->n)
-            throw std::invalid_argument(std::string("LLR vector length must be ") +
-                                        std::to_string(llrs_per_symbol * this->n));
+        constexpr size_t rows = details::degree_over_prime_v<T> * (T::get_characteristic() - 1);
+        if (llrs.get_m() != rows || llrs.get_n() != this->n)
+            throw std::invalid_argument("LLR matrix must have " + std::to_string(rows) + " rows and " +
+                                        std::to_string(this->n) + " columns");
     }
 
     size_t k;
@@ -1975,7 +1976,6 @@ class LinearCode : public Code<T> {
     mutable details::OnceCache<std::vector<Vector<T>>> codewords;
     mutable details::OnceCache<std::vector<Vector<T>>> standard_array;
     mutable details::OnceCache<std::vector<bool>> tainted;
-    mutable details::OnceCache<std::vector<bool>> tainted_burst;
     mutable details::OnceCache<std::unordered_map<size_t, Vector<T>>> Meggitt_table;
 #ifdef CECCO_ERASURE_SUPPORT
     mutable details::OnceCache<std::vector<std::optional<LinearCode<T>>>> punctured_codes_BD;
@@ -1984,6 +1984,7 @@ class LinearCode : public Code<T> {
     mutable details::OnceCache<bool> polynomial;
     mutable details::OnceCache<Polynomial<T>> gamma;
     mutable details::OnceCache<Trellis<T>> minimal_trellis;
+    mutable details::OnceCache<TannerGraph<T>> tanner_graph;
 
    private:
     explicit LinearCode(Matrix<T> G) : LinearCode(G.get_n(), G.get_m(), G) {}
@@ -2017,32 +2018,10 @@ class LinearCode : public Code<T> {
         return Gp.get_submatrix(0, 0, k, n);
     }
 
-    // Documentation note: column j of the LLR matrix holds the [T:F_p]·(p−1) LLRs of code symbol j,
-    // rows in as_vector() coordinate order (highest level of the construction tower first); for
-    // characteristic 2 this is the LLRCalculator output on the DEMUXed/as_matrix'ed codeword.
-    Vector<double> flatten_llrs(const Matrix<double>& llrs) const
-        requires FiniteFieldType<T>
-    {
-        constexpr size_t rows = details::degree_over_prime_v<T> * (T::get_characteristic() - 1);
-     
-        const size_t n = this->n;
-
-        if (llrs.get_m() != rows || llrs.get_n() != n)
-            throw std::invalid_argument("LLR matrix must have " + std::to_string(rows) + " rows and " +
-                                        std::to_string(n) + " columns");
-
-        Vector<double> res(rows * n);
-        for (size_t j = 0; j < n; ++j)
-            for (size_t i = 0; i < rows; ++i) res.set_component(j * rows + i, llrs(i, j));
-        return res;
-    }
-
     template <typename cost_t>
     Vector<T> viterbi_forward_pass_and_traceback(const Trellis<T>& Tr,
                                                  typename Trellis<T>::template Viterbi_Workspace<cost_t>& ws,
                                                  const std::string& filename = "") const {
-        std::uniform_real_distribution<double> uniform(0.0, 1.0);
-
         const size_t n = this->n;
         using ws_t = typename Trellis<T>::template Viterbi_Workspace<cost_t>;
 
@@ -2068,13 +2047,12 @@ class LinearCode : public Code<T> {
                     ws.backptrs[s + 1][e.to_id] = &e;
                     ws.tie_counts[e.to_id] = 1;
                 } else if (cost == ws.path_costs_curr[e.to_id]) {
-                    ++ws.tie_counts[e.to_id];
-                    if (uniform(gen()) < 1.0 / ws.tie_counts[e.to_id]) ws.backptrs[s + 1][e.to_id] = &e;
+                    if (details::reservoir_accept(++ws.tie_counts[e.to_id])) ws.backptrs[s + 1][e.to_id] = &e;
                 }
             }
             std::swap(ws.path_costs_prev, ws.path_costs_curr);
             if constexpr (T::get_size() <= 64) {
-                if (file.is_open()) Tr.tikz_picture(file, &ws, s + 1);
+                if (!filename.empty()) Tr.tikz_picture(file, &ws, s + 1);
             }
         }
 
@@ -2090,8 +2068,7 @@ class LinearCode : public Code<T> {
                 v = u;
                 sink_ties = 1;
             } else if (c == best) {
-                ++sink_ties;
-                if (uniform(gen()) < 1.0 / sink_ties) v = u;
+                if (details::reservoir_accept(++sink_ties)) v = u;
             }
         }
 
@@ -2104,26 +2081,19 @@ class LinearCode : public Code<T> {
         return c_est;
     }
 
-    Vector<double> bcjr_forward_backward(const Trellis<T>& Tr, typename Trellis<T>::BCJR_Workspace& ws) const
+    Matrix<double> bcjr_forward_backward(const Trellis<T>& Tr, typename Trellis<T>::BCJR_Workspace& ws) const
         requires FiniteFieldType<T>
     {
         constexpr double neg_inf = -std::numeric_limits<double>::infinity();
         constexpr size_t q = T::get_size();
         const size_t n = this->n;
 
-        auto max_star = [](double a, double b) noexcept {
-            if (a == neg_inf) return b;
-            if (b == neg_inf) return a;
-            const double d = std::abs(a - b);
-            return std::max(a, b) + ((d > 500.0) ? 0.0 : std::log(1.0 + std::exp(-d)));
-        };
-
         ws.alpha[0][0] = 0.0;
         for (size_t s = 0; s < n; ++s) {
             for (size_t j = 0; j < Tr.E[s].size(); ++j) {
                 const auto& e = Tr.E[s][j];
                 const double val = ws.alpha[s][e.from_id] - ws.edge_costs[s][j];
-                ws.alpha[s + 1][e.to_id] = max_star(ws.alpha[s + 1][e.to_id], val);
+                ws.alpha[s + 1][e.to_id] = details::max_star(ws.alpha[s + 1][e.to_id], val);
             }
         }
 
@@ -2132,11 +2102,11 @@ class LinearCode : public Code<T> {
             for (size_t j = 0; j < Tr.E[s - 1].size(); ++j) {
                 const auto& e = Tr.E[s - 1][j];
                 const double val = ws.beta[s][e.to_id] - ws.edge_costs[s - 1][j];
-                ws.beta[s - 1][e.from_id] = max_star(ws.beta[s - 1][e.from_id], val);
+                ws.beta[s - 1][e.from_id] = details::max_star(ws.beta[s - 1][e.from_id], val);
             }
         }
 
-        Vector<double> res(n * (q - 1));
+        Matrix<double> res(q - 1, n);
         std::array<double, q> Lambda;
         for (size_t s = 0; s < n; ++s) {
             Lambda.fill(neg_inf);
@@ -2144,12 +2114,195 @@ class LinearCode : public Code<T> {
                 const auto& e = Tr.E[s][j];
                 const double val = ws.alpha[s][e.from_id] - ws.edge_costs[s][j] + ws.beta[s + 1][e.to_id];
                 const size_t a = e.value.get_label();
-                Lambda[a] = max_star(Lambda[a], val);
+                Lambda[a] = details::max_star(Lambda[a], val);
             }
-            for (size_t a = 1; a < q; ++a) res.set_component(s * (q - 1) + (a - 1), Lambda[0] - Lambda[a]);
+            for (size_t a = 1; a < q; ++a) res.set_component(a - 1, s, Lambda[0] - Lambda[a]);
         }
 
         return res;
+    }
+
+    Vector<T> bcjr_decode(const Matrix<double>& llrs, Matrix<double>* Lambda, const std::string& filename) const
+        requires FiniteFieldType<T>
+    {
+        validate_length(llrs);
+        if (!filename.empty() && T::get_size() > 2)
+            throw std::invalid_argument("BCJR trellis TikZ export only supported for binary codes!");
+
+        constexpr size_t q = T::get_size();
+        const size_t n = this->n;
+
+        if (k == 0) {
+            if (Lambda != nullptr) *Lambda = Matrix<double>(q - 1, n, std::numeric_limits<double>::infinity());
+            return Vector<T>(n);
+        }
+
+        const auto& Tr = get_minimal_trellis();
+        typename Trellis<T>::BCJR_Workspace ws(Tr);
+        ws.calculate_edge_costs(Tr, llrs);
+        const Matrix<double> Lambda_local = bcjr_forward_backward(Tr, ws);
+        if constexpr (T::get_size() == 2) {
+            if (!filename.empty()) {
+                ws.v.emplace(llrs);
+                Tr.export_as_tikz(filename, &ws);
+            }
+        }
+        if (Lambda != nullptr) *Lambda = Lambda_local;
+
+        Vector<T> c_est(n);
+        for (size_t i = 0; i < n; ++i) {
+            size_t label = 0;
+            double min_LLR = 0.0;  // the LLR of label 0 is 0 by definition
+            uint16_t ties = 1;
+            for (size_t a = 1; a < q; ++a) {
+                const double L = Lambda_local(a - 1, i);
+                if (L < min_LLR) {
+                    min_LLR = L;
+                    label = a;
+                    ties = 1;
+                } else if (L == min_LLR) {
+                    if (details::reservoir_accept(++ties)) label = a;
+                }
+            }
+            c_est.set_component(i, T(label));
+        }
+        return c_est;
+    }
+
+    Vector<T> bp_decode(const Matrix<double>& llrs, size_t max_iterations, Matrix<double>* Lambda,
+                        const std::string& filename, size_t* nof_iterations) const
+        requires FiniteFieldType<T>
+    {
+        validate_length(llrs);
+        if (!filename.empty() && T::get_size() > 2)
+            throw std::invalid_argument("BP Tanner graph TikZ export only supported for binary codes!");
+
+        constexpr double neg_inf = -std::numeric_limits<double>::infinity();
+        constexpr size_t q = T::get_size();
+        const size_t n = this->n;
+
+        if (k == 0) {
+            if (Lambda != nullptr) *Lambda = Matrix<double>(q - 1, n, std::numeric_limits<double>::infinity());
+            if (nof_iterations != nullptr) *nof_iterations = 0;
+            return Vector<T>(n);
+        }
+
+        const auto& g = get_tanner_graph();
+        typename TannerGraph<T>::BP_Workspace ws(g);
+        ws.calculate_intrinsic(g, llrs);
+
+        std::ofstream file;
+        if constexpr (T::get_size() == 2) {
+            if (!filename.empty()) {
+                ws.v.emplace(llrs);
+                file.open(filename);
+                g.tikz_header(file);
+            }
+        }
+
+        auto conv = [neg_inf](const std::array<double, q>& A, const std::array<double, q>& B) {
+            std::array<double, q> R;
+            R.fill(neg_inf);
+            for (size_t x = 0; x < q; ++x) {
+                if (A[x] == neg_inf) continue;
+                for (size_t y = 0; y < q; ++y) {
+                    if (B[y] == neg_inf) continue;
+                    const size_t t = (T(x) + T(y)).get_label();
+                    R[t] = details::max_star(R[t], A[x] + B[y]);
+                }
+            }
+            return R;
+        };
+
+        auto normalize = [](std::array<double, q>& m) {
+            const double ref = m[0];
+            for (auto& x : m) x -= ref;
+        };
+
+        Vector<T> c_est(n);
+        auto decide = [&](size_t j) {
+            size_t best = 0;
+            double best_val = ws.posterior[j][0];
+            uint16_t ties = 1;
+            for (size_t a = 1; a < q; ++a) {
+                const double val = ws.posterior[j][a];
+                if (val > best_val) {
+                    best_val = val;
+                    best = a;
+                    ties = 1;
+                } else if (val == best_val) {
+                    if (details::reservoir_accept(++ties)) best = a;
+                }
+            }
+            c_est.set_component(j, T(best));
+        };
+
+        for (size_t i = 0; i < g.checks.size(); ++i)
+            for (size_t e = 0; e < g.checks[i].size(); ++e) ws.m_vc[i][e] = ws.intrinsic[g.checks[i][e].var_id];
+
+        // Intrinsic (channel-only) posterior and hard decision; this is the result for max_iterations == 0.
+        for (size_t j = 0; j < n; ++j) {
+            ws.posterior[j] = ws.intrinsic[j];
+            decide(j);
+        }
+
+        if constexpr (T::get_size() == 2) {
+            if (!filename.empty()) g.tikz_picture(file, &ws);
+        }
+
+        std::vector<std::array<double, q>> W, F, B;
+        size_t iter = 0;
+        for (; !(c_est * HT).is_zero() && iter < max_iterations; ++iter) {
+            for (size_t i = 0; i < g.checks.size(); ++i) {
+                const size_t d = g.checks[i].size();
+                W.resize(d);
+                F.resize(d + 1);
+                B.resize(d + 1);
+                for (size_t e = 0; e < d; ++e) {
+                    const T h = g.checks[i][e].value;
+                    W[e].fill(neg_inf);
+                    for (size_t a = 0; a < q; ++a) W[e][(h * T(a)).get_label()] = ws.m_vc[i][e][a];
+                }
+                F[0].fill(neg_inf);
+                F[0][0] = 0.0;
+                for (size_t e = 0; e < d; ++e) F[e + 1] = conv(F[e], W[e]);
+                B[d].fill(neg_inf);
+                B[d][0] = 0.0;
+                for (size_t e = d; e-- > 0;) B[e] = conv(W[e], B[e + 1]);
+                for (size_t e = 0; e < d; ++e) {
+                    const std::array<double, q> excl = conv(F[e], B[e + 1]);
+                    const T h = g.checks[i][e].value;
+                    for (size_t a = 0; a < q; ++a) ws.m_cv[i][e][a] = excl[(-(h * T(a))).get_label()];
+                    normalize(ws.m_cv[i][e]);
+                }
+            }
+
+            for (size_t j = 0; j < n; ++j) {
+                ws.posterior[j] = ws.intrinsic[j];
+                for (const auto& [i, e] : ws.var_edges[j])
+                    for (size_t a = 0; a < q; ++a) ws.posterior[j][a] += ws.m_cv[i][e][a];
+                decide(j);
+                for (const auto& [i, e] : ws.var_edges[j]) {
+                    for (size_t a = 0; a < q; ++a) ws.m_vc[i][e][a] = ws.posterior[j][a] - ws.m_cv[i][e][a];
+                    normalize(ws.m_vc[i][e]);
+                }
+            }
+
+            if constexpr (T::get_size() == 2) {
+                if (!filename.empty()) g.tikz_picture(file, &ws);
+            }
+        }
+
+        if (nof_iterations != nullptr) *nof_iterations = iter;
+
+        if (Lambda != nullptr) {
+            Matrix<double> res(q - 1, n);
+            for (size_t j = 0; j < n; ++j)
+                for (size_t a = 1; a < q; ++a) res.set_component(a - 1, j, ws.posterior[j][0] - ws.posterior[j][a]);
+            *Lambda = std::move(res);
+        }
+
+        return c_est;
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
@@ -2310,22 +2463,11 @@ class UniverseCode : public LinearCode<T> {
         return r;
     }
 
-    Vector<T> dec_burst(const Vector<T>& r) const override {
-        this->validate_length(r);
-#ifdef CECCO_ERASURE_SUPPORT
-        if (LinearCode<T>::erasures_present(r))
-            throw decoding_failure("Universe code burst decoder failed, received vector contains erasures!");
-#endif
-        return r;
-    }
-
 #ifdef CECCO_ERASURE_SUPPORT
     Vector<T> dec_BD_EE(const Vector<T>& r) const override {
         this->validate_length(r);
-#ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r))
             throw decoding_failure("Universe code BD error/erasure decoder failed, received vector contains erasures!");
-#endif
         return r;
     }
     Vector<T> dec_ML_EE(const Vector<T>& r) const override {
@@ -2622,10 +2764,14 @@ class SimplexCode : public LinearCode<T> {
 
         size_t hit = 0;
         double best = -std::numeric_limits<double>::infinity();
+        uint16_t ties = 1;
         for (size_t i = 0; i < y.get_n(); ++i) {
             if (y[i] > best) {
                 best = y[i];
                 hit = i;
+                ties = 1;
+            } else if (y[i] == best) {
+                if (details::reservoir_accept(++ties)) hit = i;
             }
         }
 
@@ -2680,10 +2826,14 @@ class SimplexCode : public LinearCode<T> {
 
         size_t hit = 0;
         double best = -std::numeric_limits<double>::infinity();
+        uint16_t ties = 1;
         for (size_t u = 0; u < y.get_n(); ++u) {
             if (y[u] > best) {
                 best = y[u];
                 hit = u;
+                ties = 1;
+            } else if (y[u] == best) {
+                if (details::reservoir_accept(++ties)) hit = u;
             }
         }
 
@@ -3532,12 +3682,16 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
 
         Vector<Fp<2>> best;
         size_t best_t = std::numeric_limits<size_t>::max();
+        uint16_t ties = 1;
 
         for (auto it = this->cbegin(); it != this->cend(); ++it) {
             const size_t t = dH(*it, r);
             if (t < best_t) {
                 best = *it;
                 best_t = t;
+                ties = 1;
+            } else if (t == best_t) {
+                if (details::reservoir_accept(++ties)) best = *it;
             }
         }
         return best;
@@ -3579,6 +3733,7 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
 
         Vector<Fp<2>> best;
         size_t best_t = std::numeric_limits<size_t>::max();
+        uint16_t ties = 1;
 
         for (auto it = this->cbegin(); it != this->cend(); ++it) {
             size_t t = 0;
@@ -3589,7 +3744,9 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
             if (t < best_t) {
                 best_t = t;
                 best = *it;
-                if (best_t == 0) return best;
+                ties = 1;
+            } else if (t == best_t) {
+                if (details::reservoir_accept(++ties)) best = *it;
             }
         }
 
@@ -3792,7 +3949,7 @@ class RMCode : public LinearCode<Fp<2>> {
         }
     }
 
-    // Documentation note: there is no dec_ML, falls back to LinearCode since dec_recursive is only approximative
+    // Docu note: there is no dec_ML, falls back to LinearCode since dec_recursive is only approximative
     // ML!
 
     Vector<T> dec_recursive(const Vector<T>& r) const override {
@@ -4294,7 +4451,7 @@ class GoppaCode : public AlternantCode<GRSCode<SUPER>> {
         });
     }
 
-    // docu note: these are G multipliers (in literature typically: H multipliers)
+    // Docu note: these are G multipliers (in literature typically: H multipliers)
     static Vector<SUPER> Goppa_multipliers(const Vector<SUPER>& a, const Polynomial<SUPER>& h) {
         const size_t n = a.get_n();
         Vector<SUPER> res(n);
@@ -4584,6 +4741,7 @@ class AugmentedCode : public LinearCode<T> {
 
             if (best_t <= tmax) return best;
 
+            uint16_t ties = 1;
             for (size_t i = 1; i < T::get_size(); ++i) {
                 const T alpha = T(i);
 
@@ -4597,6 +4755,9 @@ class AugmentedCode : public LinearCode<T> {
                 if (t < best_t) {
                     best_t = t;
                     best = std::move(c_est);
+                    ties = 1;
+                } else if (t == best_t) {
+                    if (details::reservoir_accept(++ties)) best = std::move(c_est);
                 }
             }
 
@@ -4653,8 +4814,8 @@ class AugmentedCode : public LinearCode<T> {
             for (size_t j = 0; j < this->n; ++j) {
                 if (!r[j].is_erased() && r[j] != best[j]) ++best_t;
             }
-            if (best_t == 0) return best;
 
+            uint16_t ties = 1;
             for (size_t i = 1; i < T::get_size(); ++i) {
                 const T alpha = T(i);
 
@@ -4666,11 +4827,12 @@ class AugmentedCode : public LinearCode<T> {
                     if (!r[j].is_erased() && r[j] != c_est[j]) ++t;
                 }
 
-                if (t == 0) return c_est;
-
                 if (t < best_t) {
                     best_t = t;
                     best = std::move(c_est);
+                    ties = 1;
+                } else if (t == best_t) {
+                    if (details::reservoir_accept(++ties)) best = std::move(c_est);
                 }
             }
 
@@ -4742,7 +4904,7 @@ auto extend(B&& base) {
     return ExtendedCode<T, D>(std::forward<B>(base));
 }
 
-// docu note: unextend maintains special structure, puncture does not
+// Docu note: unextend maintains special structure, puncture does not
 template <FieldType T, class B>
 B unextend(const ExtendedCode<T, B>& C) {
     return C.get_BaseCode();
@@ -4755,7 +4917,7 @@ auto augment(B&& base, size_t j, const Vector<field_t<B>>& w) {
     return AugmentedCode<T, D>(std::forward<B>(base), j, w);
 }
 
-// docu note: unaugment maintains special structure, expurgate does not
+// Docu note: unaugment maintains special structure, expurgate does not
 template <FieldType T, class B>
 B unaugment(const AugmentedCode<T, B>& C) {
     return C.get_BaseCode();
@@ -4775,7 +4937,7 @@ auto lengthen(B&& base, size_t j, const Vector<field_t<B>>& w) {
     return ExtendedCode<T, AugmentedCode<T, D>>(AugmentedCode<T, D>(std::forward<B>(base), j, w));
 }
 
-// docu note: unlengthen maintains special structure, shorten does not
+// Docu note: unlengthen maintains special structure, shorten does not
 template <FieldType T, class D>
 auto unlengthen(const ExtendedCode<T, AugmentedCode<T, D>>& C) {
     return C.get_BaseCode().get_BaseCode();
@@ -4910,6 +5072,7 @@ enum class method_t {
     Viterbi,
     Viterbi_soft,
     BCJR,
+    BP,
     recursive,
     Meggitt,
     WBA,
@@ -4927,8 +5090,7 @@ enum class method_t {
 template <FieldType T>
 class Dec {
    public:
-    explicit Dec(const Code<T>& C, method_t method = method_t::ML, size_t cache_limit = 10000)
-        : C(C), method(method), cache_limit(cache_limit) {
+    explicit Dec(const Code<T>& C, method_t method = method_t::ML) : C(C), method(method) {
         switch (method) {
             case method_t::BD:
                 dec = [this](const Vector<T>& r) { return this->C.dec_BD(r); };
@@ -4957,6 +5119,8 @@ class Dec {
             case method_t::ML_soft:
             case method_t::Viterbi_soft:
             case method_t::BCJR:
+            case method_t::BP:
+                // Soft-input only; decoded through operator()(Vector<double>) / operator()(Matrix<double>).
                 break;
 #ifdef CECCO_ERASURE_SUPPORT
             case method_t::WBA_EE:
@@ -4993,7 +5157,11 @@ class Dec {
             return C.dec_Viterbi_soft(in);
         else if (method == method_t::BCJR)
             return C.dec_BCJR(in);
-        return C.dec_ML_soft(in, cache_limit);
+        else if (method == method_t::BP)
+            return C.dec_BP(in, bp_max_iterations);
+        else if (method == method_t::ML_soft)
+            return C.dec_ML_soft(in, cache_limit);
+        throw std::logic_error("Vector soft input requires a soft method (Viterbi_soft, BCJR, BP, or ML_soft)!");
     }
 
     Vector<T> operator()(const Matrix<double>& in) const {
@@ -5001,16 +5169,24 @@ class Dec {
             return C.dec_Viterbi_soft(in);
         else if (method == method_t::BCJR)
             return C.dec_BCJR(in);
+        else if (method == method_t::BP)
+            return C.dec_BP(in, bp_max_iterations);
         else if (method == method_t::ML_soft)
             return C.dec_ML_soft(in, cache_limit);
-        throw std::logic_error("Matrix soft input requires a soft method (Viterbi_soft, BCJR, or ML_soft)!");
+        throw std::logic_error("Matrix soft input requires a soft method (Viterbi_soft, BCJR, BP, or ML_soft)!");
     }
+
+    // Docu note: cache_limit (ML_soft) and bp_max_iterations (BP) are method-specific knobs;
+    // both default sensibly and can be overridden after construction via these setters.
+    void set_cache_limit(size_t l) { cache_limit = l; }
+    void set_BP_max_iterations(size_t l) { bp_max_iterations = l; }
 
    private:
     const Code<T>& C;
     std::function<Vector<T>(const Vector<T>&)> dec;
     method_t method;
-    size_t cache_limit;
+    size_t cache_limit = 10000;
+    size_t bp_max_iterations = BP_MAX_ITERATIONS;
 };
 
 template <FiniteFieldType T>

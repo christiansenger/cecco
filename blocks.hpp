@@ -2,7 +2,7 @@
  * @file blocks.hpp
  * @brief Communication system blocks library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.8
+ * @version 2.9.0
  * @date 2026
  *
  * @copyright
@@ -25,8 +25,8 @@
  *   𝔽_{2^m} for the soft-input decoders in codes.hpp.
  * - **Chaining**: `operator>>` for left-to-right block composition.
  *
- * All blocks expose element-wise, vector, and matrix overloads via the @ref CECCO::details::BlockProcessor
- * CRTP base; see its documentation for the canonical chain example.
+ * Most blocks expose element-wise, vector, and matrix overloads via the @ref CECCO::details::BlockProcessor
+ * CRTP base; @ref CECCO::LLRCalculator defines its overloads directly because SDMEC symbols map to LLR vectors.
  *
  * @see @ref CECCO::details::BlockProcessor — CRTP foundation and chain example
  * @see @ref CECCO::SubfieldOf, @ref CECCO::ExtensionOf — concepts behind DEMUX/MUX
@@ -46,6 +46,7 @@
 #include <cmath>
 #include <complex>
 #include <ios>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -196,10 +197,6 @@ using EncoderProcessor = BlockProcessor<T, Fp<2>, std::complex<double>>;
 template <typename T>
 using DecoderProcessor = BlockProcessor<T, std::complex<double>, Fp<2>>;
 
-/** @brief CRTP base for blocks producing log-likelihood ratios from complex symbols. */
-template <typename T>
-using LLRProcessor = BlockProcessor<T, std::complex<double>, double>;
-
 }  // namespace details
 
 /**
@@ -288,11 +285,11 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
     double px;
     std::geometric_distribution<unsigned long long> error_dist;
     unsigned long long error_trials{0};
-    unsigned long long error_failures_before_hit;
+    unsigned long long error_failures_before_hit{0};
 #ifdef CECCO_ERASURE_SUPPORT
     std::geometric_distribution<unsigned long long> erasure_dist;
     unsigned long long erasure_trials{0};
-    unsigned long long erasure_failures_before_hit;
+    unsigned long long erasure_failures_before_hit{0};
 #endif
 };
 
@@ -309,7 +306,9 @@ SDMEC<T>::SDMEC(double pe, double px) : pe(pe), px(px) {
 
     const double p_error_given_not_erased = (px == 1.0) ? 0.0 : pe / (1.0 - px);
     error_dist = std::geometric_distribution<unsigned long long>(p_error_given_not_erased);
-    error_failures_before_hit = error_dist(gen());
+    if (p_error_given_not_erased > 0.0) {
+        error_failures_before_hit = error_dist(gen());
+    }
 #ifdef CECCO_ERASURE_SUPPORT
     erasure_dist = std::geometric_distribution<unsigned long long>(px);
     if (px > 0.0) {
@@ -320,23 +319,25 @@ SDMEC<T>::SDMEC(double pe, double px) : pe(pe), px(px) {
 
 template <FieldType T>
 T SDMEC<T>::operator()(const T& in) {
-    if (error_dist.p() == 0.0 && px == 0.0) return in;
     T res(in);
-    if (error_trials == error_failures_before_hit) {
-        res.randomize_force_change();
-        error_trials = 0;
-        error_failures_before_hit = error_dist(gen());
-    } else {
-        ++error_trials;
+    if (error_dist.p() > 0.0) {
+        if (error_trials == error_failures_before_hit) {
+            res.randomize_force_change();
+            error_trials = 0;
+            error_failures_before_hit = error_dist(gen());
+        } else {
+            ++error_trials;
+        }
     }
 #ifdef CECCO_ERASURE_SUPPORT
-    if (px == 0.0) return res;
-    if (erasure_trials == erasure_failures_before_hit) {
-        res.erase();
-        erasure_trials = 0;
-        erasure_failures_before_hit = erasure_dist(gen());
-    } else {
-        ++erasure_trials;
+    if (px > 0.0) {
+        if (erasure_trials == erasure_failures_before_hit) {
+            res.erase();
+            erasure_trials = 0;
+            erasure_failures_before_hit = erasure_dist(gen());
+        } else {
+            ++erasure_trials;
+        }
     }
 #endif
     return res;
@@ -419,7 +420,7 @@ class BAC : public details::SameTypeProcessor<BAC, Fp<2>> {
      * @brief Construct with flip probability p
      * @param p Probability that 1 → 0, p ∈ [0, 1]
      *
-     * @throws std::out_of_range if p ∉ [0, 1] or 0 < p < 1e−9
+     * @throws std::out_of_range if p ∉ [0, 1]
      *
      * @note p = 0 is the perfect channel (capacity 1); p = 1 makes only 0 transmissible (capacity 0).
      */
@@ -600,7 +601,11 @@ class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
      *
      * For complex signaling with noise on both I and Q the formula is C = log₂(1 + Eb/(2σ²)).
      */
-    double get_capacity() const noexcept { return 1 / 2.0 * std::log2(1 + Eb / get_variance()); }
+    double get_capacity() const noexcept {
+        const double var = get_variance();
+        if (var == 0.0) return 0.0;  // degenerate zero-energy constellation (a = b = 0)
+        return 0.5 * std::log2(1 + Eb / var);
+    }
 
    private:
     const double Eb{};
@@ -803,56 +808,176 @@ class BPSKDemapper : public NRZDemapper {
 };
 
 /**
- * @brief Log-Likelihood Ratio calculator for NRZ-over-AWGN soft demodulation
+ * @brief Log-Likelihood Ratio calculator for soft demodulation
+ * @tparam T Channel symbol field; only relevant for the discrete (SDMEC) model
  *
- * Computes LLR(r) = b·(a − Re(r)) / σ² in nats, where (a, b) are the NRZ constellation
- * parameters and σ² is the AWGN noise variance. Sign convention: positive LLR ⇒ bit 0,
- * negative ⇒ bit 1; magnitude indicates reliability. Output suitable for belief
- * propagation, LDPC, turbo, and other soft-decision decoders.
+ * Turns channel observations into the LLR matrix consumed by the soft-input decoders in
+ * codes.hpp. The channel model is fixed at construction and selected per call by input type:
  *
- * For a code over 𝔽_{2^m}, apply it to the @ref CECCO::DEMUX'ed binary image; the resulting
- * m × n LLR matrix (column j = LLRs of code symbol j, rows in `as_vector()` coordinate order)
- * is accepted directly by the soft-input decoders in codes.hpp.
+ * - **BI-AWGN** (construct from a @ref NRZMapper + @ref AWGN pair or a @ref BI_AWGN): computes
+ *   LLR(r) = b·(a − Re(r)) / σ² in nats from each complex symbol. For a code over 𝔽_{2^m} apply
+ *   it to the @ref CECCO::DEMUX'ed binary image; the resulting m × n matrix (column j = LLRs of
+ *   code symbol j, rows in `as_vector()` coordinate order) is accepted directly by the decoders.
  *
- * Construct from a matching @ref NRZMapper + @ref AWGN pair, or directly from a
- * @ref BI_AWGN. See the @ref BI_AWGN class doc for an end-to-end chain example.
+ * - **SDMEC over a prime field 𝔽_p** (construct from a @ref SDMEC): computes the symbol LLRs
+ *   L_a(r) = ln(P(r|0)/P(r|a)), a = 1, …, p−1, directly from the transition probabilities.
+ *   Scalar field input returns one LLR vector; vector input returns the corresponding LLR matrix.
+ *   Restricted to prime fields, where these symbol LLRs are the decoder coordinates.
+ *
+ * Sign convention: positive LLR ⇒ symbol 0, negative ⇒ the indexed symbol; magnitude is
+ * reliability. See the @ref BI_AWGN class doc for an end-to-end chain example.
  *
  * @see @ref CECCO::NRZDemapper for the hard-decision counterpart
+ * @see @ref CECCO::SDMEC, @ref CECCO::BSC, @ref CECCO::BEC for the discrete channels
  */
-class LLRCalculator : public details::LLRProcessor<LLRCalculator> {
+template <FiniteFieldType T = Fp<2>>
+class LLRCalculator : private details::NonCopyable {
    public:
-    // Bring base class operator() overloads into scope
-    using details::LLRProcessor<LLRCalculator>::operator();
-
     /**
-     * @brief Construct from a matching mapper and channel
+     * @brief Construct a BI-AWGN calculator from a matching mapper and channel
      * @param nrz Source mapper providing (a, b)
-     * @param transmission Channel providing σ
+     * @param transmission Channel providing variance
      */
     LLRCalculator(const NRZMapper& nrz, const AWGN& transmission) noexcept
-        : a(nrz.get_a()), b(nrz.get_b()), sigmasq(std::pow(transmission.get_standard_deviation(), 2.0)) {}
+        : model(channel_model_t::bi_awgn),
+          a(nrz.get_a()),
+          b(nrz.get_b()),
+          sigmasq(std::pow(transmission.get_standard_deviation(), 2.0)),
+          pe(0.0),
+          px(0.0) {}
 
     /**
-     * @brief Construct from a BI-AWGN channel (convenience)
-     * @param bi_awgn Channel providing (a, b) and σ
+     * @brief Construct a BI-AWGN calculator from a BI-AWGN channel (convenience)
+     * @param bi_awgn Channel providing (a, b) and variance
      */
     LLRCalculator(const BI_AWGN& bi_awgn) noexcept
-        : a(bi_awgn.get_encoder().get_a()),
+        : model(channel_model_t::bi_awgn),
+          a(bi_awgn.get_encoder().get_a()),
           b(bi_awgn.get_encoder().get_b()),
-          sigmasq(std::pow(bi_awgn.get_transmission().get_standard_deviation(), 2.0)) {}
+          sigmasq(std::pow(bi_awgn.get_transmission().get_standard_deviation(), 2.0)),
+          pe(0.0),
+          px(0.0) {}
 
     /**
-     * @brief Compute LLR of a received symbol
+     * @brief Construct an SDMEC calculator from a discrete channel
+     * @param channel Symmetric discrete memoryless erasure channel providing pe and px
+     */
+    LLRCalculator(const SDMEC<T>& channel) noexcept
+        requires(T::get_size() == T::get_characteristic())
+        : model(channel_model_t::sdmec), a(0.0), b(0.0), sigmasq(0.0), pe(channel.get_pe()), px(channel.get_px()) {}
+
+    /**
+     * @brief Compute the LLR of a received complex symbol (BI-AWGN model)
      * @param in Received complex symbol
      * @return LLR = b·(a − Re(in)) / σ² in nats; positive ⇒ bit 0, negative ⇒ bit 1
+     * @throws std::logic_error if this calculator was constructed from an SDMEC
      */
-    double operator()(const std::complex<double>& in) noexcept { return b * (a - in.real()) / sigmasq; }
+    double operator()(const std::complex<double>& in) {
+        if (model != channel_model_t::bi_awgn)
+            throw std::logic_error("This LLRCalculator was not constructed for a soft input!");
+        if (sigmasq == 0.0) return 0.0;  // degenerate zero-energy constellation (a = b = 0)
+        return b * (a - in.real()) / sigmasq;
+    }
+
+    /**
+     * @brief Compute LLRs for a received complex word (BI-AWGN model)
+     * @param in Received complex word
+     * @return Vector of binary LLRs
+     * @throws std::logic_error if this calculator was constructed from an SDMEC
+     */
+    Vector<double> operator()(const Vector<std::complex<double>>& in) {
+        Vector<double> llrs(in.get_n());
+        for (size_t i = 0; i < in.get_n(); ++i) llrs.set_component(i, (*this)(in[i]));
+        return llrs;
+    }
+
+    /**
+     * @brief Compute LLRs for a received complex matrix (BI-AWGN model)
+     * @param in Received complex matrix
+     * @return Matrix of binary-image LLRs
+     * @throws std::logic_error if this calculator was constructed from an SDMEC
+     */
+    Matrix<double> operator()(const Matrix<std::complex<double>>& in) {
+        Matrix<double> llrs(in.get_m(), in.get_n());
+        for (size_t i = 0; i < in.get_m(); ++i)
+            for (size_t j = 0; j < in.get_n(); ++j) llrs.set_component(i, j, (*this)(in(i, j)));
+        return llrs;
+    }
+
+    /**
+     * @brief Compute symbol LLRs for one received field symbol (SDMEC model)
+     * @param r Received 𝔽_p symbol, possibly erased
+     * @return Vector with entry a−1 equal to ln(P(r|0)/P(r|a))
+     * @throws std::logic_error if this calculator was constructed from a BI-AWGN channel
+     */
+    Vector<double> operator()(const T& r)
+        requires(T::get_size() == T::get_characteristic())
+    {
+        if (model != channel_model_t::sdmec)
+            throw std::logic_error("This LLRCalculator was not constructed for hard input!");
+
+        constexpr size_t q = T::get_size();
+        Vector<double> llrs(q - 1);
+
+#ifdef CECCO_ERASURE_SUPPORT
+        if (r.is_erased()) return llrs;
+#endif
+
+        const double L = sdmec_reliability();
+        const size_t y = r.get_label();
+        if (y == 0)
+            for (size_t a = 1; a < q; ++a) llrs.set_component(a - 1, L);
+        else
+            llrs.set_component(y - 1, -L);
+
+        return llrs;
+    }
+
+    /**
+     * @brief Compute the symbol-LLR matrix of a received word (SDMEC model)
+     * @param r Received word of 𝔽_p symbols, possibly erased
+     * @return (p−1) × n matrix; entry (a−1, j) = ln(P(r_j|0)/P(r_j|a))
+     * @throws std::logic_error if this calculator was constructed from a BI-AWGN channel
+     */
+    Matrix<double> operator()(const Vector<T>& r)
+        requires(T::get_size() == T::get_characteristic())
+    {
+        constexpr size_t q = T::get_size();
+        const size_t n = r.get_n();
+
+        Matrix<double> llrs(q - 1, n);
+        for (size_t j = 0; j < n; ++j) {
+            const Vector<double> column = (*this)(r[j]);
+            for (size_t a = 1; a < q; ++a) llrs.set_component(a - 1, j, column[a - 1]);
+        }
+        return llrs;
+    }
 
    private:
-    const double a{};        ///< DC offset from mapper
-    const double b{};        ///< Constellation distance from mapper
-    const double sigmasq{};  ///< Noise variance from channel
+    enum class channel_model_t { bi_awgn, sdmec };
+
+    const channel_model_t model;
+    const double a;        ///< DC offset from mapper (BI-AWGN)
+    const double b;        ///< Constellation distance from mapper (BI-AWGN)
+    const double sigmasq;  ///< Noise variance from channel (BI-AWGN)
+    const double pe;       ///< Symbol error probability (SDMEC)
+    const double px;       ///< Symbol erasure probability (SDMEC)
+
+    double sdmec_reliability() const noexcept {
+        if (pe == 0.0) {
+            if (px == 1.0) return 0.0;
+            return std::numeric_limits<double>::infinity();
+        }
+        if (1.0 - pe - px == 0.0) return -std::numeric_limits<double>::infinity();
+        return std::log((1.0 - pe - px) * (static_cast<double>(T::get_size()) - 1.0) / pe);
+    }
 };
+
+LLRCalculator(const NRZMapper&, const AWGN&) -> LLRCalculator<Fp<2>>;
+LLRCalculator(const BI_AWGN&) -> LLRCalculator<Fp<2>>;
+template <FiniteFieldType T>
+    requires(T::get_size() == T::get_characteristic())
+LLRCalculator(const SDMEC<T>&) -> LLRCalculator<T>;
 
 /**
  * @brief Field demultiplexer — expand 𝔽_E elements into 𝔽_S coefficient vectors/matrices

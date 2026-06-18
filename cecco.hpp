@@ -33,7 +33,7 @@ namespace details {}
 #include "helpers.hpp"
 #include "matrices.hpp"
 #include "polynomials.hpp"
-#include "trellises.hpp"
+#include "graphs.hpp"
 #include "vectors.hpp"
 */
 

@@ -1,8 +1,8 @@
 /**
- * @file trellises.hpp
- * @brief Trellis representation for code decoding
+ * @file graphs.hpp
+ * @brief Trellises and Tanner graphs
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.0
+ * @version 2.3.0
  * @date 2026
  *
  * @copyright
@@ -14,15 +14,17 @@
  *
  * @section Description
  *
- * Trellis storage and workspaces used by Viterbi and BCJR decoding. A trellis stores vertices
- * in layers and edges between adjacent layers. Edge labels are field elements; soft decoding
- * workspaces derive their edge costs from channel LLRs of the prime-field coordinates of each
- * symbol. The class also provides trellis products, segment merging, text output, and TikZ
- * export for finite fields.
+ * Graph structures and decoding workspaces used by the decoders in `codes.hpp`. A trellis stores
+ * vertices in layers and field-labelled edges between adjacent layers; its nested workspaces back
+ * Viterbi and BCJR decoding, and it also provides trellis products, segment merging, text output, and
+ * TikZ export. A Tanner graph is the bipartite variable-/check-node graph of a parity-check matrix; its
+ * nested workspace backs sum-product (belief propagation) decoding. Soft workspaces derive their costs
+ * from channel LLRs of the prime-field coordinates of each symbol, see
+ * @ref CECCO::details::symbol_costs_from_llrs.
  */
 
-#ifndef TRELLISES_HPP
-#define TRELLISES_HPP
+#ifndef GRAPHS_HPP
+#define GRAPHS_HPP
 
 #include <variant>
 
@@ -67,7 +69,7 @@ namespace details {
 template <FieldType T>
 struct Vertex {
     /// @brief Construct a vertex with layer-local id `id`
-    explicit Vertex(uint32_t id) noexcept;
+    explicit Vertex(uint32_t id) noexcept : id(id) {}
 
     /// @brief Layer-local vertex id
     uint32_t id;
@@ -87,7 +89,7 @@ struct Edge {
      * @param to_id Target vertex id in layer `s + 1`
      * @param value Field label carried by the edge
      */
-    Edge(uint32_t from_id, uint32_t to_id, T value);
+    Edge(uint32_t from_id, uint32_t to_id, T value) : from_id(from_id), to_id(to_id), value(value) {}
 
     /// @brief Source vertex id
     uint32_t from_id;
@@ -98,28 +100,51 @@ struct Edge {
 };
 
 /**
+ * @brief Edge from a check node to a variable node in a Tanner graph
+ *
+ * @tparam T Field type used for edge labels
+ */
+template <FieldType T>
+struct CheckEdge {
+    /**
+     * @brief Construct an edge to variable node `var_id` with label `value`
+     *
+     * @param var_id Incident variable-node id
+     * @param value Parity-check coefficient carried by the edge
+     */
+    CheckEdge(uint32_t var_id, T value) : var_id(var_id), value(value) {}
+
+    /// @brief Incident variable-node id
+    uint32_t var_id;
+    /// @brief Parity-check coefficient (label)
+    T value;
+};
+
+/**
  * @brief Per-segment symbol costs from prime-field channel LLRs
  *
  * @tparam T Finite field of the trellis edge labels
- * @param llrs Channel LLRs, [T:𝔽_p]·(p−1) consecutive values per trellis segment
- * @param s Segment index
+ * @param llrs Channel LLR matrix with [T:𝔽_p]·(p−1) rows; column s holds the LLRs of segment s
+ * @param s Segment (column) index
  * @return Cost of every symbol of T, indexed by label
  *
  * A symbol is transmitted as its 𝔽_p coordinate vector over [T:𝔽_p] uses of a p-ary-input
  * channel, where p is the characteristic. Per channel use the soft input consists of the p−1
  * LLRs ln(P(r|0)/P(r|b)), b = 1, …, p−1. The channel uses are independent, so the cost of a
  * symbol — its LLR relative to the zero element — is the sum of the LLRs selected by its
- * nonzero coordinates. The LLR blocks follow the coordinate order of `as_vector()` and
+ * nonzero coordinates. The matrix rows follow the coordinate order of `as_vector()` and
  * @ref CECCO::DEMUX (highest level of the construction tower first), while labels encode the
  * coordinates as base-p digits low-to-high, hence the digit decomposition runs through the
- * per-segment LLR slots in reverse. For p = 2 this is one LLR per coordinate as produced by
- * @ref CECCO::LLRCalculator.
+ * column's rows in reverse. For p = 2 this is one LLR per coordinate as produced by
+ * @ref CECCO::LLRCalculator. Non-finite LLRs (e.g. from a perfect channel) are clamped to ±1e6
+ * so the soft-input decoders never see ±∞.
  */
 template <FiniteFieldType T>
-std::array<double, T::get_size()> symbol_costs_from_llrs(const Vector<double>& llrs, size_t s) {
+std::array<double, T::get_size()> symbol_costs_from_llrs(const Matrix<double>& llrs, size_t s) {
     constexpr size_t q = T::get_size();
     constexpr size_t p = T::get_characteristic();
     constexpr size_t m = degree_over_prime_v<T>;
+    constexpr double L_MAX = 1.0e6;
 
     std::array<double, q> costs;
     for (size_t a = 0; a < q; ++a) {
@@ -127,12 +152,20 @@ std::array<double, T::get_size()> symbol_costs_from_llrs(const Vector<double>& l
         size_t digits = a;
         for (size_t i = 0; i < m; ++i) {
             const size_t digit = digits % p;
-            if (digit != 0) cost += llrs[(s * m + (m - 1 - i)) * (p - 1) + digit - 1];
+            if (digit != 0) cost += std::clamp(llrs((m - 1 - i) * (p - 1) + digit - 1, s), -L_MAX, L_MAX);
             digits /= p;
         }
         costs[a] = cost;
     }
     return costs;
+}
+
+inline double max_star(double a, double b) noexcept {
+    constexpr double neg_inf = -std::numeric_limits<double>::infinity();
+    if (a == neg_inf) return b;
+    if (b == neg_inf) return a;
+    const double d = std::abs(a - b);
+    return std::max(a, b) + ((d > 500.0) ? 0.0 : std::log(1.0 + std::exp(-d)));
 }
 
 }  // namespace details
@@ -141,6 +174,8 @@ template <FieldType T>
 struct Trellis;
 template <FieldType T>
 std::ostream& operator<<(std::ostream& os, const Trellis<T>& Tr);
+template <FieldType T>
+struct TannerGraph;
 
 /**
  * @brief Trellis with field-labelled edges between consecutive layers
@@ -252,15 +287,14 @@ struct Trellis {
          * @brief Set soft edge costs from prime-field channel LLRs
          *
          * @param trellis Trellis whose edges define candidate symbols
-         * @param llrs Log-likelihood ratios, [T:𝔽_p]·(p−1) per segment
-         * @throws std::invalid_argument if `llrs.get_n()` does not equal the number of segments
-         *         times [T:𝔽_p]·(p−1)
+         * @param llrs LLR matrix with [T:𝔽_p]·(p−1) rows and one column per segment
+         * @throws std::invalid_argument if the LLR matrix has the wrong number of rows or columns
          *
          * Edge costs are the symbol LLRs of @ref CECCO::details::symbol_costs_from_llrs. For
          * codes over Fp<2> this gives cost 0 on 0-labelled edges and the channel LLR on
          * 1-labelled edges.
          */
-        void calculate_edge_costs(const Trellis& trellis, const Vector<double>& llrs)
+        void calculate_edge_costs(const Trellis& trellis, const Matrix<double>& llrs)
             requires std::floating_point<cost_t> && FiniteFieldType<T>;
 
         /// @brief Path costs from the previous layer
@@ -273,8 +307,8 @@ struct Trellis {
         std::vector<uint16_t> tie_counts;
         /// @brief Edge cost for each segment and edge index
         std::vector<std::vector<cost_t>> edge_costs;
-        /// @brief Optional received vector shown in TikZ output
-        std::optional<std::variant<Vector<T>, Vector<double>>> v;
+        /// @brief Optional received word (hard symbols or LLR matrix) shown in TikZ output
+        std::optional<std::variant<Vector<T>, Matrix<double>>> v;
     };
 
     /**
@@ -298,13 +332,12 @@ struct Trellis {
          * @brief Set BCJR edge costs from prime-field channel LLRs
          *
          * @param trellis Trellis whose edges define candidate symbols
-         * @param llrs Log-likelihood ratios, [T:𝔽_p]·(p−1) per segment
-         * @throws std::invalid_argument if `llrs.get_n()` does not equal the number of segments
-         *         times [T:𝔽_p]·(p−1)
+         * @param llrs LLR matrix with [T:𝔽_p]·(p−1) rows and one column per segment
+         * @throws std::invalid_argument if the LLR matrix has the wrong number of rows or columns
          *
          * Edge costs are the symbol LLRs of @ref CECCO::details::symbol_costs_from_llrs.
          */
-        void calculate_edge_costs(const Trellis& trellis, const Vector<double>& llrs)
+        void calculate_edge_costs(const Trellis& trellis, const Matrix<double>& llrs)
             requires FiniteFieldType<T>;
 
         /// @brief Forward metrics by layer and vertex id
@@ -313,8 +346,8 @@ struct Trellis {
         std::vector<std::vector<double>> beta;
         /// @brief Edge cost for each segment and edge index
         std::vector<std::vector<double>> edge_costs;
-        /// @brief Optional received vector shown in TikZ output
-        std::optional<std::variant<Vector<T>, Vector<double>>> v;
+        /// @brief Optional received word (hard symbols or LLR matrix) shown in TikZ output
+        std::optional<std::variant<Vector<T>, Matrix<double>>> v;
     };
 
     /** @} */
@@ -413,16 +446,6 @@ struct Trellis {
     /// @brief Edges by segment; `E[s]` connects `V[s]` to `V[s + 1]`
     std::vector<std::vector<details::Edge<T>>> E;
 };
-
-namespace details {
-
-template <FieldType T>
-Vertex<T>::Vertex(uint32_t id) noexcept : id(id) {}
-
-template <FieldType T>
-Edge<T>::Edge(uint32_t from_id, uint32_t to_id, T value) : from_id(from_id), to_id(to_id), value(value) {}
-
-}  // namespace details
 
 template <FieldType T>
 Trellis<T>::Trellis() : V(1) {
@@ -530,13 +553,13 @@ template <typename cost_t>
     requires std::integral<cost_t> ||
              std::floating_point<cost_t>
              void Trellis<T>::Viterbi_Workspace<cost_t>::calculate_edge_costs(const Trellis& trellis,
-                                                                              const Vector<double>& llrs)
+                                                                              const Matrix<double>& llrs)
                  requires std::floating_point<cost_t> && FiniteFieldType<T>
 {
     constexpr size_t p = T::get_characteristic();
     constexpr size_t m = details::degree_over_prime_v<T>;
-    if (llrs.get_n() != m * (p - 1) * trellis.E.size())
-        throw std::invalid_argument("Vector length must match number of trellis segments times LLRs per symbol!");
+    if (llrs.get_m() != m * (p - 1) || llrs.get_n() != trellis.E.size())
+        throw std::invalid_argument("LLR matrix must have [T:Fp]*(p-1) rows and one column per trellis segment!");
     for (size_t s = 0; s < trellis.E.size(); ++s) {
         const auto symbol_costs = details::symbol_costs_from_llrs<T>(llrs, s);
         for (size_t j = 0; j < trellis.E[s].size(); ++j)
@@ -557,13 +580,13 @@ Trellis<T>::BCJR_Workspace::BCJR_Workspace(const Trellis& tr) {
 }
 
 template <FieldType T>
-void Trellis<T>::BCJR_Workspace::calculate_edge_costs(const Trellis& trellis, const Vector<double>& llrs)
+void Trellis<T>::BCJR_Workspace::calculate_edge_costs(const Trellis& trellis, const Matrix<double>& llrs)
     requires FiniteFieldType<T>
 {
     constexpr size_t p = T::get_characteristic();
     constexpr size_t m = details::degree_over_prime_v<T>;
-    if (llrs.get_n() != m * (p - 1) * trellis.E.size())
-        throw std::invalid_argument("Vector length must match number of trellis segments times LLRs per symbol!");
+    if (llrs.get_m() != m * (p - 1) || llrs.get_n() != trellis.E.size())
+        throw std::invalid_argument("LLR matrix must have [T:Fp]*(p-1) rows and one column per trellis segment!");
     for (size_t s = 0; s < trellis.E.size(); ++s) {
         const auto symbol_costs = details::symbol_costs_from_llrs<T>(llrs, s);
         for (size_t j = 0; j < trellis.E[s].size(); ++j)
@@ -759,7 +782,14 @@ void Trellis<T>::tikz_picture(std::ostream& file, const WS* ws, size_t frontier)
             for (size_t s = 0; s < E.size(); ++s) {
                 file << "\n    \\node at ($(" << s << "_0)!0.5!(" << s + 1 << "_0)+(0,.5)$) {\\small$";
                 if (s == 0) file << "(";
-                std::visit([&](const auto& w) { file << w[s]; }, *(ws->v));
+                std::visit(
+                    [&](const auto& w) {
+                        if constexpr (std::is_same_v<std::decay_t<decltype(w)>, Matrix<double>>)
+                            file << w(0, s);
+                        else
+                            file << w[s];
+                    },
+                    *(ws->v));
                 file << (s + 1 == E.size() ? ")" : ",") << "$};";
             }
         }
@@ -834,6 +864,214 @@ Trellis<U> Trellis<T>::merge_segments() const {
 
     return result;
 }
+
+/**
+ * @brief Tanner graph of a parity-check matrix, with field-labelled check-to-variable edges
+ *
+ * @tparam T Field type used for edge labels
+ *
+ * Holds `n` variable nodes and one check node per parity-check equation. An edge `(check, var_id,
+ * value)` records that variable `var_id` enters parity check `check` with coefficient `value`, i.e.
+ * the nonzero entries of a parity-check matrix H. Build it with @ref add_edge, then use the nested
+ * @ref BP_Workspace for sum-product (belief propagation) decoding in `codes.hpp`. TikZ export is
+ * available for finite fields of size at most 64.
+ *
+ * @code{.cpp}
+ * TannerGraph<Fp<2>> g(7);          // 7 variable nodes
+ * g.add_edge(0, 0, 1);              // variable 0 enters check 0
+ * g.add_edge(0, 1, 1);
+ * g.export_as_tikz("tanner.tikz");  // for fields of size <= 64
+ * @endcode
+ *
+ * @see @ref Trellis<T> for the Viterbi/BCJR counterpart
+ */
+template <FieldType T>
+struct TannerGraph {
+    /// @brief Construct a Tanner graph with `n` variable nodes and no checks
+    explicit TannerGraph(size_t n) : n(n) {}
+
+    /**
+     * @brief Add a check-to-variable edge `check --value--> var_id`
+     *
+     * @param check Check-node index; checks are created on demand
+     * @param var_id Incident variable-node id
+     * @param value Parity-check coefficient carried by the edge
+     */
+    void add_edge(size_t check, uint32_t var_id, T value) {
+        if (check >= checks.size()) checks.resize(check + 1);
+        checks[check].emplace_back(var_id, value);
+    }
+
+    /**
+     * @brief Workspace for sum-product (belief propagation) decoding
+     *
+     * Stores variable-to-check and check-to-variable messages, the intrinsic (channel) costs, and the
+     * running posterior beliefs, each a length-q array per node. It is used by `LinearCode<T>::dec_BP`.
+     */
+    struct BP_Workspace {
+        /// @brief Number of field symbols (message and belief vector length)
+        static constexpr size_t q = T::get_size();
+
+        /**
+         * @brief Allocate message and belief arrays for `g`
+         *
+         * @param g Tanner graph whose variable- and check-node degrees define the workspace
+         */
+        explicit BP_Workspace(const TannerGraph& g) : intrinsic(g.n), posterior(g.n), var_edges(g.n) {
+            m_vc.reserve(g.checks.size());
+            m_cv.reserve(g.checks.size());
+            for (size_t i = 0; i < g.checks.size(); ++i) {
+                m_vc.emplace_back(g.checks[i].size());
+                m_cv.emplace_back(g.checks[i].size());
+                for (size_t e = 0; e < g.checks[i].size(); ++e) var_edges[g.checks[i][e].var_id].emplace_back(i, e);
+            }
+        }
+
+        /**
+         * @brief Set intrinsic (channel) costs from prime-field channel LLRs
+         *
+         * @param g Tanner graph providing the variable-node count
+         * @param llrs LLR matrix with [T:𝔽_p]·(p−1) rows and one column per variable node
+         *
+         * Intrinsic costs are the negated symbol LLRs of @ref CECCO::details::symbol_costs_from_llrs.
+         */
+        void calculate_intrinsic(const TannerGraph& g, const Matrix<double>& llrs)
+            requires FiniteFieldType<T>
+        {
+            for (size_t j = 0; j < g.n; ++j) {
+                const auto costs = details::symbol_costs_from_llrs<T>(llrs, j);
+                for (size_t a = 0; a < q; ++a) intrinsic[j][a] = -costs[a];
+            }
+        }
+
+        /// @brief Variable-to-check messages by check and incident edge
+        std::vector<std::vector<std::array<double, q>>> m_vc;
+        /// @brief Check-to-variable messages by check and incident edge
+        std::vector<std::vector<std::array<double, q>>> m_cv;
+        /// @brief Intrinsic (channel) cost per variable node and symbol
+        std::vector<std::array<double, q>> intrinsic;
+        /// @brief Posterior belief per variable node and symbol
+        std::vector<std::array<double, q>> posterior;
+        /// @brief Incident (check, edge) pairs for each variable node
+        std::vector<std::vector<std::pair<size_t, size_t>>> var_edges;
+        /// @brief Optional received LLR matrix shown in TikZ output
+        std::optional<Matrix<double>> v;
+    };
+
+    /**
+     * @brief Write TikZ style definitions
+     *
+     * @param file Output stream
+     */
+    void tikz_header(std::ostream& file) const {
+        file << R"(% required in preamble:
+% \usepackage{amsfonts}
+% \usepackage{bm}
+% \usepackage{tikz}
+% \usetikzlibrary{calc, positioning}
+
+\tikzstyle{tannervariable}=[circle, draw=black, inner sep=0pt, minimum size=6pt, left color=gray!80, right color=gray!20]
+\tikzstyle{tannervariablesoft}=[circle, draw=black, font=\tiny, inner sep=1pt, left color=green!80, right color=green!20, text width=4ex, align=center]
+\tikzstyle{tannercheck}=[rectangle, draw=black, inner sep=0pt, minimum size=7pt, fill=gray!40]
+\tikzstyle{tanneredge}=[draw])";
+    }
+
+    /**
+     * @brief Write one TikZ picture of the Tanner graph
+     *
+     * @param file Output stream
+     * @param ws Optional decoding workspace; if non-null, posterior beliefs and decisions are shown
+     *
+     * Available only for finite fields of size at most 64.
+     */
+    void tikz_picture(std::ostream& file, const BP_Workspace* ws) const
+        requires FiniteFieldType<T> && (T::get_size() <= 64)
+    {
+        const size_t redundancy = checks.size();
+        const double width = (n > 1) ? static_cast<double>(n - 1) : 1.0;
+        file << "\n\n\\begin{tikzpicture}[x=\\linewidth/" << width << ", y=1cm]";
+
+        for (size_t j = 0; j < n; ++j) {
+            if constexpr (T::get_size() == 2) {
+                if (ws) {
+                    file << "\n    \\node[tannervariablesoft] (v" << j << ") at (" << j << ", 0) {$" << std::fixed
+                         << std::setprecision(2) << (ws->posterior[j][0] - ws->posterior[j][1]) << "$};";
+                    const size_t dec = (ws->posterior[j][1] > ws->posterior[j][0]) ? 1 : 0;
+                    file << "\n    \\node[anchor=north, font=\\tiny] at ($(v" << j << ")-(0,0.3)$) {$" << dec << "$};";
+                    continue;
+                }
+            }
+            file << "\n    \\node[tannervariable] (v" << j << ") at (" << j << ", 0) {};";
+        }
+
+        for (size_t i = 0; i < redundancy; ++i) {
+            const double x = (redundancy > 1) ? static_cast<double>(i) * (n - 1) / (redundancy - 1) : (n - 1) / 2.0;
+            file << "\n    \\node[tannercheck] (c" << i << ") at (" << x << ", 3) {};";
+        }
+
+        for (size_t i = 0; i < redundancy; ++i) {
+            for (size_t e = 0; e < checks[i].size(); ++e) {
+                const auto label = checks[i][e].value.get_label();
+                if (label == T::get_size() - 1) {
+                    file << "\n    \\path[tanneredge, draw=red]";
+                } else {
+                    const size_t a = 63 - 63 * static_cast<double>(label) / (T::get_size() - 1);
+                    file << "\n    \\definecolor{color}{RGB}{" << static_cast<int>(details::colormap[a][0]) << ", "
+                         << static_cast<int>(details::colormap[a][1]) << ", "
+                         << static_cast<int>(details::colormap[a][2]) << "}\\path[tanneredge, draw=color]";
+                }
+                file << " (v" << checks[i][e].var_id << ") -- (c" << i << ");";
+            }
+        }
+
+        if constexpr (T::get_size() == 2) {
+            if (ws && ws->v.has_value()) {
+                for (size_t j = 0; j < n; ++j) {
+                    file << "\n    \\node[anchor=south, font=\\tiny] at ($(v" << j << ")+(0,0.3)$) {$" << std::fixed
+                         << std::setprecision(2) << (*(ws->v))(0, j) << "$};";
+                }
+            }
+        }
+
+        file << "\n\\end{tikzpicture}\n";
+    }
+
+    /**
+     * @brief Export a standalone TikZ fragment with workspace beliefs
+     *
+     * @param filename Output filename
+     * @param ws Optional decoding workspace; if non-null, posterior beliefs and decisions are shown
+     *
+     * Available only for finite fields of size at most 64.
+     */
+    void export_as_tikz(const std::string& filename, const BP_Workspace* ws) const
+        requires FiniteFieldType<T> && (T::get_size() <= 64)
+    {
+        std::ofstream file;
+        file.open(filename);
+        tikz_header(file);
+        tikz_picture(file, ws);
+        file.close();
+    }
+
+    /**
+     * @brief Export a standalone TikZ fragment without workspace beliefs
+     *
+     * @param filename Output filename
+     *
+     * Available only for finite fields of size at most 64.
+     */
+    void export_as_tikz(const std::string& filename) const
+        requires FiniteFieldType<T> && (T::get_size() <= 64)
+    {
+        export_as_tikz(filename, nullptr);
+    }
+
+    /// @brief Number of variable nodes
+    size_t n;
+    /// @brief Incident edges by check node; `checks[i]` lists the variables in parity check `i`
+    std::vector<std::vector<details::CheckEdge<T>>> checks;
+};
 
 }  // namespace CECCO
 
