@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CECCO: Soft Decoding</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="../site.css" rel="stylesheet">
+</head>
+
+<body>
+  <main class="container py-5">
+    <div class="row justify-content-center">
+      <div class="col-lg-11 col-xl-10">  
+      <div class="page-logo-wrap">
+  <a href="../index.html"><img src="../cecco.png" alt="Cecco logo" class="page-logo"></a>
+</div>
+<h1 class="display-5 fw-semibold mb-3">CECCO: Soft Decoding</h1>
+
+        <p class="mt-4">
+          CECCO supports several soft-input decoders for linear codes over finite fields. The common input format is a
+          matrix of symbol-level log-likelihood ratios (LLRs). For a code over a finite field with q elements, the
+          matrix has q−1 rows and one column per code symbol. Entry (a−1, i) is log(P(y<sub>i</sub> | 0) / P(y<sub>i</sub> | a))
+          for the nonzero field symbol a. This is the format consumed by soft-input exhaustive-search ML decoding, soft-input Viterbi
+          decoding, BCJR decoding, and belief propagation.
+        </p>
+
+        <p class="mt-4">
+          The example uses F4 as an extension of F2. Transmission is done over the binary image of
+          the F4-valued codeword: the <code>DEMUX</code> block expands every F4 symbol into two
+          binary coordinates, the <code>BI-AWGN</code> channel acts on these binary coordinates, and the field-aware
+          <code>LLRCalculator&lt;F4&gt;</code> assembles the resulting observations into F4-symbol LLRs.
+          The LLR calculator is constructed from the channel object because the channel state is needed for
+          the LLR magnitudes.
+        </p>
+        
+        <p class="mt-4">
+          What we see here are only the instantiations of the aforementioned blocks, we will make use of their overloaded <code>operator()</code> later.
+        </p>
+
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 7&ndash;12</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="k">using</span><span class="w"> </span><span class="n">F2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Fp</span><span class="o">&lt;</span><span class="mi">2</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="k">using</span><span class="w"> </span><span class="n">F4</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Ext</span><span class="o">&lt;</span><span class="n">F2</span><span class="p">,</span><span class="w"> </span><span class="n">MOD</span><span class="p">{</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">}</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">DEMUX</span><span class="o">&lt;</span><span class="n">F4</span><span class="p">,</span><span class="w"> </span><span class="n">F2</span><span class="o">&gt;</span><span class="w"> </span><span class="n">demux</span><span class="p">;</span>
+<span class="w">    </span><span class="n">BI_AWGN</span><span class="w"> </span><span class="nf">bi_awgn</span><span class="p">(</span><span class="mf">2.0</span><span class="p">);</span>
+<span class="w">    </span><span class="n">LLRCalculator</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="w"> </span><span class="n">llrcalculator</span><span class="p">(</span><span class="n">bi_awgn</span><span class="p">);</span><span class="w">  </span><span class="c1">// field aware LLR calculator</span>
+</pre></div>
+
+</div>
+
+        <p class="mt-4">
+          We use an extended Hamming code over F4 and convert it to an equivalent code in (systematic) standard form. This is
+          important for the final message comparison: BCJR and BP both make symbol-wise hard decisions from posterior
+          probabilities, so their output is not guaranteed to be a codeword in every situation. Standard-form
+          encoding makes information-symbol extraction independent of the redundancy symbols.
+        </p>
+
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 16&ndash;19</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">Cpp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">HammingCode</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">(</span><span class="mi">3</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">Cp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">extend</span><span class="p">(</span><span class="n">Cpp</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Cp</span><span class="p">.</span><span class="n">get_equivalent_code_in_standard_form</span><span class="p">();</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showall</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+</pre></div>
+
+</div>
+
+        <p class="mt-4">
+          A random F4-message is generated. We also store its binary image, which will be used later to determine
+          message bit errors. The F4-message is encoded into a codeword of C.
+        </p>
+
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 21&ndash;28</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">get_k</span><span class="p">();</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">(</span><span class="n">k</span><span class="p">).</span><span class="n">randomize</span><span class="p">();</span>
+<span class="w">    </span><span class="n">Matrix</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="w"> </span><span class="n">u_binary</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">demux</span><span class="p">(</span><span class="n">u</span><span class="p">);</span><span class="w">  </span><span class="c1">// only needed for counting bit errors</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Random message over F4:        &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">enc</span><span class="p">(</span><span class="n">u</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Codeword over F4:              &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+</pre></div>
+
+</div>
+
+        <p class="mt-4">
+          The following line performs the complete soft channel front end:
+          <code>demux(c)</code> expands the F4-codeword to a binary matrix, <code>bi_awgn(...)</code> transmits these
+          binary coordinates and returns soft channel outputs, and <code>llrcalculator(...)</code> converts those
+          observations into the symbol-level LLR matrix expected by the decoders. The explicit template argument in
+          <code>LLRCalculator&lt;F4&gt;</code> is essential: without it, class template argument deduction would create a
+          binary LLR calculator, resulting in binary-image LLRs instead of the required F4-symbol LLRs.
+        </p>
+
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 30&ndash;30</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">llrs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">llrcalculator</span><span class="p">(</span><span class="n">bi_awgn</span><span class="p">(</span><span class="n">demux</span><span class="p">(</span><span class="n">c</span><span class="p">)));</span>
+</pre></div>
+
+</div>
+
+        <p class="mt-4">
+          The same LLR matrix can be passed to any of the soft decoders. Viterbi performs per-codeword ML decoding on the
+          minimal trellis. The commented exhaustive-search ML decoder gives the same result, but it compares against all
+          codewords and is therefore not feasible already for this small example (the code has 4<sup>18</sup> codewords).
+        </p>
+
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 32&ndash;44</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">c_hat_Viterbi</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_Viterbi_soft</span><span class="p">(</span><span class="n">llrs</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">u_hat_Viterbi</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_hat_Viterbi</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Viterbi message estimate:      &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_hat_Viterbi</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Viterbi message bit errors:    &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">dH</span><span class="p">(</span><span class="n">u_binary</span><span class="p">,</span><span class="w"> </span><span class="n">demux</span><span class="p">(</span><span class="n">u_hat_Viterbi</span><span class="p">))</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/*</span>
+<span class="cm">    auto c_hat_ML = C.dec_ML_soft(llrs);  // highly inefficient, not for larger codes!</span>
+<span class="cm">    auto u_hat_ML = C.encinv(c_hat_ML);</span>
+<span class="cm">    std::cout &lt;&lt; &quot;ML message estimate:           &quot; &lt;&lt; u_hat_ML &lt;&lt; std::endl;</span>
+<span class="cm">    std::cout &lt;&lt; &quot;ML message bit errors:         &quot; &lt;&lt; dH(u_binary, demux(u_hat_ML)) &lt;&lt; std::endl;</span>
+
+<span class="cm">    assert(c_hat_ML == c_hat_Viterbi);  // Viterbi _is_ ML</span>
+<span class="cm">    */</span>
+</pre></div>
+
+</div>
+
+        <p class="mt-4">
+          BCJR performs exact marginalization on the trellis (s/s MAP decoding) and BP runs sum-product message passing on the Tanner graph.
+          Both return symbol-wise hard decisions based on posterior information. These decisions need not coincide with the ML codeword decision and they are not guaranteed to be codewords.
+        </p>
+
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 46&ndash;54</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">c_hat_BCJR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_BCJR</span><span class="p">(</span><span class="n">llrs</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">u_hat_BCJR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_hat_BCJR</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;BCJR message estimate:         &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_hat_BCJR</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;BCJR message bit errors:       &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">dH</span><span class="p">(</span><span class="n">u_binary</span><span class="p">,</span><span class="w"> </span><span class="n">demux</span><span class="p">(</span><span class="n">u_hat_BCJR</span><span class="p">))</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">c_hat_BP</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_BP</span><span class="p">(</span><span class="n">llrs</span><span class="p">,</span><span class="w"> </span><span class="mi">20</span><span class="p">);</span><span class="w">  </span><span class="c1">// max. 20 iterations of BP decoding</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">u_hat_BP</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_hat_BP</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;BP message estimate:           &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_hat_BP</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;BP message bit errors:         &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">dH</span><span class="p">(</span><span class="n">u_binary</span><span class="p">,</span><span class="w"> </span><span class="n">demux</span><span class="p">(</span><span class="n">u_hat_BP</span><span class="p">))</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+</pre></div>
+
+</div>
+
+        <p class="mt-4">
+          The message estimates are converted to their binary images. The number of message bit errors is the Hamming
+          distance between the two binary matrices, where the two entries in the i-th column represent the i-th F4 symbol.
+        </p>
+
+        <p class="mt-4">
+          The same simulation can alternatively be written as a simulation chain. The decoder block can be switched between
+          <code>method_t::Viterbi_soft</code>, <code>method_t::ML_soft</code>, <code>method_t::BCJR</code>, and <code>method_t::BP</code> without
+          changing the preceding channel and LLR calculation.
+        </p>
+
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 56&ndash;68</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="cm">/* alternative realization: simulation chain (BCJR example) */</span>
+
+<span class="w">        </span><span class="n">Enc</span><span class="w"> </span><span class="nf">enc</span><span class="p">(</span><span class="n">C</span><span class="p">);</span><span class="w">                  </span><span class="c1">// encoder block</span>
+<span class="w">        </span><span class="n">Dec</span><span class="w"> </span><span class="nf">dec</span><span class="p">(</span><span class="n">C</span><span class="p">,</span><span class="w"> </span><span class="n">method_t</span><span class="o">::</span><span class="n">BCJR</span><span class="p">);</span><span class="w">  </span><span class="c1">// (BCJR) decoder block</span>
+<span class="w">        </span><span class="n">Encinv</span><span class="w"> </span><span class="nf">encinv</span><span class="p">(</span><span class="n">C</span><span class="p">);</span><span class="w">            </span><span class="c1">// (systematic, standard form) encoder inverse block</span>
+
+<span class="w">        </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="w"> </span><span class="n">u_hat</span><span class="p">;</span>
+
+<span class="w">        </span><span class="n">u</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">enc</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">demux</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">bi_awgn</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">llrcalculator</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">dec</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">encinv</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">u_hat</span><span class="p">;</span>
+
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Sim. chain message estimate:   &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_hat</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Sim. chain message bit errors: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">dH</span><span class="p">(</span><span class="n">u_binary</span><span class="p">,</span><span class="w"> </span><span class="n">demux</span><span class="p">(</span><span class="n">u_hat</span><span class="p">))</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+</pre></div>
+
+</div>
+
+        <p class="mt-4">
+          The chain output is handled in the same way as before: recover the F4-message, demultiplex it to its binary image for bit
+          error calculation. Intermediate values of the simulation chain can be extracted as needed (by inserting appropriate buffer variables).
+        </p>
+
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+	Random message over F4:        ( 3, 1, 2, 0, 3, 2, 2, 3, 3, 3, 3, 0, 3, 1, 3, 2, 0, 1 )
+	Codeword over F4:              ( 3, 1, 2, 0, 3, 2, 2, 3, 3, 3, 3, 0, 3, 1, 3, 2, 0, 1, 3, 3, 3, 2 )
+	Viterbi message estimate:      ( 3, 1, 2, 0, 3, 2, 2, 3, 3, 3, 3, 0, 3, 1, 3, 2, 0, 1 )
+	Viterbi message bit errors:    0
+	BCJR message estimate:         ( 3, 1, 2, 0, 3, 2, 2, 1, 3, 3, 1, 0, 3, 1, 3, 2, 0, 1 )
+	BCJR message bit errors:       2
+	BP message estimate:           ( 3, 1, 2, 0, 3, 2, 2, 1, 3, 1, 1, 0, 3, 0, 3, 2, 0, 1 )
+	BP message bit errors:         4
+	Sim. chain message estimate:   ( 3, 1, 2, 0, 3, 2, 2, 3, 3, 3, 3, 0, 3, 1, 3, 2, 0, 1 )
+	Sim. chain message bit errors: 0
+            </pre>
+          </div>
+        </div>
+
+        <p class="mt-4">
+          The exact output changes from run to run because the message and channel are random. Also, the alternative simulation chain realization includes an actual channel use, resulting in a chain estimate that is much different from the other estimates. The relevant point is the
+          interface: finite-field code symbols are transmitted through their binary images, the field-aware LLR calculator produces
+          the common symbol-level LLR matrix format, and all soft decoders consume this same matrix.
+        </p>
+
+        <p class="lead text-secondary mb-4">
+          A complete, compilable demo is shown below:
+        </p>
+
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    
+  </div>
+  <div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;iostream&gt;</span>
+
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cecco.hpp&quot;</span>
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">CECCO</span><span class="p">;</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">using</span><span class="w"> </span><span class="n">F2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Fp</span><span class="o">&lt;</span><span class="mi">2</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="k">using</span><span class="w"> </span><span class="n">F4</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Ext</span><span class="o">&lt;</span><span class="n">F2</span><span class="p">,</span><span class="w"> </span><span class="n">MOD</span><span class="p">{</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">}</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">DEMUX</span><span class="o">&lt;</span><span class="n">F4</span><span class="p">,</span><span class="w"> </span><span class="n">F2</span><span class="o">&gt;</span><span class="w"> </span><span class="n">demux</span><span class="p">;</span>
+<span class="w">    </span><span class="n">BI_AWGN</span><span class="w"> </span><span class="n">bi_awgn</span><span class="p">(</span><span class="mf">2.0</span><span class="p">);</span>
+<span class="w">    </span><span class="n">LLRCalculator</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="w"> </span><span class="n">llrcalculator</span><span class="p">(</span><span class="n">bi_awgn</span><span class="p">);</span><span class="w">  </span><span class="c1">// field aware LLR calculator</span>
+
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">F4</span><span class="o">::</span><span class="n">get_info</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">Cpp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">HammingCode</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">(</span><span class="mi">3</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">Cp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">extend</span><span class="p">(</span><span class="n">Cpp</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Cp</span><span class="p">.</span><span class="n">get_equivalent_code_in_standard_form</span><span class="p">();</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showall</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">get_k</span><span class="p">();</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">(</span><span class="n">k</span><span class="p">).</span><span class="n">randomize</span><span class="p">();</span>
+<span class="w">    </span><span class="n">Matrix</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="w"> </span><span class="n">u_binary</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">demux</span><span class="p">(</span><span class="n">u</span><span class="p">);</span><span class="w">  </span><span class="c1">// only needed for counting bit errors</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Random message over F4:        &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">enc</span><span class="p">(</span><span class="n">u</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Codeword over F4:              &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">llrs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">llrcalculator</span><span class="p">(</span><span class="n">bi_awgn</span><span class="p">(</span><span class="n">demux</span><span class="p">(</span><span class="n">c</span><span class="p">)));</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">c_hat_Viterbi</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_Viterbi_soft</span><span class="p">(</span><span class="n">llrs</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">u_hat_Viterbi</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_hat_Viterbi</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Viterbi message estimate:      &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_hat_Viterbi</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Viterbi message bit errors:    &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">dH</span><span class="p">(</span><span class="n">u_binary</span><span class="p">,</span><span class="w"> </span><span class="n">demux</span><span class="p">(</span><span class="n">u_hat_Viterbi</span><span class="p">))</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/*</span>
+<span class="cm">    auto c_hat_ML = C.dec_ML_soft(llrs);  // highly inefficient, not for larger codes!</span>
+<span class="cm">    auto u_hat_ML = C.encinv(c_hat_ML);</span>
+<span class="cm">    std::cout &lt;&lt; &quot;ML message estimate:           &quot; &lt;&lt; u_hat_ML &lt;&lt; std::endl;</span>
+<span class="cm">    std::cout &lt;&lt; &quot;ML message bit errors:         &quot; &lt;&lt; dH(u_binary, demux(u_hat_ML)) &lt;&lt; std::endl;</span>
+
+<span class="cm">    assert(c_hat_ML == c_hat_Viterbi);  // Viterbi _is_ ML</span>
+<span class="cm">    */</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">c_hat_BCJR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_BCJR</span><span class="p">(</span><span class="n">llrs</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">u_hat_BCJR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_hat_BCJR</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;BCJR message estimate:         &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_hat_BCJR</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;BCJR message bit errors:       &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">dH</span><span class="p">(</span><span class="n">u_binary</span><span class="p">,</span><span class="w"> </span><span class="n">demux</span><span class="p">(</span><span class="n">u_hat_BCJR</span><span class="p">))</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">c_hat_BP</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_BP</span><span class="p">(</span><span class="n">llrs</span><span class="p">,</span><span class="w"> </span><span class="mi">20</span><span class="p">);</span><span class="w">  </span><span class="c1">// max. 20 iterations of BP decoding</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">u_hat_BP</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_hat_BP</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;BP message estimate:           &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_hat_BP</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;BP message bit errors:         &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">dH</span><span class="p">(</span><span class="n">u_binary</span><span class="p">,</span><span class="w"> </span><span class="n">demux</span><span class="p">(</span><span class="n">u_hat_BP</span><span class="p">))</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="cm">/* alternative realization: simulation chain (BCJR example) */</span>
+
+<span class="w">        </span><span class="n">Enc</span><span class="w"> </span><span class="n">enc</span><span class="p">(</span><span class="n">C</span><span class="p">);</span><span class="w">                  </span><span class="c1">// encoder block</span>
+<span class="w">        </span><span class="n">Dec</span><span class="w"> </span><span class="n">dec</span><span class="p">(</span><span class="n">C</span><span class="p">,</span><span class="w"> </span><span class="n">method_t</span><span class="o">::</span><span class="n">BCJR</span><span class="p">);</span><span class="w">  </span><span class="c1">// (BCJR) decoder block</span>
+<span class="w">        </span><span class="n">Encinv</span><span class="w"> </span><span class="n">encinv</span><span class="p">(</span><span class="n">C</span><span class="p">);</span><span class="w">            </span><span class="c1">// (systematic, standard form) encoder inverse block</span>
+
+<span class="w">        </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="w"> </span><span class="n">u_hat</span><span class="p">;</span>
+
+<span class="w">        </span><span class="n">u</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">enc</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">demux</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">bi_awgn</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">llrcalculator</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">dec</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">encinv</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">u_hat</span><span class="p">;</span>
+
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Sim. chain message estimate:   &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_hat</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Sim. chain message bit errors: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">dH</span><span class="p">(</span><span class="n">u_binary</span><span class="p">,</span><span class="w"> </span><span class="n">demux</span><span class="p">(</span><span class="n">u_hat</span><span class="p">))</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+
+</div>
+      </div>
+    </div>
+  <footer class="page-footer text-end mt-5">
+  <small><a href="../imprint.html">Impressum/Datenschutzerklärung</a>. Copyright &copy; 2026, Christian Senger &lt;<a href="mailto:senger@inue.uni-stuttgart.de">senger@inue.uni-stuttgart.de</a>&gt;.</small>
+</footer>
+</main>
+</body>
+
+</html>
