@@ -2923,6 +2923,51 @@ constexpr size_t wH(const Matrix<T>& M) {
     return M.wH();
 }
 
+/**
+ * @brief Hamming distance dₕ(lhs, rhs) = wₕ(lhs − rhs)
+ *
+ * Number of matrix components in which `lhs` and `rhs` differ. Under
+ * @ref CECCO_ERASURE_SUPPORT, positions where either side is erased are not counted.
+ *
+ * @throws std::invalid_argument if dimensions differ
+ */
+template <ReliablyComparableType T>
+size_t dH(const Matrix<T>& lhs, const Matrix<T>& rhs) {
+    if (lhs.get_m() != rhs.get_m() || lhs.get_n() != rhs.get_n())
+        throw std::invalid_argument(
+            "trying to calculate Hamming distance between matrices of different "
+            "dimensions");
+    return (lhs - rhs).wH();
+}
+
+// rvalue overloads of dH share semantics with the const&,const& version above.
+template <ReliablyComparableType T>
+size_t dH(Matrix<T>&& lhs, const Matrix<T>& rhs) {
+    if (lhs.get_m() != rhs.get_m() || lhs.get_n() != rhs.get_n())
+        throw std::invalid_argument(
+            "trying to calculate Hamming distance between matrices of different "
+            "dimensions");
+    return (std::move(lhs) - rhs).wH();
+}
+
+template <ReliablyComparableType T>
+size_t dH(const Matrix<T>& lhs, Matrix<T>&& rhs) {
+    if (lhs.get_m() != rhs.get_m() || lhs.get_n() != rhs.get_n())
+        throw std::invalid_argument(
+            "trying to calculate Hamming distance between matrices of different "
+            "dimensions");
+    return (lhs - std::move(rhs)).wH();
+}
+
+template <ReliablyComparableType T>
+size_t dH(Matrix<T>&& lhs, Matrix<T>&& rhs) {
+    if (lhs.get_m() != rhs.get_m() || lhs.get_n() != rhs.get_n())
+        throw std::invalid_argument(
+            "trying to calculate Hamming distance between matrices of different "
+            "dimensions");
+    return (std::move(lhs) - std::move(rhs)).wH();
+}
+
 template <ComponentType T>
 Matrix<T> set_component(const Matrix<T>& M, size_t i, size_t j, const T& c) {
     Matrix<T> res(M);

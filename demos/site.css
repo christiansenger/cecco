@@ -1,5 +1,5 @@
 body {
-  background: #f8f9fa;
+  background: #ffffff;
 }
 
 .snippet-card {
@@ -10,7 +10,7 @@ body {
 
 .snippet-card .card-header {
   font-size: 0.92rem;
-  background: #fff;
+  background: #f8f9fa;
 }
 
 .snippet-meta {
@@ -23,7 +23,7 @@ body {
   overflow-x: auto;
   font-size: 0.95rem;
   line-height: 1.55;
-  background: #0d1117;
+  background: #000000;
 }
 
 /* Pygments style */

@@ -19,7 +19,7 @@
  * Viterbi and BCJR decoding, and it also provides trellis products, segment merging, text output, and
  * TikZ export. A Tanner graph is the bipartite variable-/check-node graph of a parity-check matrix; its
  * nested workspace backs sum-product (belief propagation) decoding. Soft workspaces derive their costs
- * from channel LLRs of the prime-field coordinates of each symbol, see
+ * from symbol-level channel/a-priori LLRs (q−1 per symbol), see
  * @ref CECCO::details::symbol_costs_from_llrs.
  */
 
@@ -121,42 +121,26 @@ struct CheckEdge {
 };
 
 /**
- * @brief Per-segment symbol costs from prime-field channel LLRs
+ * @brief Per-segment symbol costs from symbol-level LLRs
  *
  * @tparam T Finite field of the trellis edge labels
- * @param llrs Channel LLR matrix with [T:𝔽_p]·(p−1) rows; column s holds the LLRs of segment s
+ * @param llrs Symbol-level LLR matrix with q−1 rows; column s holds the LLRs of segment s
  * @param s Segment (column) index
  * @return Cost of every symbol of T, indexed by label
  *
- * A symbol is transmitted as its 𝔽_p coordinate vector over [T:𝔽_p] uses of a p-ary-input
- * channel, where p is the characteristic. Per channel use the soft input consists of the p−1
- * LLRs ln(P(r|0)/P(r|b)), b = 1, …, p−1. The channel uses are independent, so the cost of a
- * symbol — its LLR relative to the zero element — is the sum of the LLRs selected by its
- * nonzero coordinates. The matrix rows follow the coordinate order of `as_vector()` and
- * @ref CECCO::DEMUX (highest level of the construction tower first), while labels encode the
- * coordinates as base-p digits low-to-high, hence the digit decomposition runs through the
- * column's rows in reverse. For p = 2 this is one LLR per coordinate as produced by
- * @ref CECCO::LLRCalculator. Non-finite LLRs (e.g. from a perfect channel) are clamped to ±1e6
- * so the soft-input decoders never see ±∞.
+ * Row a−1 of column s holds L_s(a) = ln(P(·|0)/P(·|a)) for symbol a = 1, …, q−1. The cost of
+ * symbol 0 is 0 and the cost of symbol a is L_s(a), so lower cost means more likely. This is the
+ * single soft-input format shared by all soft-input decoders. Non-finite LLRs (e.g. from a
+ * perfect channel) are clamped to ±1e6 so the decoders never see ±∞.
  */
 template <FiniteFieldType T>
 std::array<double, T::get_size()> symbol_costs_from_llrs(const Matrix<double>& llrs, size_t s) {
     constexpr size_t q = T::get_size();
-    constexpr size_t p = T::get_characteristic();
-    constexpr size_t m = degree_over_prime_v<T>;
     constexpr double L_MAX = 1.0e6;
 
     std::array<double, q> costs;
-    for (size_t a = 0; a < q; ++a) {
-        double cost = 0.0;
-        size_t digits = a;
-        for (size_t i = 0; i < m; ++i) {
-            const size_t digit = digits % p;
-            if (digit != 0) cost += std::clamp(llrs((m - 1 - i) * (p - 1) + digit - 1, s), -L_MAX, L_MAX);
-            digits /= p;
-        }
-        costs[a] = cost;
-    }
+    costs[0] = 0.0;
+    for (size_t a = 1; a < q; ++a) costs[a] = std::clamp(llrs(a - 1, s), -L_MAX, L_MAX);
     return costs;
 }
 
@@ -284,15 +268,14 @@ struct Trellis {
             requires std::integral<cost_t>;
 
         /**
-         * @brief Set soft edge costs from prime-field channel LLRs
+         * @brief Set soft edge costs from symbol-level LLRs
          *
          * @param trellis Trellis whose edges define candidate symbols
-         * @param llrs LLR matrix with [T:𝔽_p]·(p−1) rows and one column per segment
+         * @param llrs Symbol-level LLR matrix with q−1 rows and one column per segment
          * @throws std::invalid_argument if the LLR matrix has the wrong number of rows or columns
          *
-         * Edge costs are the symbol LLRs of @ref CECCO::details::symbol_costs_from_llrs. For
-         * codes over Fp<2> this gives cost 0 on 0-labelled edges and the channel LLR on
-         * 1-labelled edges.
+         * Edge costs are the symbol costs of @ref CECCO::details::symbol_costs_from_llrs: cost 0
+         * on 0-labelled edges and L_s(a) on edges labelled by symbol a.
          */
         void calculate_edge_costs(const Trellis& trellis, const Matrix<double>& llrs)
             requires std::floating_point<cost_t> && FiniteFieldType<T>;
@@ -329,13 +312,13 @@ struct Trellis {
         explicit BCJR_Workspace(const Trellis& tr);
 
         /**
-         * @brief Set BCJR edge costs from prime-field channel LLRs
+         * @brief Set BCJR edge costs from symbol-level LLRs
          *
          * @param trellis Trellis whose edges define candidate symbols
-         * @param llrs LLR matrix with [T:𝔽_p]·(p−1) rows and one column per segment
+         * @param llrs Symbol-level LLR matrix with q−1 rows and one column per segment
          * @throws std::invalid_argument if the LLR matrix has the wrong number of rows or columns
          *
-         * Edge costs are the symbol LLRs of @ref CECCO::details::symbol_costs_from_llrs.
+         * Edge costs are the symbol costs of @ref CECCO::details::symbol_costs_from_llrs.
          */
         void calculate_edge_costs(const Trellis& trellis, const Matrix<double>& llrs)
             requires FiniteFieldType<T>;
@@ -556,10 +539,8 @@ template <typename cost_t>
                                                                               const Matrix<double>& llrs)
                  requires std::floating_point<cost_t> && FiniteFieldType<T>
 {
-    constexpr size_t p = T::get_characteristic();
-    constexpr size_t m = details::degree_over_prime_v<T>;
-    if (llrs.get_m() != m * (p - 1) || llrs.get_n() != trellis.E.size())
-        throw std::invalid_argument("LLR matrix must have [T:Fp]*(p-1) rows and one column per trellis segment!");
+    if (llrs.get_m() != T::get_size() - 1 || llrs.get_n() != trellis.E.size())
+        throw std::invalid_argument("LLR matrix must have q-1 rows and one column per trellis segment!");
     for (size_t s = 0; s < trellis.E.size(); ++s) {
         const auto symbol_costs = details::symbol_costs_from_llrs<T>(llrs, s);
         for (size_t j = 0; j < trellis.E[s].size(); ++j)
@@ -583,10 +564,8 @@ template <FieldType T>
 void Trellis<T>::BCJR_Workspace::calculate_edge_costs(const Trellis& trellis, const Matrix<double>& llrs)
     requires FiniteFieldType<T>
 {
-    constexpr size_t p = T::get_characteristic();
-    constexpr size_t m = details::degree_over_prime_v<T>;
-    if (llrs.get_m() != m * (p - 1) || llrs.get_n() != trellis.E.size())
-        throw std::invalid_argument("LLR matrix must have [T:Fp]*(p-1) rows and one column per trellis segment!");
+    if (llrs.get_m() != T::get_size() - 1 || llrs.get_n() != trellis.E.size())
+        throw std::invalid_argument("LLR matrix must have q-1 rows and one column per trellis segment!");
     for (size_t s = 0; s < trellis.E.size(); ++s) {
         const auto symbol_costs = details::symbol_costs_from_llrs<T>(llrs, s);
         for (size_t j = 0; j < trellis.E[s].size(); ++j)
@@ -928,12 +907,12 @@ struct TannerGraph {
         }
 
         /**
-         * @brief Set intrinsic (channel) costs from prime-field channel LLRs
+         * @brief Set intrinsic (channel) costs from symbol-level LLRs
          *
          * @param g Tanner graph providing the variable-node count
-         * @param llrs LLR matrix with [T:𝔽_p]·(p−1) rows and one column per variable node
+         * @param llrs Symbol-level LLR matrix with q−1 rows and one column per variable node
          *
-         * Intrinsic costs are the negated symbol LLRs of @ref CECCO::details::symbol_costs_from_llrs.
+         * Intrinsic costs are the negated symbol costs of @ref CECCO::details::symbol_costs_from_llrs.
          */
         void calculate_intrinsic(const TannerGraph& g, const Matrix<double>& llrs)
             requires FiniteFieldType<T>

@@ -809,20 +809,22 @@ class BPSKDemapper : public NRZDemapper {
 
 /**
  * @brief Log-Likelihood Ratio calculator for soft demodulation
- * @tparam T Channel symbol field; only relevant for the discrete (SDMEC) model
+ * @tparam T Code symbol field; sets the output format ((q−1)-row symbol-level LLR matrix)
  *
- * Turns channel observations into the LLR matrix consumed by the soft-input decoders in
- * codes.hpp. The channel model is fixed at construction and selected per call by input type:
+ * Turns channel observations into the symbol-level LLR matrix consumed by the soft-input decoders
+ * in codes.hpp: q−1 rows, column j holding ln(P(r_j|0)/P(r_j|a)) for symbol a = 1, …, q−1. The
+ * channel model is fixed at construction and selected per call by input type:
  *
- * - **BI-AWGN** (construct from a @ref NRZMapper + @ref AWGN pair or a @ref BI_AWGN): computes
- *   LLR(r) = b·(a − Re(r)) / σ² in nats from each complex symbol. For a code over 𝔽_{2^m} apply
- *   it to the @ref CECCO::DEMUX'ed binary image; the resulting m × n matrix (column j = LLRs of
- *   code symbol j, rows in `as_vector()` coordinate order) is accepted directly by the decoders.
+ * - **BI-AWGN** (construct from a @ref NRZMapper + @ref AWGN pair or a @ref BI_AWGN; binary image,
+ *   so T must have characteristic 2): each complex symbol gives a bit LLR b·(a − Re(r)) / σ² in
+ *   nats. For a code over 𝔽_{2^m} apply it to the @ref CECCO::DEMUX'ed [T:𝔽_2]-row binary image;
+ *   the matrix overload assembles the (q−1)-row symbol-level matrix (a symbol LLR is the sum of
+ *   the bit LLRs selected by its nonzero coordinates). For 𝔽_2 this is one LLR per symbol.
  *
  * - **SDMEC over a prime field 𝔽_p** (construct from a @ref SDMEC): computes the symbol LLRs
- *   L_a(r) = ln(P(r|0)/P(r|a)), a = 1, …, p−1, directly from the transition probabilities.
- *   Scalar field input returns one LLR vector; vector input returns the corresponding LLR matrix.
- *   Restricted to prime fields, where these symbol LLRs are the decoder coordinates.
+ *   L_a(r) = ln(P(r|0)/P(r|a)), a = 1, …, p−1, directly from the transition probabilities. Scalar
+ *   field input returns one LLR vector; vector input returns the (p−1) × n matrix. For a prime
+ *   field symbol-level and prime-image coincide, so this is already the decoder format.
  *
  * Sign convention: positive LLR ⇒ symbol 0, negative ⇒ the indexed symbol; magnitude is
  * reliability. See the @ref BI_AWGN class doc for an end-to-end chain example.
@@ -839,6 +841,7 @@ class LLRCalculator : private details::NonCopyable {
      * @param transmission Channel providing variance
      */
     LLRCalculator(const NRZMapper& nrz, const AWGN& transmission) noexcept
+        requires(T::get_characteristic() == 2)
         : model(channel_model_t::bi_awgn),
           a(nrz.get_a()),
           b(nrz.get_b()),
@@ -851,6 +854,7 @@ class LLRCalculator : private details::NonCopyable {
      * @param bi_awgn Channel providing (a, b) and variance
      */
     LLRCalculator(const BI_AWGN& bi_awgn) noexcept
+        requires(T::get_characteristic() == 2)
         : model(channel_model_t::bi_awgn),
           a(bi_awgn.get_encoder().get_a()),
           b(bi_awgn.get_encoder().get_b()),
@@ -892,15 +896,41 @@ class LLRCalculator : private details::NonCopyable {
     }
 
     /**
-     * @brief Compute LLRs for a received complex matrix (BI-AWGN model)
-     * @param in Received complex matrix
-     * @return Matrix of binary-image LLRs
+     * @brief Compute the symbol-level LLR matrix of a received binary image (BI-AWGN model)
+     * @param in Received complex matrix; the [T:𝔽_2]-row binary image of the code word, column j
+     *           holding the bits of symbol j in `as_vector()`/@ref CECCO::DEMUX order
+     * @return (q−1) × n matrix; entry (a−1, j) = ln(P(r_j|0)/P(r_j|a)) for symbol a = 1, …, q−1
      * @throws std::logic_error if this calculator was constructed from an SDMEC
+     * @throws std::invalid_argument if the input does not have [T:𝔽_2] rows
+     *
+     * The bits of a symbol are transmitted over independent channel uses, so a symbol LLR is the
+     * sum of the bit LLRs selected by its nonzero coordinates. For a binary code (T = 𝔽_2) this is
+     * one LLR per symbol.
      */
     Matrix<double> operator()(const Matrix<std::complex<double>>& in) {
-        Matrix<double> llrs(in.get_m(), in.get_n());
-        for (size_t i = 0; i < in.get_m(); ++i)
-            for (size_t j = 0; j < in.get_n(); ++j) llrs.set_component(i, j, (*this)(in(i, j)));
+        if (model != channel_model_t::bi_awgn)
+            throw std::logic_error("This LLRCalculator was not constructed for a soft input!");
+
+        constexpr size_t q = T::get_size();
+        constexpr size_t m = details::degree_over_prime_v<T>;
+        if (in.get_m() != m)
+            throw std::invalid_argument("BI-AWGN input must have [T:F2] rows (the binary image of the code symbols)!");
+
+        const size_t n = in.get_n();
+        Matrix<double> llrs(q - 1, n);
+        for (size_t j = 0; j < n; ++j) {
+            Vector<double> bit(m);
+            for (size_t i = 0; i < m; ++i) bit.set_component(i, (*this)(in(i, j)));
+            for (size_t lab = 1; lab < q; ++lab) {
+                double L = 0.0;
+                size_t bits = lab;
+                for (size_t i = 0; i < m; ++i) {
+                    if (bits & 1u) L += bit[m - 1 - i];
+                    bits >>= 1u;
+                }
+                llrs.set_component(lab - 1, j, L);
+            }
+        }
         return llrs;
     }
 
@@ -988,8 +1018,8 @@ LLRCalculator(const SDMEC<T>&) -> LLRCalculator<T>;
  * of length n, the resulting `Matrix<S>` has [E:S] rows and n columns; column j holds the
  * coefficients of element j in `as_vector()` order (highest level of the construction tower
  * first). For S = 𝔽_2 the output is the binary image of the input; chained with
- * @ref CECCO::BI_AWGN and @ref CECCO::LLRCalculator it produces the LLR matrix expected by the
- * soft-input decoders in codes.hpp.
+ * @ref CECCO::BI_AWGN and a field-aware @ref CECCO::LLRCalculator it produces the symbol-level LLR
+ * matrix expected by the soft-input decoders in codes.hpp.
  *
  * @code{.cpp}
  * using F2 = Fp<2>;
@@ -1000,8 +1030,8 @@ LLRCalculator(const SDMEC<T>&) -> LLRCalculator<T>;
  * Matrix<F2> M = c >> demux;              // 2×4 binary image of c
  *
  * BI_AWGN channel(6.0);
- * LLRCalculator llr(channel);
- * Matrix<double> L = c >> demux >> channel >> llr;   // 2×4 bit-LLR matrix, column per symbol
+ * LLRCalculator<F4> llr(channel);         // field-aware: assembles 𝔽_4 symbol LLRs
+ * Matrix<double> L = c >> demux >> channel >> llr;   // 3×4 symbol-level LLR matrix, column per symbol
  * @endcode
  *
  * @see @ref CECCO::MUX for the inverse
