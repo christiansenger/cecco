@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.2
+ * @version 2.3.4
  * @date 2026
  *
  * @copyright
@@ -241,6 +241,17 @@ class Code {
     virtual Vector<T> dec_BMA_EE(const Vector<T>&) const {
         throw std::logic_error("Berlekamp-Massey error/erasure decoding not supported for this code!");
     }
+    // Docu note: GMD is soft-input. It takes the same symbol-level LLR format as the other soft
+    // decoders, forms a per-symbol hard decision and a [0,1] reliability (best-vs-second-best margin
+    // squashed through tanh) for every coordinate, then runs Forney's generalized minimum distance
+    // decoding on top of the error/erasure decoder. The Vector<double> overload is the binary special
+    // case. Hence GMD exists only with CECCO_ERASURE_SUPPORT.
+    virtual Vector<T> dec_GMD(const Vector<double>&) const {
+        throw std::logic_error("GMD decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_GMD(const Matrix<double>&) const {
+        throw std::logic_error("GMD decoding not supported for this code!");
+    }
 #endif
 
    protected:
@@ -293,7 +304,8 @@ enum class method_t {
     BD_EE,
     ML_EE,
     Viterbi_EE,
-    recursive_EE
+    recursive_EE,
+    GMD
 #endif
 };
 
@@ -2011,12 +2023,12 @@ class LinearCode : public Code<T> {
         }
     }
 
-    Vector<T> dec_GMD(const Vector<T>& r, const std::vector<double>& reliability) const
+    Vector<T> dec_GMD(const Vector<T>& r, const Vector<double>& reliability) const
         requires FiniteFieldType<T>
     {
         const size_t n = this->n;
 
-        if (reliability.size() != n)
+        if (reliability.get_n() != n)
             throw std::invalid_argument("GMD decoder: length of reliability vector must match code length");
 
         std::vector<size_t> order(n);
@@ -2054,6 +2066,52 @@ class LinearCode : public Code<T> {
 
         if (!best.has_value()) throw decoding_failure("GMD decoder failed (all trials failed)!");
         return std::move(*best);
+    }
+
+    virtual Vector<T> dec_GMD(const Vector<double>& llrs) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("GMD decoding only available for codes over finite fields!");
+        } else if constexpr (T::get_size() != 2) {
+            throw std::logic_error(
+                "Soft-input GMD vector decoding only available for binary codes; use the Matrix<double> overload!");
+        } else {
+            return dec_GMD(Matrix<double>(llrs));
+        }
+    }
+
+    virtual Vector<T> dec_GMD(const Matrix<double>& llrs) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("GMD decoding only available for codes over finite fields!");
+        } else {
+            validate_length(llrs);
+
+            const size_t n = this->n;
+            Vector<T> r(n);
+            Vector<double> reliabilities(n);
+
+            for (size_t i = 0; i < n; ++i) {
+                size_t best_label = 0;
+                double best = 0.0;
+                double second = std::numeric_limits<double>::infinity();
+                for (size_t a = 1; a < T::get_size(); ++a) {
+                    const double cost = llrs(a - 1, i);
+                    if (cost < best) {
+                        second = best;
+                        best = cost;
+                        best_label = a;
+                    } else if (cost < second) {
+                        second = cost;
+                    }
+                }
+
+                r.set_component(i, T(best_label));
+
+                const double lambda = second - best;
+                reliabilities.set_component(i, std::tanh(lambda / 2.0));
+            }
+
+            return dec_GMD(r, reliabilities);
+        }
     }
 #endif
 
@@ -5261,6 +5319,9 @@ class Dec {
             case method_t::recursive_EE:
                 dec = [this](const Vector<T>& r) { return this->C.dec_recursive_EE(r); };
                 break;
+            case method_t::GMD:
+                // Soft-input only; decoded through operator()(Vector<double>) / operator()(Matrix<double>).
+                break;
 #endif
             default:
                 break;
@@ -5281,7 +5342,12 @@ class Dec {
             return C.dec_BP(in, bp_max_iterations);
         else if (method == method_t::ML_soft)
             return C.dec_ML_soft(in, cache_limit);
-        throw std::logic_error("Vector soft input requires a soft method (Viterbi_soft, BCJR, BP, or ML_soft)!");
+#ifdef CECCO_ERASURE_SUPPORT
+        else if (method == method_t::GMD)
+            return C.dec_GMD(in);
+#endif
+        throw std::logic_error(
+            "Vector soft input requires a soft method (Viterbi_soft, BCJR, BP, ML_soft, or GMD)!");
     }
 
     Vector<T> operator()(const Matrix<double>& in) const {
@@ -5293,7 +5359,12 @@ class Dec {
             return C.dec_BP(in, bp_max_iterations);
         else if (method == method_t::ML_soft)
             return C.dec_ML_soft(in, cache_limit);
-        throw std::logic_error("Matrix soft input requires a soft method (Viterbi_soft, BCJR, BP, or ML_soft)!");
+#ifdef CECCO_ERASURE_SUPPORT
+        else if (method == method_t::GMD)
+            return C.dec_GMD(in);
+#endif
+        throw std::logic_error(
+            "Matrix soft input requires a soft method (Viterbi_soft, BCJR, BP, ML_soft, or GMD)!");
     }
 
     // Docu note: cache_limit (ML_soft) and bp_max_iterations (BP) are method-specific knobs;

@@ -5,10 +5,10 @@
 using namespace CECCO;
 
 int main(void) {
-    using F = Fp<3>;
+    using F = Ext<Fp<2>, MOD{1, 1, 1}>;
 
-    const size_t n = 17;
-    const size_t k = 9;
+    const size_t n = 13;
+    const size_t k = 6;
     auto G = ZeroMatrix<F>(k, n);
     do {
         G.randomize();
@@ -118,58 +118,59 @@ int main(void) {
         assert(dH(r, c_est) == dH(r, C.dec_Viterbi_EE(r)));
     }
 
-    if constexpr (std::is_same_v<F, Fp<2>>) {
-        const double EbNodB = -1;
-        BI_AWGN channel(EbNodB);
+    // note: this only works if F has characteristic 2
 
-        // RX
-        auto y = channel(c);
-        auto LLRs = LLRCalculator(channel)(y);
+    DEMUX<F, Fp<2>> demux;
+    const double EbNodB = 0;
+    BI_AWGN channel(EbNodB);
+    LLRCalculator<F> llrcalculator(channel);
 
-        {
-            auto c_est = C.dec_Viterbi_soft(LLRs);
-            auto u_est = C.encinv(c_est);
-            std::cout << "Soft ML decoding message estimate: " << u_est << std::endl;
-            if (u_est == u) {
-                std::cout << "... this is correct decoding." << std::endl;
-            } else {
-                std::cout << "... this is wrong decoding/a word error with " << dH(u, u_est)
-                          << " (message) symbol errors" << std::endl;
+    // RX
+    auto y = channel(demux(c));
+    auto llrs = llrcalculator(y);
+    std::cout << "Per-symbol LLR matrix: " << std::endl << llrs << std::endl;
+
+    auto r = Vector<F>(n);
+    auto reliabilities = Vector<double>(n);
+
+    for (size_t i = 0; i < n; ++i) {
+        size_t best_label = 0; // initialization, F(0) is best
+        double best = 0.0;
+        double second = std::numeric_limits<double>::infinity();
+        for (size_t a = 1; a < F::get_q(); ++a) {
+            const double cost = llrs(a - 1, i);
+            if (cost < best) {
+                second = best;
+                best = cost;
+                best_label = a;
+            } else if (cost < second) {
+                second = cost;
             }
         }
 
-        {
-            auto c_est = C.dec_BCJR(LLRs);
-            auto u_est = c_est.get_subvector(0, k);
-            std::cout << "Soft s/s MAP decoding message estimate: " << u_est << std::endl;
-            if (u_est == u) {
-                std::cout << "... this is correct decoding." << std::endl;
-            } else {
-                std::cout << "... this is wrong decoding/a word error with " << dH(u, u_est)
-                          << " (message) symbol errors" << std::endl;
-            }
-        }
+        // hard decision: most probable symbol
+        r.set_component(i, F(best_label));
 
-        {
-            auto r = Vector<F>(C.get_n());
-            for (size_t i = 0; i < C.get_n(); ++i) r.set_component(i, LLRs[i] < 0 ? 1 : 0);
-            std::vector<double> reliabilities(n);
-            for (size_t i = 0; i < C.get_n(); ++i) reliabilities[i] = abs(LLRs[i]);
+        // reliability in [0, 1]: best-vs-second through tanh
+        const double lambda = second - best;
+        reliabilities.set_component(i, std::tanh(lambda / 2.0));
+    }
 
-            try {
-                auto c_est = C.dec_GMD(r, reliabilities);
-                auto u_est = C.encinv(c_est);
-                std::cout << "Pseudo-soft GMD decoding message estimate: " << u_est << std::endl;
-                if (u_est == u) {
-                    std::cout << "... this is correct decoding." << std::endl;
-                } else {
-                    std::cout << "... this is wrong decoding/a word error with " << dH(u, u_est)
-                              << " (message) symbol errors" << std::endl;
-                }
-            } catch (const decoding_failure& e) {
-                std::cout << "GMD decoding failure: " << e.what() << std::endl;
-            }
+    std::cout << "Hard decision r: " << std::endl << r << std::endl;
+    std::cout << "Reliabilities: " << std::endl << reliabilities << std::endl;
+
+    try {
+        auto c_est = C.dec_GMD(r, reliabilities);
+        auto u_est = C.encinv(c_est);
+        std::cout << "GMD decoding message estimate: " << u_est << std::endl;
+        if (u_est == u) {
+            std::cout << "... this is correct decoding." << std::endl;
+        } else {
+            std::cout << "... this is wrong decoding/a word error with " << dH(u, u_est) << " (message) symbol errors"
+                      << std::endl;
         }
+    } catch (const decoding_failure& e) {
+        std::cout << "GMD decoding failure: " << e.what() << std::endl;
     }
 
     return 0;
