@@ -110,10 +110,13 @@ long double PlotkinUpperBound(size_t n, size_t dmin) {
                              static_cast<long double>((Q * D - N * (Q - 1)).toUnsignedLongLong())) /
                    std::log2(static_cast<long double>(q));
         } else {  // improved
-            const InfInt Delta = N - Q * D / (Q - 1) + 1;
-            const InfInt M = sqm<InfInt>(q, Delta.toUnsignedLongLong() + 1) * D / (Q * D - (N - Delta) * (Q - 1));
+            const InfInt temp = (Q * D + (Q - 2)) / (Q - 1);
+            const InfInt denominator = Q * D - (temp - 1) * (Q - 1);
 
-            return std::log2(static_cast<long double>(M.toUnsignedLongLong())) / std::log2(static_cast<long double>(q));
+            return static_cast<long double>((N - temp + 2).toUnsignedLongLong()) +
+                   std::log2(static_cast<long double>(D.toUnsignedLongLong()) /
+                             static_cast<long double>(denominator.toUnsignedLongLong())) /
+                       std::log2(static_cast<long double>(q));
         }
     } catch (const InfIntException& e) {
         std::cerr << " [Plotkin bound overflow]";
