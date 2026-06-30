@@ -1864,12 +1864,14 @@ std::vector<Vector<T>> Matrix<T>::rowspace() const
         throw std::out_of_range("row space too big (more than 10^10 elements) to compute all elements");
     }
     const size_t size = sqm<size_t>(q, r);
+    std::vector<size_t> qpow(r);
+    for (size_t i = 0; i < r; ++i) qpow[i] = (i == 0) ? 1 : qpow[i - 1] * q;
     std::vector<Vector<T>> res;
     res.reserve(size);
     for (size_t counter = 0; counter < size; ++counter) {
         Vector<T> temp(n);
         for (size_t i = 0; i < r; ++i) {
-            T scalar(counter / sqm<size_t>(q, i) % q);
+            T scalar(counter / qpow[i] % q);
             if (scalar != T(0)) {
                 temp += scalar * get_row(r - i - 1);
             }

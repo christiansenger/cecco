@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.4
+ * @version 2.4.1
  * @date 2026
  *
  * @copyright
@@ -37,6 +37,7 @@
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <queue>
 #include <random>
 #include <ranges>
 #include <set>
@@ -61,6 +62,18 @@
 // cap used when decoding through Dec with method_t::BP. Override with -DBP_MAX_ITERATIONS=<value>.
 #ifndef BP_MAX_ITERATIONS
 #define BP_MAX_ITERATIONS 100
+#endif
+
+// Docu note: default OSD order on the base-class dec_OSD/dec_LC_OSD virtuals, hence the order Dec
+// uses for method_t::OSD and method_t::LC_OSD. Override with -DOSD_ORDER=<value>.
+#ifndef OSD_ORDER
+#define OSD_ORDER 2
+#endif
+
+// Docu note: default LC-OSD buffer width on the base-class dec_LC_OSD virtuals, hence the width Dec
+// uses for method_t::LC_OSD. Override with -DLC_OSD_DELTA=<value>.
+#ifndef LC_OSD_DELTA
+#define LC_OSD_DELTA 4
 #endif
 
 namespace CECCO {
@@ -106,6 +119,8 @@ Polynomial<InfInt> MacWilliamsIdentity(const Polynomial<InfInt>& A, size_t n, si
 namespace details {
 
 inline const int index = std::ios_base::xalloc();
+
+struct CodewordSentinel {};
 
 }  // namespace details
 
@@ -222,6 +237,26 @@ class Code {
                              const std::string& = "", size_t* = nullptr) const {
         throw std::logic_error("Belief-propagation decoding not supported for this code!");
     }
+    // Docu note: OSD is the delta = 0 special case of dec_LC_OSD; w is the order, the maximum Hamming
+    // weight of a test error pattern on the information symbols.
+    virtual Vector<T> dec_OSD(const Vector<double>&, size_t = OSD_ORDER) const {
+        throw std::logic_error("OSD decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_OSD(const Matrix<double>&, size_t = OSD_ORDER) const {
+        throw std::logic_error("OSD decoding not supported for this code!");
+    }
+    // Docu note: w is the OSD order (max test-error-pattern weight on the information symbols; w >= k is
+    // the full ML candidate set), delta the buffer width (a q^delta-state search), ell_max the maximum list
+    // size. ell_max = infinity searches to the exact OSD(w) optimum (delta then affects only effort, so it
+    // equals OSD(w)); a finite ell_max stops after ell_max candidates, trading error performance for complexity.
+    virtual Vector<T> dec_LC_OSD(const Vector<double>&, size_t = LC_OSD_DELTA, size_t = OSD_ORDER,
+                                 size_t = std::numeric_limits<size_t>::max()) const {
+        throw std::logic_error("LC-OSD decoding not supported for this code!");
+    }
+    virtual Vector<T> dec_LC_OSD(const Matrix<double>&, size_t = LC_OSD_DELTA, size_t = OSD_ORDER,
+                                 size_t = std::numeric_limits<size_t>::max()) const {
+        throw std::logic_error("LC-OSD decoding not supported for this code!");
+    }
 #ifdef CECCO_ERASURE_SUPPORT
     virtual Vector<T> dec_BD_EE(const Vector<T>&) const {
         throw std::logic_error("BD error/erasure decoding not supported for this code!");
@@ -298,6 +333,8 @@ enum class method_t {
     Meggitt,
     WBA,
     BMA,
+    OSD,
+    LC_OSD,
 #ifdef CECCO_ERASURE_SUPPORT
     WBA_EE,
     BMA_EE,
@@ -328,28 +365,38 @@ template <FieldType T, class B>
     requires std::derived_from<B, LinearCode<T>>
 class ExtendedCode;
 
+// Docu note: input iterator. operator++ updates the internal state in place, so any reference returned
+// by a prior operator*() is invalidated by the increment; copy the codeword if it must outlive ++.
 template <FiniteFieldType T>
 class CodewordIterator {
-    friend bool operator==(const CodewordIterator& a, const CodewordIterator& b) { return a.counter == b.counter; }
+    friend bool operator==(const CodewordIterator& a, const CodewordIterator& b) {
+        return a.C == b.C && a.counter == b.counter;
+    }
     friend bool operator!=(const CodewordIterator& a, const CodewordIterator& b) { return !(a == b); }
+    friend bool operator==(const CodewordIterator& a, details::CodewordSentinel) {
+        return a.counter == a.C->get_size();
+    }
 
    public:
     // Required for STL compatibility
-    using iterator_category = std::forward_iterator_tag;
+    using iterator_category = std::input_iterator_tag;
     using value_type = Vector<T>;
     using difference_type = std::ptrdiff_t;
     using pointer = const Vector<T>*;
     using reference = const Vector<T>&;
 
-    CodewordIterator(const LinearCode<T>& C, InfInt s) : C(C), counter(s), u(C.get_k()) {
-        constexpr size_t q = T::get_size();
-        if (s < C.get_size()) {  // for cend()
-            const size_t k = C.get_k();
-            for (size_t i = 0; i < k; ++i) {
-                u.set_component(i, T((s % q).toInt()));
+    CodewordIterator(const LinearCode<T>& C, InfInt s) : C(&C), counter(s), d(C.get_k(), 0), c(C.get_n()) {
+        if (s < C.get_size()) {
+            constexpr size_t q = T::get_size();
+            const size_t n = c.get_n();
+            const Matrix<T>& G = C.get_G();
+            for (size_t i = 0; i < d.size(); ++i) {
+                const size_t rem = (s % q).toInt();
+                d[i] = rem;
+                if (rem != 0)
+                    for (size_t j = 0; j < n; ++j) c.set_component(j, c[j] + T(rem) * G(i, j));
                 s /= q;
             }
-            c = u * C.get_G();
         }
     }
 
@@ -357,25 +404,31 @@ class CodewordIterator {
 
     CodewordIterator& operator++() {
         constexpr size_t q = T::get_size();
-        const size_t k = C.get_k();
+        const size_t k = d.size();
+        const size_t n = c.get_n();
+        const Matrix<T>& G = C->get_G();
         ++counter;
-        if (counter < C.get_size()) {
-            auto j = counter;
-            for (size_t i = 0; i < k; ++i) {
-                const auto quot = j / q;
-                const auto rem = (j % q).toInt();
-                u.set_component(i, T(rem));
-                j = quot;
-            }
-            c = u * C.get_G();
+        for (size_t i = 0; i < k; ++i) {
+            const size_t old_label = d[i];
+            const size_t new_label = (old_label + 1 == q) ? 0 : old_label + 1;
+            const T delta = T(new_label) - T(old_label);
+            for (size_t j = 0; j < n; ++j) c.set_component(j, c[j] + delta * G(i, j));
+            d[i] = new_label;
+            if (new_label != 0) break;
         }
         return *this;
     }
 
+    CodewordIterator operator++(int) {
+        CodewordIterator tmp = *this;
+        ++(*this);
+        return tmp;
+    }
+
    private:
-    const LinearCode<T>& C;
+    const LinearCode<T>* C;
     InfInt counter;
-    Vector<T> u;
+    std::vector<size_t> d;
     Vector<T> c;
 };
 
@@ -467,6 +520,7 @@ class LinearCode : public Code<T> {
           HT(other.HT),
           MI(other.MI),
           infoset(other.infoset),
+          size(other.size),
           dmin(other.dmin),
           weight_enumerator(other.weight_enumerator),
           p_ary_image_weight_enumerator(other.p_ary_image_weight_enumerator),
@@ -491,6 +545,7 @@ class LinearCode : public Code<T> {
           HT(std::move(other.HT)),
           MI(std::move(other.MI)),
           infoset(std::move(other.infoset)),
+          size(std::move(other.size)),
           dmin(std::move(other.dmin)),
           weight_enumerator(std::move(other.weight_enumerator)),
           p_ary_image_weight_enumerator(std::move(other.p_ary_image_weight_enumerator)),
@@ -516,6 +571,7 @@ class LinearCode : public Code<T> {
             HT = other.HT;
             MI = other.MI;
             infoset = other.infoset;
+            size = other.size;
             dmin = other.dmin;
             weight_enumerator = other.weight_enumerator;
             p_ary_image_weight_enumerator = other.p_ary_image_weight_enumerator;
@@ -543,6 +599,7 @@ class LinearCode : public Code<T> {
             HT = std::move(other.HT);
             MI = std::move(other.MI);
             infoset = std::move(other.infoset);
+            size = std::move(other.size);
             dmin = std::move(other.dmin);
             weight_enumerator = std::move(other.weight_enumerator);
             p_ary_image_weight_enumerator = std::move(other.p_ary_image_weight_enumerator);
@@ -568,7 +625,11 @@ class LinearCode : public Code<T> {
     InfInt get_size() const
         requires FiniteFieldType<T>
     {
-        return sqm<InfInt>(T::get_size(), k);
+        size.call_once([this] {
+            if (size.has_value()) return;
+            size.emplace(sqm<InfInt>(T::get_size(), k));
+        });
+        return size.value();
     }
 
     const Matrix<T>& get_G() const noexcept { return G; }
@@ -597,9 +658,9 @@ class LinearCode : public Code<T> {
                     return;
                 }
 
-                // if less than 100 codewords calculate weight enumerator (even when not required)
+                // if less than 1000 codewords calculate weight enumerator (even when not required)
                 if constexpr (FiniteFieldType<T>) {
-                    if (get_size() < 100) {
+                    if (get_size() < 1000) {
                         get_weight_enumerator();
                         for (size_t i = 1; i <= weight_enumerator.value().degree(); ++i) {
                             if (weight_enumerator.value()[i] != 0) {
@@ -1023,16 +1084,13 @@ class LinearCode : public Code<T> {
     auto cbegin() const
         requires FiniteFieldType<T>
     {
-        if (k == 0)
-            return CodewordIterator<T>(*this, get_size());
-        else
-            return CodewordIterator<T>(*this, 0);
+        return CodewordIterator<T>(*this, 0);
     }
 
     auto cend() const
         requires FiniteFieldType<T>
     {
-        return CodewordIterator<T>(*this, get_size());
+        return details::CodewordSentinel{};
     }
 
     /**
@@ -1671,21 +1729,20 @@ class LinearCode : public Code<T> {
             const T lead_inv = T(1) / gamma[redundancy];
             const auto& table = get_Meggitt_table();
 
-            Vector<T> s = pad_back(Vector<T>(Polynomial<T>(r) % gamma), redundancy);
+            Vector<T> s = pad_back(Vector<T>((Polynomial<T>(r) * Polynomial<T>({T(0), T(1)})) % gamma), redundancy);
 
             if (s.is_zero()) return r;
 
             Vector<T> c_est = r;
             bool corrected = false;
-            for (size_t i = 0; i < n; ++i) {
+            for (size_t j = n; j-- > 0;) {
                 const auto it = table.find(s.as_integer());
                 if (it != table.end()) {
-                    const size_t pos = (n - i) % n;
-                    c_est.set_component(pos, r[pos] - it->second);
+                    c_est.set_component(j, r[j] - it->second);
                     corrected = true;
                 }
                 const T feedback = s[redundancy - 1] * lead_inv;
-                for (size_t j = redundancy - 1; j > 0; --j) s.set_component(j, s[j - 1] - feedback * gamma[j]);
+                for (size_t l = redundancy - 1; l > 0; --l) s.set_component(l, s[l - 1] - feedback * gamma[l]);
                 s.set_component(0, -feedback * gamma[0]);
             }
 
@@ -1767,18 +1824,18 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t cache_limit = 1000) const override {
+    virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t ml_soft_cache_limit = 1000) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Soft-input ML decoding only available for codes over finite fields!");
         } else if constexpr (T::get_size() != 2) {
             throw std::logic_error(
                 "Soft-input ML vector decoding only available for binary codes; use the Matrix<double> overload!");
         } else {
-            return dec_ML_soft(Matrix<double>(llrs), cache_limit);
+            return dec_ML_soft(Matrix<double>(llrs), ml_soft_cache_limit);
         }
     }
 
-    virtual Vector<T> dec_ML_soft(const Matrix<double>& llrs, size_t cache_limit = 1000) const override {
+    virtual Vector<T> dec_ML_soft(const Matrix<double>& llrs, size_t ml_soft_cache_limit = 1000) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Soft-input ML decoding only available for codes over finite fields!");
         } else {
@@ -1795,7 +1852,7 @@ class LinearCode : public Code<T> {
             double best = std::numeric_limits<double>::max();
             uint16_t ties = 1;
 
-            if (this->get_size() <= cache_limit) {
+            if (this->get_size() <= ml_soft_cache_limit) {
                 codewords.call_once([this] {
                     if (codewords.has_value()) return;
                     codewords.emplace(this->get_G().span());
@@ -1827,6 +1884,227 @@ class LinearCode : public Code<T> {
             }
 
             return c_est;
+        }
+    }
+
+    virtual Vector<T> dec_OSD(const Vector<double>& llrs, size_t w = OSD_ORDER) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("OSD decoding only available for codes over finite fields!");
+        } else if constexpr (T::get_size() != 2) {
+            throw std::logic_error(
+                "Soft-input OSD vector decoding only available for binary codes; use the Matrix<double> overload!");
+        } else {
+            return dec_OSD(Matrix<double>(llrs), w);
+        }
+    }
+
+    virtual Vector<T> dec_OSD(const Matrix<double>& llrs, size_t w = OSD_ORDER) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("OSD decoding only available for codes over finite fields!");
+        } else {
+            return dec_LC_OSD(llrs, 0, w);
+        }
+    }
+
+    virtual Vector<T> dec_LC_OSD(const Vector<double>& llrs, size_t delta = LC_OSD_DELTA, size_t w = OSD_ORDER,
+                                 size_t ell_max = std::numeric_limits<size_t>::max()) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("LC-OSD decoding only available for codes over finite fields!");
+        } else if constexpr (T::get_size() != 2) {
+            throw std::logic_error(
+                "Soft-input LC-OSD vector decoding only available for binary codes; use the Matrix<double> overload!");
+        } else {
+            return dec_LC_OSD(Matrix<double>(llrs), delta, w, ell_max);
+        }
+    }
+
+    virtual Vector<T> dec_LC_OSD(const Matrix<double>& llrs, size_t delta = LC_OSD_DELTA, size_t w = OSD_ORDER,
+                                 size_t ell_max = std::numeric_limits<size_t>::max()) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("LC-OSD decoding only available for codes over finite fields!");
+        } else {
+            validate_length(llrs);
+            if (ell_max == 0) throw std::invalid_argument("LC-OSD list size must be positive");
+
+            const size_t n = this->n;
+            if (k == 0) return Vector<T>(n);
+
+            constexpr size_t q = T::get_size();
+            const size_t redundancy = n - k;
+
+            std::vector<std::array<double, q>> costs;
+            costs.reserve(n);
+            Vector<T> hard(n);
+            std::vector<double> reliability(n);
+            for (size_t i = 0; i < n; ++i) {
+                const auto c = details::symbol_costs_from_llrs<T>(llrs, i);
+                costs.push_back(c);
+                size_t best_label = 0;
+                double best = c[0];
+                double second = std::numeric_limits<double>::infinity();
+                for (size_t a = 1; a < q; ++a) {
+                    if (c[a] < best) {
+                        second = best;
+                        best = c[a];
+                        best_label = a;
+                    } else if (c[a] < second) {
+                        second = c[a];
+                    }
+                }
+                hard.set_component(i, T(best_label));
+                reliability[i] = second - best;
+            }
+
+            std::vector<size_t> order(n);
+            std::iota(order.begin(), order.end(), 0);
+            std::stable_sort(order.begin(), order.end(),
+                             [&](size_t a, size_t b) { return reliability[a] > reliability[b]; });
+
+            const auto columns = [&](const std::vector<size_t>& cols) {
+                Matrix<T> M(k, cols.size());
+                for (size_t j = 0; j < cols.size(); ++j) M.set_submatrix(0, j, G.get_submatrix(0, cols[j], k, 1));
+                return M;
+            };
+
+            std::vector<size_t> mris;
+            mris.reserve(k);
+            for (size_t idx = 0; idx < n && mris.size() < k; ++idx) {
+                std::vector<size_t> trial = mris;
+                trial.push_back(order[idx]);
+                if (columns(trial).rank() == trial.size()) mris = std::move(trial);
+            }
+
+            std::vector<size_t> perm = mris;
+            std::vector<bool> in_mris(n, false);
+            for (size_t p : mris) in_mris[p] = true;
+            for (size_t p : order)
+                if (!in_mris[p]) perm.push_back(p);
+
+            const Matrix<T> Gsys = rref(columns(perm));
+
+            Vector<T> u0(k);
+            for (size_t j = 0; j < k; ++j) u0.set_component(j, hard[perm[j]]);
+
+            const auto codeword_and_cost = [&](const Vector<T>& v) {
+                const Vector<T> c_perm = v * Gsys;
+                double cost = 0.0;
+                for (size_t j = 0; j < n; ++j) cost += costs[perm[j]][c_perm[j].get_label()];
+                Vector<T> c(n);
+                for (size_t j = 0; j < n; ++j) c.set_component(perm[j], c_perm[j]);
+                return std::pair<Vector<T>, double>{std::move(c), cost};
+            };
+
+            const size_t d = std::min(delta, redundancy);
+            if (sqm<InfInt>(q, d) > sqm<InfInt>(10, 6))
+                throw std::out_of_range("LC-OSD trellis too big (more than 10^6 states) to compute");
+            const size_t ww = std::min(w, k);
+            const size_t stages = k + d;
+            const size_t num_states = sqm<size_t>(q, d);
+
+            std::vector<std::vector<T>> hcol(stages, std::vector<T>(d, T(0)));
+            for (size_t i = 0; i < k; ++i)
+                for (size_t j = 0; j < d; ++j) hcol[i][j] = -Gsys(i, k + j);
+            for (size_t l = 0; l < d; ++l) hcol[k + l][l] = T(1);
+
+            std::vector<size_t> trans(stages * num_states * q);
+            std::vector<size_t> digits(d);
+            for (size_t i = 0; i < stages; ++i)
+                for (size_t s = 0; s < num_states; ++s) {
+                    size_t tmp = s;
+                    for (size_t j = 0; j < d; ++j) {
+                        digits[j] = tmp % q;
+                        tmp /= q;
+                    }
+                    for (size_t a = 0; a < q; ++a) {
+                        size_t ns = 0;
+                        size_t mul = 1;
+                        for (size_t j = 0; j < d; ++j) {
+                            ns += (T(digits[j]) + T(a) * hcol[i][j]).get_label() * mul;
+                            mul *= q;
+                        }
+                        trans[(i * num_states + s) * q + a] = ns;
+                    }
+                }
+
+            constexpr double inf = std::numeric_limits<double>::infinity();
+            std::vector<double> cost_to_go((stages + 1) * num_states, inf);
+            cost_to_go[stages * num_states] = 0.0;
+            for (size_t i = stages; i-- > 0;)
+                for (size_t s = 0; s < num_states; ++s) {
+                    double best = inf;
+                    for (size_t a = 0; a < q; ++a) {
+                        const double e =
+                            costs[perm[i]][a] + cost_to_go[(i + 1) * num_states + trans[(i * num_states + s) * q + a]];
+                        if (e < best) best = e;
+                    }
+                    cost_to_go[i * num_states + s] = best;
+                }
+
+            double tail_min = 0.0;
+            for (size_t j = stages; j < n; ++j) {
+                double m = 0.0;
+                for (size_t a = 1; a < q; ++a) m = std::min(m, costs[perm[j]][a]);
+                tail_min += m;
+            }
+
+            struct Node {
+                double f;
+                double g;
+                size_t stage;
+                size_t state;
+                size_t parent;
+                size_t label;
+                size_t dev;
+            };
+            std::vector<Node> pool;
+            pool.push_back(Node{cost_to_go[0], 0.0, 0, 0, std::numeric_limits<size_t>::max(), 0, 0});
+
+            const auto node_cmp = [&pool](size_t a, size_t b) { return pool[a].f > pool[b].f; };
+            std::priority_queue<size_t, std::vector<size_t>, decltype(node_cmp)> heap(node_cmp);
+            heap.push(0);
+
+            Vector<T> best_c;
+            double best_cost = inf;
+            uint16_t ties = 1;
+            size_t list_size = 0;
+
+            while (!heap.empty()) {
+                const size_t ni = heap.top();
+                heap.pop();
+                if (pool[ni].f + tail_min > best_cost) break;
+
+                if (pool[ni].stage == stages) {
+                    Vector<T> v(k);
+                    for (size_t cur = ni; pool[cur].stage > 0; cur = pool[cur].parent) {
+                        const size_t st = pool[cur].stage - 1;
+                        if (st < k) v.set_component(st, T(pool[cur].label));
+                    }
+                    auto [c, cost] = codeword_and_cost(v);
+                    if (cost < best_cost) {
+                        best_cost = cost;
+                        best_c = std::move(c);
+                        ties = 1;
+                    } else if (cost == best_cost) {
+                        if (details::reservoir_accept(++ties)) best_c = std::move(c);
+                    }
+                    if (++list_size >= ell_max) break;
+                    continue;
+                }
+
+                const size_t i = pool[ni].stage;
+                for (size_t a = 0; a < q; ++a) {
+                    const size_t dev = pool[ni].dev + ((i < k && a != u0[i].get_label()) ? 1 : 0);
+                    if (dev > ww) continue;
+                    const size_t ns = trans[(i * num_states + pool[ni].state) * q + a];
+                    const double h = cost_to_go[(i + 1) * num_states + ns];
+                    if (h == inf) continue;
+                    const double g = pool[ni].g + costs[perm[i]][a];
+                    pool.push_back(Node{g + h, g, i + 1, ns, ni, a, dev});
+                    heap.push(pool.size() - 1);
+                }
+            }
+
+            return best_c;
         }
     }
 
@@ -2086,28 +2364,25 @@ class LinearCode : public Code<T> {
             validate_length(llrs);
 
             const size_t n = this->n;
+            constexpr size_t q = T::get_size();
             Vector<T> r(n);
             Vector<double> reliabilities(n);
-
             for (size_t i = 0; i < n; ++i) {
+                const auto c = details::symbol_costs_from_llrs<T>(llrs, i);
                 size_t best_label = 0;
-                double best = 0.0;
+                double best = c[0];
                 double second = std::numeric_limits<double>::infinity();
-                for (size_t a = 1; a < T::get_size(); ++a) {
-                    const double cost = llrs(a - 1, i);
-                    if (cost < best) {
+                for (size_t a = 1; a < q; ++a) {
+                    if (c[a] < best) {
                         second = best;
-                        best = cost;
+                        best = c[a];
                         best_label = a;
-                    } else if (cost < second) {
-                        second = cost;
+                    } else if (c[a] < second) {
+                        second = c[a];
                     }
                 }
-
                 r.set_component(i, T(best_label));
-
-                const double lambda = second - best;
-                reliabilities.set_component(i, std::tanh(lambda / 2.0));
+                reliabilities.set_component(i, std::tanh((second - best) / 2.0));
             }
 
             return dec_GMD(r, reliabilities);
@@ -2147,6 +2422,7 @@ class LinearCode : public Code<T> {
     Matrix<T> HT;
     Matrix<T> MI;
     std::vector<size_t> infoset{};
+    mutable details::OnceCache<InfInt> size;
     mutable details::OnceCache<size_t> dmin;
     mutable details::OnceCache<Polynomial<InfInt>> weight_enumerator;
     mutable details::OnceCache<Polynomial<InfInt>> p_ary_image_weight_enumerator;
@@ -2943,17 +3219,17 @@ class SimplexCode : public LinearCode<T> {
         return FWHT_argmax(y);
     }
 
-    Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t cache_limit) const override {
+    Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t ml_soft_cache_limit) const override {
         if constexpr (T::get_size() != 2) {
-            return LinearCode<T>::dec_ML_soft(llrs, cache_limit);
+            return LinearCode<T>::dec_ML_soft(llrs, ml_soft_cache_limit);
         } else {
-            return dec_ML_soft(Matrix<double>(llrs), cache_limit);
+            return dec_ML_soft(Matrix<double>(llrs), ml_soft_cache_limit);
         }
     }
 
-    Vector<T> dec_ML_soft(const Matrix<double>& llrs, [[maybe_unused]] size_t cache_limit) const override {
+    Vector<T> dec_ML_soft(const Matrix<double>& llrs, [[maybe_unused]] size_t ml_soft_cache_limit) const override {
         if constexpr (T::get_size() != 2) {
-            return LinearCode<T>::dec_ML_soft(llrs, cache_limit);
+            return LinearCode<T>::dec_ML_soft(llrs, ml_soft_cache_limit);
         } else {
             this->validate_length(llrs);
 
@@ -5298,6 +5574,8 @@ class Dec {
             case method_t::Viterbi_soft:
             case method_t::BCJR:
             case method_t::BP:
+            case method_t::OSD:
+            case method_t::LC_OSD:
                 // Soft-input only; decoded through operator()(Vector<double>) / operator()(Matrix<double>).
                 break;
 #ifdef CECCO_ERASURE_SUPPORT
@@ -5341,13 +5619,17 @@ class Dec {
         else if (method == method_t::BP)
             return C.dec_BP(in, bp_max_iterations);
         else if (method == method_t::ML_soft)
-            return C.dec_ML_soft(in, cache_limit);
+            return C.dec_ML_soft(in, ml_soft_cache_limit);
+        else if (method == method_t::OSD)
+            return C.dec_OSD(in, osd_order);
+        else if (method == method_t::LC_OSD)
+            return C.dec_LC_OSD(in, lc_osd_delta, lc_osd_order, lc_osd_ell_max);
 #ifdef CECCO_ERASURE_SUPPORT
         else if (method == method_t::GMD)
             return C.dec_GMD(in);
 #endif
         throw std::logic_error(
-            "Vector soft input requires a soft method (Viterbi_soft, BCJR, BP, ML_soft, or GMD)!");
+            "Vector soft input requires a soft method (Viterbi_soft, BCJR, BP, ML_soft, OSD, LC_OSD, or GMD)!");
     }
 
     Vector<T> operator()(const Matrix<double>& in) const {
@@ -5358,26 +5640,39 @@ class Dec {
         else if (method == method_t::BP)
             return C.dec_BP(in, bp_max_iterations);
         else if (method == method_t::ML_soft)
-            return C.dec_ML_soft(in, cache_limit);
+            return C.dec_ML_soft(in, ml_soft_cache_limit);
+        else if (method == method_t::OSD)
+            return C.dec_OSD(in, osd_order);
+        else if (method == method_t::LC_OSD)
+            return C.dec_LC_OSD(in, lc_osd_delta, lc_osd_order, lc_osd_ell_max);
 #ifdef CECCO_ERASURE_SUPPORT
         else if (method == method_t::GMD)
             return C.dec_GMD(in);
 #endif
         throw std::logic_error(
-            "Matrix soft input requires a soft method (Viterbi_soft, BCJR, BP, ML_soft, or GMD)!");
+            "Matrix soft input requires a soft method (Viterbi_soft, BCJR, BP, ML_soft, OSD, LC_OSD, or GMD)!");
     }
 
-    // Docu note: cache_limit (ML_soft) and bp_max_iterations (BP) are method-specific knobs;
-    // both default sensibly and can be overridden after construction via these setters.
-    void set_cache_limit(size_t l) { cache_limit = l; }
+    // Docu note: ml_soft_cache_limit (ML_soft), bp_max_iterations (BP), osd_order (OSD), and lc_osd_delta /
+    // lc_osd_order / lc_osd_ell_max (LC_OSD) are method-specific knobs; all default sensibly and can be
+    // overridden after construction via these setters.
+    void set_cache_limit(size_t l) { ml_soft_cache_limit = l; }
     void set_BP_max_iterations(size_t l) { bp_max_iterations = l; }
+    void set_OSD_order(size_t w) { osd_order = w; }
+    void set_LC_OSD_delta(size_t d) { lc_osd_delta = d; }
+    void set_LC_OSD_order(size_t w) { lc_osd_order = w; }
+    void set_LC_OSD_ell_max(size_t l) { lc_osd_ell_max = l; }
 
    private:
     const Code<T>& C;
     std::function<Vector<T>(const Vector<T>&)> dec;
     method_t method;
-    size_t cache_limit = 10000;
+    size_t ml_soft_cache_limit = 10000;
     size_t bp_max_iterations = BP_MAX_ITERATIONS;
+    size_t osd_order = OSD_ORDER;
+    size_t lc_osd_delta = LC_OSD_DELTA;
+    size_t lc_osd_order = OSD_ORDER;
+    size_t lc_osd_ell_max = std::numeric_limits<size_t>::max();
 };
 
 template <FiniteFieldType T>

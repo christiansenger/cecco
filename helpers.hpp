@@ -292,6 +292,7 @@ inline InfInt bin(const InfInt& n, InfInt k) {
  * For negative exponents, computes `(1/b)^|e|`.
  *
  * @note Returns `T(1)` for e = 0.
+ * @throws std::overflow_error if T is an unsigned integral type and the result would overflow it
  */
 template <class T>
 constexpr T sqm(T b, int e) {
@@ -307,10 +308,23 @@ constexpr T sqm(T b, int e) {
     // square and multiply
     T temp(1);
     unsigned int exp = static_cast<unsigned int>(e);
-    while (exp > 0) {
-        if (exp & 1) temp *= b;
-        b *= b;
-        exp >>= 1;
+    if constexpr (std::is_unsigned_v<T>) {
+        const auto mul = [](T x, T y) -> T {
+            if (x != T(0) && y > std::numeric_limits<T>::max() / x)
+                throw std::overflow_error("sqm: integer overflow");
+            return x * y;
+        };
+        while (exp > 0) {
+            if (exp & 1) temp = mul(temp, b);
+            exp >>= 1;
+            if (exp > 0) b = mul(b, b);
+        }
+    } else {
+        while (exp > 0) {
+            if (exp & 1) temp *= b;
+            exp >>= 1;
+            if (exp > 0) b *= b;
+        }
     }
     return temp;
 }
