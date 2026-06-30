@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.4.1
+ * @version 2.4.2
  * @date 2026
  *
  * @copyright
@@ -249,11 +249,11 @@ class Code {
     // the full ML candidate set), delta the buffer width (a q^delta-state search), ell_max the maximum list
     // size. ell_max = infinity searches to the exact OSD(w) optimum (delta then affects only effort, so it
     // equals OSD(w)); a finite ell_max stops after ell_max candidates, trading error performance for complexity.
-    virtual Vector<T> dec_LC_OSD(const Vector<double>&, size_t = LC_OSD_DELTA, size_t = OSD_ORDER,
+    virtual Vector<T> dec_LC_OSD(const Vector<double>&, size_t = OSD_ORDER, size_t = LC_OSD_DELTA,
                                  size_t = std::numeric_limits<size_t>::max()) const {
         throw std::logic_error("LC-OSD decoding not supported for this code!");
     }
-    virtual Vector<T> dec_LC_OSD(const Matrix<double>&, size_t = LC_OSD_DELTA, size_t = OSD_ORDER,
+    virtual Vector<T> dec_LC_OSD(const Matrix<double>&, size_t = OSD_ORDER, size_t = LC_OSD_DELTA,
                                  size_t = std::numeric_limits<size_t>::max()) const {
         throw std::logic_error("LC-OSD decoding not supported for this code!");
     }
@@ -1902,11 +1902,11 @@ class LinearCode : public Code<T> {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("OSD decoding only available for codes over finite fields!");
         } else {
-            return dec_LC_OSD(llrs, 0, w);
+            return dec_LC_OSD(llrs, w, 0);
         }
     }
 
-    virtual Vector<T> dec_LC_OSD(const Vector<double>& llrs, size_t delta = LC_OSD_DELTA, size_t w = OSD_ORDER,
+    virtual Vector<T> dec_LC_OSD(const Vector<double>& llrs, size_t w = OSD_ORDER, size_t delta = LC_OSD_DELTA,
                                  size_t ell_max = std::numeric_limits<size_t>::max()) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("LC-OSD decoding only available for codes over finite fields!");
@@ -1914,11 +1914,11 @@ class LinearCode : public Code<T> {
             throw std::logic_error(
                 "Soft-input LC-OSD vector decoding only available for binary codes; use the Matrix<double> overload!");
         } else {
-            return dec_LC_OSD(Matrix<double>(llrs), delta, w, ell_max);
+            return dec_LC_OSD(Matrix<double>(llrs), w, delta, ell_max);
         }
     }
 
-    virtual Vector<T> dec_LC_OSD(const Matrix<double>& llrs, size_t delta = LC_OSD_DELTA, size_t w = OSD_ORDER,
+    virtual Vector<T> dec_LC_OSD(const Matrix<double>& llrs, size_t w = OSD_ORDER, size_t delta = LC_OSD_DELTA,
                                  size_t ell_max = std::numeric_limits<size_t>::max()) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("LC-OSD decoding only available for codes over finite fields!");
@@ -5623,7 +5623,7 @@ class Dec {
         else if (method == method_t::OSD)
             return C.dec_OSD(in, osd_order);
         else if (method == method_t::LC_OSD)
-            return C.dec_LC_OSD(in, lc_osd_delta, lc_osd_order, lc_osd_ell_max);
+            return C.dec_LC_OSD(in, lc_osd_order, lc_osd_delta, lc_osd_ell_max);
 #ifdef CECCO_ERASURE_SUPPORT
         else if (method == method_t::GMD)
             return C.dec_GMD(in);
@@ -5644,7 +5644,7 @@ class Dec {
         else if (method == method_t::OSD)
             return C.dec_OSD(in, osd_order);
         else if (method == method_t::LC_OSD)
-            return C.dec_LC_OSD(in, lc_osd_delta, lc_osd_order, lc_osd_ell_max);
+            return C.dec_LC_OSD(in, lc_osd_order, lc_osd_delta, lc_osd_ell_max);
 #ifdef CECCO_ERASURE_SUPPORT
         else if (method == method_t::GMD)
             return C.dec_GMD(in);
@@ -5653,14 +5653,14 @@ class Dec {
             "Matrix soft input requires a soft method (Viterbi_soft, BCJR, BP, ML_soft, OSD, LC_OSD, or GMD)!");
     }
 
-    // Docu note: ml_soft_cache_limit (ML_soft), bp_max_iterations (BP), osd_order (OSD), and lc_osd_delta /
-    // lc_osd_order / lc_osd_ell_max (LC_OSD) are method-specific knobs; all default sensibly and can be
+    // Docu note: ml_soft_cache_limit (ML_soft), bp_max_iterations (BP), osd_order (OSD), and lc_osd_order /
+    // lc_osd_delta / lc_osd_ell_max (LC_OSD) are method-specific knobs; all default sensibly and can be
     // overridden after construction via these setters.
     void set_cache_limit(size_t l) { ml_soft_cache_limit = l; }
     void set_BP_max_iterations(size_t l) { bp_max_iterations = l; }
     void set_OSD_order(size_t w) { osd_order = w; }
-    void set_LC_OSD_delta(size_t d) { lc_osd_delta = d; }
     void set_LC_OSD_order(size_t w) { lc_osd_order = w; }
+    void set_LC_OSD_delta(size_t d) { lc_osd_delta = d; }
     void set_LC_OSD_ell_max(size_t l) { lc_osd_ell_max = l; }
 
    private:
@@ -5670,8 +5670,8 @@ class Dec {
     size_t ml_soft_cache_limit = 10000;
     size_t bp_max_iterations = BP_MAX_ITERATIONS;
     size_t osd_order = OSD_ORDER;
-    size_t lc_osd_delta = LC_OSD_DELTA;
     size_t lc_osd_order = OSD_ORDER;
+    size_t lc_osd_delta = LC_OSD_DELTA;
     size_t lc_osd_ell_max = std::numeric_limits<size_t>::max();
 };
 
