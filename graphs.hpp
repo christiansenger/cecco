@@ -208,6 +208,20 @@ struct Trellis {
     void add_edge(size_t segment, uint32_t id_from, uint32_t id_to, T value);
 
     /**
+     * @brief Add one edge in segment `segment`, allowing a parallel edge
+     *
+     * @param segment Segment index; connects layer `segment` to `segment + 1`
+     * @param id_from Source vertex id in layer `segment`
+     * @param id_to Target vertex id in layer `segment + 1`
+     * @param value Edge label
+     * @throws std::invalid_argument if `id_from` is missing or `id_to` breaks the id/index invariant
+     *
+     * Unlike @ref add_edge this does not reject an existing `(id_from, id_to)` edge; use it only
+     * where several labels legitimately connect the same two vertices (e.g. the LC-OSD local trellis).
+     */
+    void add_parallel_edge(size_t segment, uint32_t id_from, uint32_t id_to, T value);
+
+    /**
      * @brief Product trellis with componentwise added edge labels
      *
      * @param other Trellis with the same number of segments
@@ -292,6 +306,57 @@ struct Trellis {
         std::vector<std::vector<cost_t>> edge_costs;
         /// @brief Optional received word (hard symbols or LLR matrix) shown in TikZ output
         std::optional<std::variant<Vector<T>, Matrix<double>>> v;
+    };
+
+    /**
+     * @brief Workspace for list-output Viterbi decoding on this trellis
+     *
+     * @tparam cost_t Integral type for hard-decision costs or floating-point type for soft costs
+     *
+     * Stores edge costs by segment and, for the priority-first path enumeration, the backward
+     * cost-to-go from every vertex to the final layer. Construct it from the trellis before calling
+     * the list Viterbi routine in `codes.hpp`.
+     */
+    template <typename cost_t>
+        requires std::integral<cost_t> || std::floating_point<cost_t>
+    struct ListViterbi_Workspace {
+        /// @brief True for floating-point soft metrics
+        static constexpr bool is_soft = std::is_floating_point_v<cost_t>;
+        /// @brief Cost of an unreachable vertex or an infeasible path
+        static constexpr cost_t init =
+            is_soft ? std::numeric_limits<cost_t>::infinity() : std::numeric_limits<cost_t>::max();
+
+        /**
+         * @brief Allocate metric arrays for `tr`
+         *
+         * @param tr Trellis whose layer and edge sizes define the workspace
+         */
+        explicit ListViterbi_Workspace(const Trellis& tr);
+
+        /**
+         * @brief Set hard-decision edge costs from received word `r`
+         *
+         * @param tr Trellis whose edges define candidate symbols
+         * @param r Received word; length must equal the number of segments
+         * @throws std::invalid_argument if `r.get_n() != tr.E.size()`
+         */
+        void calculate_edge_costs(const Trellis& tr, const Vector<T>& r)
+            requires std::integral<cost_t>;
+
+        /**
+         * @brief Set soft edge costs from symbol-level LLRs
+         *
+         * @param trellis Trellis whose edges define candidate symbols
+         * @param llrs Symbol-level LLR matrix with q−1 rows and one column per segment
+         * @throws std::invalid_argument if the LLR matrix has the wrong number of rows or columns
+         */
+        void calculate_edge_costs(const Trellis& trellis, const Matrix<double>& llrs)
+            requires std::floating_point<cost_t> && FiniteFieldType<T>;
+
+        /// @brief Edge cost for each segment and edge index
+        std::vector<std::vector<cost_t>> edge_costs;
+        /// @brief Minimum cost from each vertex (by layer and id) to any final-layer vertex
+        std::vector<std::vector<cost_t>> cost_to_go;
     };
 
     /**
@@ -437,6 +502,15 @@ Trellis<T>::Trellis() : V(1) {
 
 template <FieldType T>
 void Trellis<T>::add_edge(size_t segment, uint32_t id_from, uint32_t id_to, T value) {
+    if (segment < E.size() &&
+        std::ranges::any_of(E[segment], [&](const auto& e) { return e.from_id == id_from && e.to_id == id_to; }))
+        throw std::invalid_argument("Edge (" + std::to_string(id_from) + " -> " + std::to_string(id_to) +
+                                    ") already exists in E[" + std::to_string(segment) + "]!");
+    add_parallel_edge(segment, id_from, id_to, value);
+}
+
+template <FieldType T>
+void Trellis<T>::add_parallel_edge(size_t segment, uint32_t id_from, uint32_t id_to, T value) {
     if (segment >= E.size()) {
         V.resize(segment + 2);
         E.resize(segment + 1);
@@ -456,11 +530,7 @@ void Trellis<T>::add_edge(size_t segment, uint32_t id_from, uint32_t id_to, T va
         Vt.emplace_back(id_to);
     }
 
-    auto& Es = E[segment];
-    if (std::ranges::any_of(Es, [&](const auto& e) { return e.from_id == id_from && e.to_id == id_to; }))
-        throw std::invalid_argument("Edge (" + std::to_string(id_from) + " -> " + std::to_string(id_to) +
-                                    ") already exists in E[" + std::to_string(segment) + "]!");
-    Es.emplace_back(id_from, id_to, value);
+    E[segment].emplace_back(id_from, id_to, value);
 }
 
 template <FieldType T>
@@ -537,6 +607,51 @@ template <typename cost_t>
              std::floating_point<cost_t>
              void Trellis<T>::Viterbi_Workspace<cost_t>::calculate_edge_costs(const Trellis& trellis,
                                                                               const Matrix<double>& llrs)
+                 requires std::floating_point<cost_t> && FiniteFieldType<T>
+{
+    if (llrs.get_m() != T::get_size() - 1 || llrs.get_n() != trellis.E.size())
+        throw std::invalid_argument("LLR matrix must have q-1 rows and one column per trellis segment!");
+    for (size_t s = 0; s < trellis.E.size(); ++s) {
+        const auto symbol_costs = details::symbol_costs_from_llrs<T>(llrs, s);
+        for (size_t j = 0; j < trellis.E[s].size(); ++j)
+            edge_costs[s][j] = symbol_costs[trellis.E[s][j].value.get_label()];
+    }
+}
+
+template <FieldType T>
+template <typename cost_t>
+    requires std::integral<cost_t> || std::floating_point<cost_t>
+Trellis<T>::ListViterbi_Workspace<cost_t>::ListViterbi_Workspace(const Trellis& tr) {
+    edge_costs.reserve(tr.E.size());
+    for (size_t s = 0; s < tr.E.size(); ++s) edge_costs.emplace_back(tr.E[s].size());
+    cost_to_go.reserve(tr.V.size());
+    for (size_t s = 0; s < tr.V.size(); ++s) cost_to_go.emplace_back(tr.V[s].size(), init);
+}
+
+template <FieldType T>
+template <typename cost_t>
+    requires std::integral<cost_t> ||
+             std::floating_point<cost_t>
+             void Trellis<T>::ListViterbi_Workspace<cost_t>::calculate_edge_costs(const Trellis& tr,
+                                                                                  const Vector<T>& r)
+                 requires std::integral<cost_t>
+{
+    if (r.get_n() != tr.E.size()) throw std::invalid_argument("Vector length must match number of trellis segments!");
+    for (size_t s = 0; s < tr.E.size(); ++s)
+        for (size_t j = 0; j < tr.E[s].size(); ++j)
+#ifdef CECCO_ERASURE_SUPPORT
+            edge_costs[s][j] = r[s].is_erased() ? cost_t{0} : ((tr.E[s][j].value != r[s]) ? cost_t{1} : cost_t{0});
+#else
+            edge_costs[s][j] = (tr.E[s][j].value != r[s]) ? cost_t{1} : cost_t{0};
+#endif
+}
+
+template <FieldType T>
+template <typename cost_t>
+    requires std::integral<cost_t> ||
+             std::floating_point<cost_t>
+             void Trellis<T>::ListViterbi_Workspace<cost_t>::calculate_edge_costs(const Trellis& trellis,
+                                                                                  const Matrix<double>& llrs)
                  requires std::floating_point<cost_t> && FiniteFieldType<T>
 {
     if (llrs.get_m() != T::get_size() - 1 || llrs.get_n() != trellis.E.size())

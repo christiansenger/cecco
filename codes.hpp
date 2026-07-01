@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.4.2
+ * @version 2.4.3
  * @date 2026
  *
  * @copyright
@@ -183,6 +183,9 @@ class Code {
     virtual Vector<T> dec_Viterbi(const Vector<T>&, const std::string& = "") const {
         throw std::logic_error("Viterbi decoding not supported for this code!");
     }
+    virtual std::vector<Vector<T>> dec_Viterbi_list(const Vector<T>&, size_t) const {
+        throw std::logic_error("List Viterbi decoding not supported for this code!");
+    }
     virtual Vector<T> dec_recursive(const Vector<T>&) const {
         throw std::logic_error("Recursive decoding not supported for this code!");
     }
@@ -213,6 +216,12 @@ class Code {
     virtual Vector<T> dec_Viterbi_soft(const Matrix<double>&, const std::string& = "") const {
         throw std::logic_error("Soft-input Viterbi decoding not supported for this code!");
     }
+    virtual std::vector<Vector<T>> dec_Viterbi_soft_list(const Vector<double>&, size_t) const {
+        throw std::logic_error("Soft-input list Viterbi decoding not supported for this code!");
+    }
+    virtual std::vector<Vector<T>> dec_Viterbi_soft_list(const Matrix<double>&, size_t) const {
+        throw std::logic_error("Soft-input list Viterbi decoding not supported for this code!");
+    }
     // Docu note: pass nullptr as Lambda when only the filename argument is needed. Lambda receives
     // a-posteriori LLRs in the same symbol-level format as the soft input matrix: q−1 rows and n
     // columns. These are posterior, not extrinsic, LLRs.
@@ -222,10 +231,6 @@ class Code {
     virtual Vector<T> dec_BCJR(const Matrix<double>&, Matrix<double>* = nullptr, const std::string& = "") const {
         throw std::logic_error("BCJR decoding not supported for this code!");
     }
-    // Docu note: belief propagation runs exact log-domain sum-product on the Tanner graph
-    // (via details::max_star), not min-sum or any other approximation. With max_iterations = 0 it
-    // returns the intrinsic (channel-only) hard decision and posterior LLRs. Lambda uses the same
-    // symbol-level LLR format as the soft input matrix, matching dec_BCJR.
     // Docu note: the max_iterations default BP_MAX_ITERATIONS (defined at the top of this
     // file) lives only on these base virtuals. Virtual default arguments are bound from the static
     // type of the call, so this is the value Dec uses, as it decodes through a Code reference.
@@ -237,18 +242,12 @@ class Code {
                              const std::string& = "", size_t* = nullptr) const {
         throw std::logic_error("Belief-propagation decoding not supported for this code!");
     }
-    // Docu note: OSD is the delta = 0 special case of dec_LC_OSD; w is the order, the maximum Hamming
-    // weight of a test error pattern on the information symbols.
     virtual Vector<T> dec_OSD(const Vector<double>&, size_t = OSD_ORDER) const {
         throw std::logic_error("OSD decoding not supported for this code!");
     }
     virtual Vector<T> dec_OSD(const Matrix<double>&, size_t = OSD_ORDER) const {
         throw std::logic_error("OSD decoding not supported for this code!");
     }
-    // Docu note: w is the OSD order (max test-error-pattern weight on the information symbols; w >= k is
-    // the full ML candidate set), delta the buffer width (a q^delta-state search), ell_max the maximum list
-    // size. ell_max = infinity searches to the exact OSD(w) optimum (delta then affects only effort, so it
-    // equals OSD(w)); a finite ell_max stops after ell_max candidates, trading error performance for complexity.
     virtual Vector<T> dec_LC_OSD(const Vector<double>&, size_t = OSD_ORDER, size_t = LC_OSD_DELTA,
                                  size_t = std::numeric_limits<size_t>::max()) const {
         throw std::logic_error("LC-OSD decoding not supported for this code!");
@@ -276,11 +275,6 @@ class Code {
     virtual Vector<T> dec_BMA_EE(const Vector<T>&) const {
         throw std::logic_error("Berlekamp-Massey error/erasure decoding not supported for this code!");
     }
-    // Docu note: GMD is soft-input. It takes the same symbol-level LLR format as the other soft
-    // decoders, forms a per-symbol hard decision and a [0,1] reliability (best-vs-second-best margin
-    // squashed through tanh) for every coordinate, then runs Forney's generalized minimum distance
-    // decoding on top of the error/erasure decoder. The Vector<double> overload is the binary special
-    // case. Hence GMD exists only with CECCO_ERASURE_SUPPORT.
     virtual Vector<T> dec_GMD(const Vector<double>&) const {
         throw std::logic_error("GMD decoding not supported for this code!");
     }
@@ -1802,6 +1796,52 @@ class LinearCode : public Code<T> {
         }
     }
 
+    // Documentation note: the first entry of every returned list is a Viterbi-optimal codeword,
+    // reservoir-selected among the ML-optimal candidates as elsewhere in the library; remaining entries
+    // follow in nondecreasing trellis metric. Like the other soft decoders it agrees in cost with the
+    // single-output dec_Viterbi but, under ties, need not select the same tied codeword.
+    virtual std::vector<Vector<T>> dec_Viterbi_list(const Vector<T>& r, size_t list_size) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Viterbi decoding only available for codes over finite fields!");
+        } else {
+            validate_length(r);
+            if (list_size == 0) throw std::invalid_argument("Viterbi list size must be positive!");
+            if (k == 0) return {Vector<T>(this->n)};
+
+            const auto& Tr = get_minimal_trellis();
+            typename Trellis<T>::template ListViterbi_Workspace<uint16_t> ws(Tr);
+            ws.calculate_edge_costs(Tr, r);
+            return viterbi_list<uint16_t>(Tr, ws, list_size);
+        }
+    }
+
+    virtual std::vector<Vector<T>> dec_Viterbi_soft_list(const Vector<double>& llrs, size_t list_size) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Soft-input Viterbi decoding only available for codes over finite fields!");
+        } else if constexpr (T::get_size() != 2) {
+            throw std::logic_error(
+                "Soft-input Viterbi vector decoding only available for binary codes; use the "
+                "Matrix<double> overload!");
+        } else {
+            return dec_Viterbi_soft_list(Matrix<double>(llrs), list_size);
+        }
+    }
+
+    virtual std::vector<Vector<T>> dec_Viterbi_soft_list(const Matrix<double>& llrs, size_t list_size) const override {
+        if constexpr (!FiniteFieldType<T>) {
+            throw std::logic_error("Soft-input Viterbi decoding only available for codes over finite fields!");
+        } else {
+            validate_length(llrs);
+            if (list_size == 0) throw std::invalid_argument("Viterbi list size must be positive!");
+            if (k == 0) return {Vector<T>(this->n)};
+
+            const auto& Tr = get_minimal_trellis();
+            typename Trellis<T>::template ListViterbi_Workspace<double> ws(Tr);
+            ws.calculate_edge_costs(Tr, llrs);
+            return viterbi_list<double>(Tr, ws, list_size);
+        }
+    }
+
     // Docu note: pass nullptr as Lambda when only the filename argument is needed.
     virtual Vector<T> dec_BCJR(const Vector<double>& llrs, Matrix<double>* Lambda = nullptr,
                                const std::string& filename = "") const override {
@@ -1898,6 +1938,7 @@ class LinearCode : public Code<T> {
         }
     }
 
+    // Docu note: OSD is the delta = 0 special case of LC-OSD, so it needs no separate implementation.
     virtual Vector<T> dec_OSD(const Matrix<double>& llrs, size_t w = OSD_ORDER) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("OSD decoding only available for codes over finite fields!");
@@ -1976,131 +2017,77 @@ class LinearCode : public Code<T> {
 
             std::vector<size_t> perm = mris;
             std::vector<bool> in_mris(n, false);
-            for (size_t p : mris) in_mris[p] = true;
-            for (size_t p : order)
-                if (!in_mris[p]) perm.push_back(p);
+            for (size_t i = 0; i < mris.size(); ++i) in_mris[mris[i]] = true;
+            for (size_t i = 0; i < n; ++i)
+                if (!in_mris[order[i]]) perm.push_back(order[i]);
 
             const Matrix<T> Gsys = rref(columns(perm));
 
             Vector<T> u0(k);
             for (size_t j = 0; j < k; ++j) u0.set_component(j, hard[perm[j]]);
 
-            const auto codeword_and_cost = [&](const Vector<T>& v) {
-                const Vector<T> c_perm = v * Gsys;
-                double cost = 0.0;
-                for (size_t j = 0; j < n; ++j) cost += costs[perm[j]][c_perm[j].get_label()];
-                Vector<T> c(n);
-                for (size_t j = 0; j < n; ++j) c.set_component(perm[j], c_perm[j]);
-                return std::pair<Vector<T>, double>{std::move(c), cost};
-            };
-
             const size_t d = std::min(delta, redundancy);
-            if (sqm<InfInt>(q, d) > sqm<InfInt>(10, 6))
-                throw std::out_of_range("LC-OSD trellis too big (more than 10^6 states) to compute");
             const size_t ww = std::min(w, k);
+            if (sqm<InfInt>(q, d) * InfInt(ww + 1) > sqm<InfInt>(10, 6))
+                throw std::out_of_range("LC-OSD trellis too big (more than 10^6 states) to compute");
             const size_t stages = k + d;
-            const size_t num_states = sqm<size_t>(q, d);
 
+            // Documentation note: state = (local syndrome, deviation count from the hard MRIS word u0).
+            // Baking the deviation count into the trellis state lets the generic list Viterbi enforce
+            // the OSD order limit w, and restricting the last stage to syndrome 0 makes every
+            // final-layer vertex an accepting local codeword.
             std::vector<std::vector<T>> hcol(stages, std::vector<T>(d, T(0)));
             for (size_t i = 0; i < k; ++i)
                 for (size_t j = 0; j < d; ++j) hcol[i][j] = -Gsys(i, k + j);
             for (size_t l = 0; l < d; ++l) hcol[k + l][l] = T(1);
 
-            std::vector<size_t> trans(stages * num_states * q);
-            std::vector<size_t> digits(d);
+            Trellis<T> local;
+            std::vector<std::unordered_map<size_t, uint32_t>> vid(stages + 1);
+            vid[0].emplace(0, 0);
             for (size_t i = 0; i < stages; ++i)
-                for (size_t s = 0; s < num_states; ++s) {
-                    size_t tmp = s;
-                    for (size_t j = 0; j < d; ++j) {
-                        digits[j] = tmp % q;
-                        tmp /= q;
-                    }
+                for (auto it = vid[i].begin(); it != vid[i].end(); ++it) {
+                    const uint32_t from = it->second;
+                    const size_t s = it->first / (ww + 1);
+                    const size_t dev = it->first % (ww + 1);
                     for (size_t a = 0; a < q; ++a) {
-                        size_t ns = 0;
-                        size_t mul = 1;
+                        const size_t ndev = dev + ((i < k && a != u0[i].get_label()) ? 1 : 0);
+                        if (ndev > ww) continue;
+                        size_t ns = 0, pw = 1;
                         for (size_t j = 0; j < d; ++j) {
-                            ns += (T(digits[j]) + T(a) * hcol[i][j]).get_label() * mul;
-                            mul *= q;
+                            ns += (T((s / pw) % q) + T(a) * hcol[i][j]).get_label() * pw;
+                            pw *= q;
                         }
-                        trans[(i * num_states + s) * q + a] = ns;
+                        if (i + 1 == stages && ns != 0) continue;
+                        const auto [to_it, inserted] =
+                            vid[i + 1].try_emplace(ns * (ww + 1) + ndev, static_cast<uint32_t>(vid[i + 1].size()));
+                        local.add_parallel_edge(i, from, to_it->second, T(a));
                     }
                 }
 
-            constexpr double inf = std::numeric_limits<double>::infinity();
-            std::vector<double> cost_to_go((stages + 1) * num_states, inf);
-            cost_to_go[stages * num_states] = 0.0;
-            for (size_t i = stages; i-- > 0;)
-                for (size_t s = 0; s < num_states; ++s) {
-                    double best = inf;
-                    for (size_t a = 0; a < q; ++a) {
-                        const double e =
-                            costs[perm[i]][a] + cost_to_go[(i + 1) * num_states + trans[(i * num_states + s) * q + a]];
-                        if (e < best) best = e;
-                    }
-                    cost_to_go[i * num_states + s] = best;
-                }
+            Matrix<double> local_llrs(q - 1, stages);
+            for (size_t i = 0; i < stages; ++i)
+                local_llrs.set_submatrix(0, i, llrs.get_submatrix(0, perm[i], q - 1, 1));
+            typename Trellis<T>::template ListViterbi_Workspace<double> ws(local);
+            ws.calculate_edge_costs(local, local_llrs);
 
-            double tail_min = 0.0;
-            for (size_t j = stages; j < n; ++j) {
-                double m = 0.0;
-                for (size_t a = 1; a < q; ++a) m = std::min(m, costs[perm[j]][a]);
-                tail_min += m;
-            }
-
-            struct Node {
-                double f;
-                double g;
-                size_t stage;
-                size_t state;
-                size_t parent;
-                size_t label;
-                size_t dev;
-            };
-            std::vector<Node> pool;
-            pool.push_back(Node{cost_to_go[0], 0.0, 0, 0, std::numeric_limits<size_t>::max(), 0, 0});
-
-            const auto node_cmp = [&pool](size_t a, size_t b) { return pool[a].f > pool[b].f; };
-            std::priority_queue<size_t, std::vector<size_t>, decltype(node_cmp)> heap(node_cmp);
-            heap.push(0);
-
+            const auto candidates = viterbi_list<double>(local, ws, ell_max);
             Vector<T> best_c;
-            double best_cost = inf;
+            double best_cost = std::numeric_limits<double>::infinity();
             uint16_t ties = 1;
-            size_t list_size = 0;
-
-            while (!heap.empty()) {
-                const size_t ni = heap.top();
-                heap.pop();
-                if (pool[ni].f + tail_min > best_cost) break;
-
-                if (pool[ni].stage == stages) {
-                    Vector<T> v(k);
-                    for (size_t cur = ni; pool[cur].stage > 0; cur = pool[cur].parent) {
-                        const size_t st = pool[cur].stage - 1;
-                        if (st < k) v.set_component(st, T(pool[cur].label));
-                    }
-                    auto [c, cost] = codeword_and_cost(v);
-                    if (cost < best_cost) {
-                        best_cost = cost;
-                        best_c = std::move(c);
-                        ties = 1;
-                    } else if (cost == best_cost) {
-                        if (details::reservoir_accept(++ties)) best_c = std::move(c);
-                    }
-                    if (++list_size >= ell_max) break;
-                    continue;
-                }
-
-                const size_t i = pool[ni].stage;
-                for (size_t a = 0; a < q; ++a) {
-                    const size_t dev = pool[ni].dev + ((i < k && a != u0[i].get_label()) ? 1 : 0);
-                    if (dev > ww) continue;
-                    const size_t ns = trans[(i * num_states + pool[ni].state) * q + a];
-                    const double h = cost_to_go[(i + 1) * num_states + ns];
-                    if (h == inf) continue;
-                    const double g = pool[ni].g + costs[perm[i]][a];
-                    pool.push_back(Node{g + h, g, i + 1, ns, ni, a, dev});
-                    heap.push(pool.size() - 1);
+            for (size_t p = 0; p < candidates.size(); ++p) {
+                Vector<T> v(k);
+                for (size_t j = 0; j < k; ++j) v.set_component(j, candidates[p][j]);
+                const Vector<T> c_perm = v * Gsys;
+                double cost = 0.0;
+                for (size_t j = 0; j < n; ++j) cost += costs[perm[j]][c_perm[j].get_label()];
+                Vector<T> c(n);
+                for (size_t j = 0; j < n; ++j) c.set_component(perm[j], c_perm[j]);
+                if (cost < best_cost) {
+                    best_cost = cost;
+                    best_c = std::move(c);
+                    ties = 1;
+                } else if (cost == best_cost) {
+                    if (details::reservoir_accept(++ties)) best_c = std::move(c);
                 }
             }
 
@@ -2534,6 +2521,99 @@ class LinearCode : public Code<T> {
         return c_est;
     }
 
+    // Documentation note: priority-first (A*) enumeration of complete trellis paths in nondecreasing
+    // metric. The exact backward cost-to-go is an admissible, consistent heuristic, so the first path
+    // returned is Viterbi-optimal. The head is a reservoir pick over the whole minimum-metric group,
+    // which is enumerated in full even when it exceeds list_size, so the tie-break is proper down to
+    // list_size 1. Paths are identified by edge index (not vertex sequence), so parallel edges are
+    // distinguished.
+    template <typename cost_t>
+    std::vector<Vector<T>> viterbi_list(const Trellis<T>& Tr,
+                                        typename Trellis<T>::template ListViterbi_Workspace<cost_t>& ws,
+                                        size_t list_size) const {
+        using ws_t = typename Trellis<T>::template ListViterbi_Workspace<cost_t>;
+        if (list_size == 0) throw std::invalid_argument("Viterbi list size must be positive!");
+
+        const size_t segments = Tr.E.size();
+
+        for (size_t s = 0; s < ws.cost_to_go.size(); ++s)
+            std::fill(ws.cost_to_go[s].begin(), ws.cost_to_go[s].end(), ws_t::init);
+        std::fill(ws.cost_to_go[segments].begin(), ws.cost_to_go[segments].end(), cost_t{0});
+        for (size_t s = segments; s-- > 0;)
+            for (size_t j = 0; j < Tr.E[s].size(); ++j) {
+                const auto& e = Tr.E[s][j];
+                const cost_t h = ws.cost_to_go[s + 1][e.to_id];
+                if (h == ws_t::init) continue;
+                const cost_t cand = ws.edge_costs[s][j] + h;
+                if (cand < ws.cost_to_go[s][e.from_id]) ws.cost_to_go[s][e.from_id] = cand;
+            }
+
+        struct PathNode {
+            cost_t g;
+            cost_t f;
+            size_t segment;
+            uint32_t vertex;
+            size_t parent;
+            size_t edge;
+        };
+        std::vector<PathNode> pool;
+        pool.push_back(PathNode{cost_t{0}, ws.cost_to_go[0][0], 0, 0, std::numeric_limits<size_t>::max(), 0});
+
+        const auto node_cmp = [&pool](size_t a, size_t b) { return pool[a].f > pool[b].f; };
+        std::priority_queue<size_t, std::vector<size_t>, decltype(node_cmp)> heap(node_cmp);
+        heap.push(0);
+
+        constexpr size_t unstored = std::numeric_limits<size_t>::max();
+        std::vector<Vector<T>> list;
+        cost_t best = ws_t::init;
+        uint16_t ties = 0;
+        size_t head = 0;
+        Vector<T> head_path;
+        while (!heap.empty()) {
+            const size_t ni = heap.top();
+            if (list.size() >= list_size && pool[ni].f > best) break;
+            heap.pop();
+            if (pool[ni].f == ws_t::init) break;
+
+            if (pool[ni].segment == segments) {
+                Vector<T> labels(segments);
+                for (size_t cur = ni; pool[cur].segment > 0; cur = pool[cur].parent) {
+                    const size_t s = pool[cur].segment - 1;
+                    labels.set_component(s, Tr.E[s][pool[cur].edge].value);
+                }
+                if (list.empty()) best = pool[ni].g;
+                if (pool[ni].g == best && details::reservoir_accept(++ties)) {
+                    if (list.size() < list_size)
+                        head = list.size();
+                    else {
+                        head = unstored;
+                        head_path = labels;
+                    }
+                }
+                if (list.size() < list_size) list.push_back(std::move(labels));
+                continue;
+            }
+
+            const size_t s = pool[ni].segment;
+            for (size_t j = 0; j < Tr.E[s].size(); ++j) {
+                const auto& e = Tr.E[s][j];
+                if (e.from_id != pool[ni].vertex) continue;
+                const cost_t h = ws.cost_to_go[s + 1][e.to_id];
+                if (h == ws_t::init) continue;
+                const cost_t g = pool[ni].g + ws.edge_costs[s][j];
+                const cost_t f = static_cast<cost_t>(g + h);
+                pool.push_back(PathNode{g, f, s + 1, e.to_id, ni, j});
+                heap.push(pool.size() - 1);
+            }
+        }
+
+        if (head == unstored)
+            list[0] = std::move(head_path);
+        else if (head != 0)
+            std::swap(list[0], list[head]);
+        return list;
+    }
+
     Matrix<double> bcjr_forward_backward(const Trellis<T>& Tr, typename Trellis<T>::BCJR_Workspace& ws) const
         requires FiniteFieldType<T>
     {
@@ -2622,6 +2702,7 @@ class LinearCode : public Code<T> {
         return c_est;
     }
 
+    // Docu note: exact log-domain sum-product (via details::max_star), not min-sum or any approximation.
     Vector<T> bp_decode(const Matrix<double>& llrs, size_t max_iterations, Matrix<double>* Lambda,
                         const std::string& filename, size_t* nof_iterations) const
         requires FiniteFieldType<T>
@@ -2705,7 +2786,7 @@ class LinearCode : public Code<T> {
 
         std::vector<std::array<double, q>> W, F, B;
         size_t iter = 0;
-        for (; !(c_est * HT).is_zero() && iter < max_iterations; ++iter) {
+        while (iter < max_iterations && !(c_est * HT).is_zero()) {
             for (size_t i = 0; i < g.checks.size(); ++i) {
                 const size_t d = g.checks[i].size();
                 W.resize(d);
@@ -2732,10 +2813,13 @@ class LinearCode : public Code<T> {
 
             for (size_t j = 0; j < n; ++j) {
                 ws.posterior[j] = ws.intrinsic[j];
-                for (const auto& [i, e] : ws.var_edges[j])
+                for (size_t t = 0; t < ws.var_edges[j].size(); ++t) {
+                    const auto [i, e] = ws.var_edges[j][t];
                     for (size_t a = 0; a < q; ++a) ws.posterior[j][a] += ws.m_cv[i][e][a];
+                }
                 decide(j);
-                for (const auto& [i, e] : ws.var_edges[j]) {
+                for (size_t t = 0; t < ws.var_edges[j].size(); ++t) {
+                    const auto [i, e] = ws.var_edges[j][t];
                     for (size_t a = 0; a < q; ++a) ws.m_vc[i][e][a] = ws.posterior[j][a] - ws.m_cv[i][e][a];
                     normalize(ws.m_vc[i][e]);
                 }
@@ -2744,6 +2828,7 @@ class LinearCode : public Code<T> {
             if constexpr (T::get_size() == 2) {
                 if (!filename.empty()) g.tikz_picture(file, &ws);
             }
+            ++iter;
         }
 
         if (nof_iterations != nullptr) *nof_iterations = iter;
