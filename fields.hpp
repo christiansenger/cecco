@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.13
+ * @version 2.3.14
  * @date 2026
  *
  * @copyright
@@ -160,15 +160,12 @@ namespace CECCO {
 
 template <ComponentType T>
 class Vector;
-template <ComponentType T>
+template <CoefficientType T>
 class Polynomial;
 template <ComponentType T>
 class Matrix;
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 class Iso;
-}  // namespace CECCO
-
-namespace CECCO {
 
 namespace details {
 /**
@@ -388,14 +385,14 @@ constexpr T operator*(T&& lhs, T&& rhs) {
 }
 
 template <FieldType T>
-constexpr T operator*(const T& lhs, uint16_t rhs) {
+constexpr T operator*(const T& lhs, int rhs) {
     T res(lhs);
     res *= rhs;
     return res;
 }
 
 template <FieldType T>
-constexpr T operator*(uint16_t lhs, const T& rhs) {
+constexpr T operator*(int lhs, const T& rhs) {
     T res(rhs);
     res *= lhs;
     return res;
@@ -527,7 +524,7 @@ class Rationals : public details::Field<Rationals<T>> {
     size_t get_additive_order() const noexcept;
 
     /// @brief Human-readable description: `"rational number"`
-    static const std::string get_info() {
+    static std::string get_info() {
         static const std::string info = "rational number";
         return info;
     }
@@ -535,10 +532,8 @@ class Rationals : public details::Field<Rationals<T>> {
     /// @brief Characteristic of ℚ: 0
     static constexpr size_t get_characteristic() noexcept { return 0; }
 
-    /// @brief Sign predicate (true iff numerator and denominator share their sign)
-    constexpr bool has_positive_sign() const noexcept {
-        return (numerator >= 0 && denominator > 0) || (numerator <= 0 && denominator < 0);
-    }
+    /// @brief Sign predicate: true iff the numerator is non-negative (always false for erased elements)
+    constexpr bool has_positive_sign() const noexcept { return numerator >= 0 && denominator > 0; }
 
     /// @brief True iff numerator is zero
     constexpr bool is_zero() const noexcept { return numerator == 0; }
@@ -832,7 +827,7 @@ struct Lut2D {
         if constexpr (FieldSize < CECCO_COMPRESS_LUTS_FROM_Q) {
             return values[i][j];
         } else {
-            if (i > floor_constexpr(FieldSize / 2.0)) {
+            if (i > FieldSize / 2) {
                 return values[FieldSize - i][j - i];
             } else {
                 return values[i][j];
@@ -846,7 +841,7 @@ struct Lut2D {
         if constexpr (FieldSize < CECCO_COMPRESS_LUTS_FROM_Q) {
             return values[i][j];
         } else {
-            if (i > floor_constexpr(FieldSize / 2.0)) {
+            if (i > FieldSize / 2) {
                 return values[FieldSize - i][j - i];
             } else {
                 return values[i][j];
@@ -855,9 +850,9 @@ struct Lut2D {
     }
 
     /// @brief Backing storage; full square below the compression threshold, upper triangle above
-    std::array < std::array<LabelType, FieldSize>,
-        FieldSize<CECCO_COMPRESS_LUTS_FROM_Q ? FieldSize : static_cast<size_t>(floor_constexpr(FieldSize / 2.0) + 1)>
-            values{};
+    std::array<std::array<LabelType, FieldSize>,
+               (FieldSize < CECCO_COMPRESS_LUTS_FROM_Q ? FieldSize : FieldSize / 2 + 1)>
+        values{};
 };
 
 /**
@@ -1122,7 +1117,6 @@ constexpr auto compute_polynomial_multiplication_table(const LutCoeffType& lut_c
     for (LabelType i = 2; i < FieldSize; ++i) {
         const auto lhs = lut_coeff.values[i];
 
-        // Calculate degree of lhs polynomial
         uint8_t lhs_deg = m - 1;
         for (uint8_t s = 0; s < m; ++s) {
             if (lhs[s] != 0)
@@ -1134,7 +1128,6 @@ constexpr auto compute_polynomial_multiplication_table(const LutCoeffType& lut_c
         for (LabelType j = i; j < FieldSize; ++j) {
             const auto rhs = lut_coeff.values[j];
 
-            // Calculate degree of rhs polynomial
             uint8_t rhs_deg = m - 1;
             for (uint8_t t = 0; t < m; ++t) {
                 if (rhs[t] != 0)
@@ -1213,8 +1206,6 @@ struct LutHolderNoProvider<LutType, F, LutMode::CompileTime> {
     static constexpr LutType lut = F();
     static constexpr const LutType& get_lut() { return lut; }
 };
-template <typename LutType, LutType (*F)()>
-constexpr LutType LutHolderNoProvider<LutType, F, LutMode::CompileTime>::lut;
 
 /// @brief RunTime specialisation: thread-safe lazy initialisation on first access
 template <typename LutType, LutType (*F)()>
@@ -1254,9 +1245,6 @@ struct LutHolder<LutType, ProviderLutType, P, F, LutMode::CompileTime> {
     static constexpr LutType lut = F(P);
     static constexpr const LutType& get_lut() { return lut; }
 };
-template <typename LutType, typename ProviderLutType, const ProviderLutType& (*P)(),
-          LutType (*F)(const ProviderLutType& (*)())>
-constexpr LutType LutHolder<LutType, ProviderLutType, P, F, LutMode::CompileTime>::lut;
 
 /// @brief RunTime specialisation: thread-safe lazy initialisation, dependency resolved on first access
 template <typename LutType, typename ProviderLutType, const ProviderLutType& (*P)(),
@@ -1343,9 +1331,7 @@ Embedding member functions
 template <FiniteFieldType SUBFIELD, FiniteFieldType SUPERFIELD>
     requires SubfieldOf<SUPERFIELD, SUBFIELD>
 Embedding<SUBFIELD, SUPERFIELD>::Embedding() {
-    static std::once_flag computed_flag;
-    static std::vector<size_t> cached_embedding;
-    std::call_once(computed_flag, []() { cached_embedding = compute_embedding(); });
+    static const std::vector<size_t> cached_embedding = compute_embedding();
     embedding_map = std::span<const size_t>(cached_embedding);
 }
 
@@ -1415,16 +1401,11 @@ std::vector<size_t> Embedding<SUBFIELD, SUPERFIELD>::compute_embedding() {
         return embedding;
     }
 
-    // Get generators and power factor
     const auto sub_gen = SUBFIELD::get_generator();
     const auto super_gen = SUPERFIELD::get_generator();
     constexpr size_t power_factor = (super_size - 1) / (sub_size - 1);
 
-    // Compute super_gen^power_factor
-    auto super_gen_to_power_factor = SUPERFIELD(1);
-    for (size_t i = 0; i < power_factor; ++i) {
-        super_gen_to_power_factor *= super_gen;
-    }
+    const auto super_gen_to_power_factor = sqm<SUPERFIELD>(super_gen, power_factor);
 
     auto sub_elem = sub_gen;
     auto sup_elem = super_gen_to_power_factor;
@@ -1451,9 +1432,9 @@ namespace details {
 template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
 struct IsomorphismPair {
-    static std::once_flag computed_flag;
-    static std::vector<size_t> forward_iso;  // A -> B
-    static std::vector<size_t> reverse_iso;  // B -> A
+    inline static std::once_flag computed_flag;
+    inline static std::vector<size_t> forward_iso;  // A -> B
+    inline static std::vector<size_t> reverse_iso;  // B -> A
 
     /// @brief Compute and cache both maps on first call (no-op afterwards)
     static void compute_if_needed() {
@@ -1462,7 +1443,6 @@ struct IsomorphismPair {
             forward_iso.resize(size);
             reverse_iso.resize(size);
 
-            // Compute forward isomorphism A -> B using existing algorithm
             const size_t m = A(0).template as_vector<Fp<A::get_p()>>().get_n();
 
             A alpha;
@@ -1521,19 +1501,6 @@ struct IsomorphismPair {
         });
     }
 };
-
-// Static member definitions
-template <FiniteFieldType A, FiniteFieldType B>
-    requires Isomorphic<A, B>
-std::once_flag details::IsomorphismPair<A, B>::computed_flag;
-
-template <FiniteFieldType A, FiniteFieldType B>
-    requires Isomorphic<A, B>
-std::vector<size_t> details::IsomorphismPair<A, B>::forward_iso;
-
-template <FiniteFieldType A, FiniteFieldType B>
-    requires Isomorphic<A, B>
-std::vector<size_t> details::IsomorphismPair<A, B>::reverse_iso;
 
 }  // namespace details
 
@@ -2582,7 +2549,7 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 Ext<B, modulus, mode>::Ext(int l) {
-    if (l < 0 || l >= Q) throw std::invalid_argument("l must be positive and no larger than Q-1");
+    if (l < 0 || static_cast<size_t>(l) >= Q) throw std::invalid_argument("l must be positive and no larger than Q-1");
     label = l;
 }
 
@@ -2692,7 +2659,10 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
         static_assert(SubfieldOf<Ext<B, modulus, mode>, T>,
                       "extension field elements can only be constructed from vectors over subfields");
 
-        if (v.get_n() != get_m() * B::get_m())
+        // [B:T] — length of one B component in T coordinates (T need not be B's immediate base)
+        constexpr size_t mBT = details::degree_over_prime_v<B> / details::degree_over_prime_v<T>;
+
+        if (v.get_n() != get_m() * mBT)
             throw std::invalid_argument(
                 "trying to construct extension field element using subfield vector of wrong length");
 
@@ -2711,8 +2681,8 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
         {
             Vector<B> intermediate(get_m());
             for (uint8_t i = 0; i < get_m(); ++i) {
-                Vector<T> sub(B::get_m());
-                for (uint8_t j = 0; j < B::get_m(); ++j) sub.set_component(j, v[i * B::get_m() + j]);
+                Vector<T> sub(mBT);
+                for (uint8_t j = 0; j < mBT; ++j) sub.set_component(j, v[i * mBT + j]);
                 intermediate.set_component(i, B(sub));
             }
 
@@ -2787,11 +2757,11 @@ Ext<B, modulus, mode>::Ext(const Iso<MAIN, OTHERS...>& other) {
             // CommonField is an Iso, continue with its MAIN
             using CommonMainField = typename details::iso_info<CommonField>::main_type;
             CommonMainField intermediate(other);  // Downcast other to CommonField's MAIN
-            *this = OUT(intermediate);            // Use existing cross-field Ext->Ext constructor
+            *this = OUT(intermediate);
         } else {
             // CommonField is an Ext, continue with CommonField
             CommonField intermediate(other);  // Downcast other to CommonField
-            *this = OUT(intermediate);        // Use existing cross-field Ext->Ext constructor
+            *this = OUT(intermediate);
         }
     }
 }
@@ -2819,7 +2789,7 @@ constexpr Ext<B, modulus, mode>::Ext(const Fp<p>& other)
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator=(int l) {
-    if (l < 0 || l >= Q) throw std::invalid_argument("l must be positive and no larger than Q-1");
+    if (l < 0 || static_cast<size_t>(l) >= Q) throw std::invalid_argument("l must be positive and no larger than Q-1");
     label = l;
     return *this;
 }
@@ -2979,11 +2949,14 @@ Polynomial<S> Ext<B, modulus, mode>::get_minimal_polynomial() const
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 std::string Ext<B, modulus, mode>::get_info() {
-    std::stringstream ss;
-    ss << "finite field with " + std::to_string(Q) + " elements, specified as degree " + std::to_string(m) +
-              " extension of (" + B::get_info() + "), irreducible polynomial ";
-    ss << get_modulus();
-    return ss.str();
+    static const std::string info = [] {
+        std::stringstream ss;
+        ss << "finite field with " + std::to_string(Q) + " elements, specified as degree " + std::to_string(m) +
+                  " extension of (" + B::get_info() + "), irreducible polynomial ";
+        ss << get_modulus();
+        return ss.str();
+    }();
+    return info;
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
@@ -2999,12 +2972,7 @@ constexpr Polynomial<B> Ext<B, modulus, mode>::get_modulus() {
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 Ext<B, modulus, mode> Ext<B, modulus, mode>::get_generator() {
-    // Use local static cache for each specific field type
-    static std::once_flag computed_flag;
-    static Ext cached_generator{0};
-
-    std::call_once(computed_flag, []() { cached_generator = Ext(g().value); });
-
+    static const Ext cached_generator = Ext(g().value);
     return cached_generator;
 }
 
@@ -3028,13 +2996,15 @@ Vector<T> Ext<B, modulus, mode>::as_vector() const {
     } else {
         static_assert(SubfieldOf<Ext<B, modulus, mode>, T>,
                       "extension field elements can only be converted into vectors over subfields");
+        // [B:T] — length of one B component in T coordinates (T need not be B's immediate base)
+        constexpr size_t mBT = details::degree_over_prime_v<B> / details::degree_over_prime_v<T>;
         const auto intermediate = as_vector<B>();  // Explicitly call with B
-        Vector<T> res(get_m() * B::get_m());
+        Vector<T> res(get_m() * mBT);
         for (uint8_t i = 0; i < get_m(); ++i) {
             auto sub = intermediate[i].template as_vector<T>();
             // Copy sub_vector elements into result at appropriate positions
-            for (uint8_t j = 0; j < B::get_m(); ++j) {
-                res.set_component(i * B::get_m() + j, sub[j]);
+            for (uint8_t j = 0; j < mBT; ++j) {
+                res.set_component(i * mBT + j, sub[j]);
             }
         }
         return res;
@@ -3126,7 +3096,7 @@ class Iso : public details::Base {
     // Ensure we have multiple representations to unify, otherwise Iso doesn't make sense
     static_assert(sizeof...(OTHERS) > 0, "Iso requires at least two field representations");
     // Ensure all fields in the  union of MAIN and OTHERS... are pairwise distinct
-    static_assert(details::pairwise_distinct<MAIN, OTHERS...>(),
+    static_assert(details::pairwise_distinct_v<MAIN, OTHERS...>,
                   "All field representations in Iso must be pairwise distinct");
     // Comment: the last two assert that prime fields cannot occur in Isos
 
@@ -3290,7 +3260,7 @@ class Iso : public details::Base {
     constexpr bool is_erased() const noexcept { return main_.is_erased(); }
 #endif
 
-    constexpr Iso& operator=(const Iso& other);
+    constexpr Iso& operator=(const Iso& other) = default;
     constexpr Iso& operator=(Iso&& other) noexcept = default;
 
     /// @brief Assign a MAIN-representation element directly
@@ -3333,7 +3303,7 @@ class Iso : public details::Base {
     // Stream operator - delegate to underlying value
     friend std::ostream& operator<<(std::ostream& os, const Iso& iso) { return os << iso.main_; }
 
-    static const std::string get_info();
+    static std::string get_info();
 
     // Static methods required by FiniteFieldType concept
     static constexpr size_t get_characteristic() noexcept { return MAIN::get_characteristic(); }
@@ -3388,12 +3358,6 @@ class Iso : public details::Base {
 };
 
 /* member functions for Iso */
-
-template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
-constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator=(const Iso& other) {
-    main_ = other.main_;
-    return *this;
-}
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 constexpr Iso<MAIN, OTHERS...>& Iso<MAIN, OTHERS...>::operator=(const MAIN& other) {
@@ -3509,11 +3473,11 @@ Iso<MAIN, OTHERS...>::Iso(const Ext<B, modulus, mode>& other) {
             // CommonField is an Iso, continue with its MAIN
             using CommonMainField = typename details::iso_info<CommonField>::main_type;
             CommonMainField intermediate(other);  // Downcast other to CommonField's MAIN
-            main_ = MAIN(intermediate);           // Use existing cross-field Ext->Ext constructor to convert to MAIN
+            main_ = MAIN(intermediate);
         } else {
             // CommonField is an Ext, continue with CommonField
             CommonField intermediate(other);  // Downcast other to CommonField
-            main_ = MAIN(intermediate);       // Use existing cross-field Ext->Ext constructor to convert to MAIN
+            main_ = MAIN(intermediate);
         }
     }
 }
@@ -3578,7 +3542,7 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
     } else if constexpr (SubfieldOf<OUT, IN>) {
         // Sub-branch 2a: OTHER_MAIN is subfield of MAIN
         if constexpr (SubfieldOf<MAIN, OTHER_MAIN>) {
-            main_ = MAIN(other.main());  // Use existing Ext-from-Ext cross-field constructor
+            main_ = MAIN(other.main());
 
             // Sub-branch 2b: OTHER_MAIN is subfield of one of OTHERS
         } else if constexpr ((SubfieldOf<OTHERS, OTHER_MAIN> || ...)) {
@@ -3586,8 +3550,7 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
             auto try_main_to_others = [&]<typename OutputOtherType>() {
                 if constexpr (SubfieldOf<OutputOtherType, OTHER_MAIN>) {
                     if (!conversion_done) {
-                        OutputOtherType intermediate(
-                            other.main());  // Use existing Ext-from-Ext cross-field constructor
+                        OutputOtherType intermediate(other.main());
                         auto isomorphism = Isomorphism<OutputOtherType, MAIN>();
                         main_ = isomorphism(intermediate);
                         conversion_done = true;
@@ -3602,8 +3565,8 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
             auto try_others_to_main = [&]<typename InputOtherType>() {
                 if constexpr (SubfieldOf<MAIN, InputOtherType>) {
                     if (!conversion_done) {
-                        InputOtherType input_other(other);  // Convert Iso to InputOtherType
-                        main_ = MAIN(input_other);          // Use existing Ext-from-Ext cross-field constructor
+                        InputOtherType input_other(other);
+                        main_ = MAIN(input_other);
                         conversion_done = true;
                     }
                 }
@@ -3618,25 +3581,24 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
                 auto try_input_others = [&]<typename InputOtherType>() {
                     if constexpr (SubfieldOf<OutputOtherType, InputOtherType>) {
                         if (!conversion_done) {
-                            InputOtherType input_other(other);  // Convert Iso to InputOtherType
-                            OutputOtherType intermediate(
-                                input_other);  // Use existing Ext-from-Ext cross-field constructor
+                            InputOtherType input_other(other);
+                            OutputOtherType intermediate(input_other);
                             auto isomorphism = Isomorphism<OutputOtherType, MAIN>();
                             main_ = isomorphism(intermediate);
                             conversion_done = true;
                         }
                     }
                 };
-                (try_input_others.template operator()<OTHER_OTHERS>(), ...);  // This calls the inner lambda
+                (try_input_others.template operator()<OTHER_OTHERS>(), ...);
             };
-            (try_others_to_others.template operator()<OTHERS>(), ...);  // This calls the outer lambda
+            (try_others_to_others.template operator()<OTHERS>(), ...);
         }
 
         // Branch 3 (downcast): OUT is subfield of IN (but not the same since this would be caught by copy constr.)
     } else if constexpr (SubfieldOf<IN, OUT>) {
         // Sub-branch 3a: OTHER_MAIN is superfield of MAIN
         if constexpr (SubfieldOf<OTHER_MAIN, MAIN>) {
-            main_ = MAIN(other.main());  // Use existing Ext-from-Ext cross-field constructor
+            main_ = MAIN(other.main());
 
             // Sub-branch 3b: OTHER_MAIN is superfield of one of OTHERS
         } else if constexpr ((SubfieldOf<OTHER_MAIN, OTHERS> || ...)) {
@@ -3644,8 +3606,7 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
             auto try_main_to_others = [&]<typename OutputOtherType>() {
                 if constexpr (SubfieldOf<OTHER_MAIN, OutputOtherType>) {
                     if (!conversion_done) {
-                        OutputOtherType intermediate(
-                            other.main());  // Use existing Ext-from-Ext cross-field constructor
+                        OutputOtherType intermediate(other.main());
                         auto isomorphism = Isomorphism<OutputOtherType, MAIN>();
                         main_ = isomorphism(intermediate);
                         conversion_done = true;
@@ -3660,8 +3621,8 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
             auto try_others_to_main = [&]<typename InputOtherType>() {
                 if constexpr (SubfieldOf<InputOtherType, MAIN>) {
                     if (!conversion_done) {
-                        InputOtherType input_other(other);  // Convert Iso to InputOtherType
-                        main_ = MAIN(input_other);          // Use existing Ext-from-Ext cross-field constructor
+                        InputOtherType input_other(other);
+                        main_ = MAIN(input_other);
                         conversion_done = true;
                     }
                 }
@@ -3676,17 +3637,17 @@ Iso<MAIN, OTHERS...>::Iso(const Iso<OTHER_MAIN, OTHER_OTHERS...>& other) {
                 auto try_input_others = [&]<typename InputOtherType>() {
                     if constexpr (SubfieldOf<InputOtherType, OutputOtherType>) {
                         if (!conversion_done) {
-                            InputOtherType input_other(other);          // Convert Iso to InputOtherType
-                            OutputOtherType intermediate(input_other);  // Use existing Ext-from-Ext cross-field
+                            InputOtherType input_other(other);
+                            OutputOtherType intermediate(input_other);
                             auto isomorphism = Isomorphism<OutputOtherType, MAIN>();
                             main_ = isomorphism(intermediate);
                             conversion_done = true;
                         }
                     }
                 };
-                (try_input_others.template operator()<OTHER_OTHERS>(), ...);  // This calls the inner lambda
+                (try_input_others.template operator()<OTHER_OTHERS>(), ...);
             };
-            (try_others_to_others.template operator()<OTHERS>(), ...);  // This calls the outer lambda
+            (try_others_to_others.template operator()<OTHERS>(), ...);
         }
 
     } else {
@@ -3807,11 +3768,9 @@ constexpr TO Iso<MAIN, OTHERS...>::as() const
 }
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
-const std::string Iso<MAIN, OTHERS...>::get_info() {
-    std::stringstream ss;
-    ss << "stack of isomorphic fields, main field: ";
-    ss << MAIN::get_info();
-    return ss.str();
+std::string Iso<MAIN, OTHERS...>::get_info() {
+    static const std::string info = "stack of isomorphic fields, main field: " + MAIN::get_info();
+    return info;
 }
 
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>

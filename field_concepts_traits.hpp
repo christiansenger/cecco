@@ -2,7 +2,7 @@
  * @file field_concepts_traits.hpp
  * @brief Concepts, traits, and type utilities for finite field arithmetic
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.5
+ * @version 2.2.0
  * @date 2026
  *
  * @copyright
@@ -20,12 +20,14 @@
  *
  * Concepts visible to library users: @ref CECCO::FieldType, @ref CECCO::FiniteFieldType,
  * @ref CECCO::SubfieldOf / @ref CECCO::ExtensionOf, @ref CECCO::Isomorphic,
- * @ref CECCO::ComponentType (the umbrella for @ref CECCO::Vector / @ref CECCO::Polynomial /
- * @ref CECCO::Matrix component types), @ref CECCO::ReliablyComparableType, @ref CECCO::SignedIntType.
+ * @ref CECCO::CoefficientType (@ref CECCO::Polynomial coefficient types), @ref CECCO::PolynomialType,
+ * @ref CECCO::ComponentType (@ref CECCO::Vector / @ref CECCO::Matrix component types),
+ * @ref CECCO::ReliablyComparableType, @ref CECCO::SignedIntType.
  *
- * Internals (in @c CECCO::details): metafunctions that compute field-tower relationships
- * (@c is_subfield_of, @c collect_subfields, @c largest_common_subfield_t) and
- * @c iso_info for Iso introspection.
+ * Internals (in @c CECCO::details): the @c is_polynomial / @c coefficient_of traits behind the
+ * polynomial concepts, metafunctions that compute field-tower relationships (@c is_subfield_of,
+ * @c degree_over_prime, @c collect_subfields, @c largest_common_subfield_t), @c iso_info for
+ * Iso introspection, and the utilities @c pairwise_distinct_v and @c NonCopyable.
  *
  * @see @ref fields.hpp for the field classes (Fp, Ext, Iso, Rationals) that satisfy these concepts
  */
@@ -56,7 +58,6 @@ enum class LutMode {
 };
 
 namespace details {
-// Forward declaration for Base (full definition in fields.hpp)
 class Base;
 }  // namespace details
 
@@ -85,7 +86,7 @@ class Base;
  */
 template <typename T>
 concept FieldType =
-    std::is_base_of_v<details::Base, T> && !std::is_same_v<details::Base, T> && requires(const T& t, T& mutable_t) {
+    std::derived_from<T, details::Base> && !std::same_as<T, details::Base> && requires(const T& t, T& mutable_t) {
         // Constructors (via constructibility checks)
         requires std::constructible_from<T>;       // Default constructor
         requires std::copy_constructible<T>;       // Copy constructor
@@ -115,8 +116,8 @@ concept FieldType =
         { t.get_info() } -> std::convertible_to<std::string>;
 
         // Randomization
-        requires requires { mutable_t.randomize(); };
-        requires requires { mutable_t.randomize_force_change(); };
+        mutable_t.randomize();
+        mutable_t.randomize_force_change();
     };
 
 /**
@@ -158,16 +159,87 @@ concept FiniteFieldType = FieldType<T> && requires(const T& t) {
  *
  * @tparam T Candidate type
  *
- * Satisfied by any type with `std::is_integral_v<T> && std::is_signed_v<T>` (i.e. `int`,
- * `long`, `long long`, …) and by @c InfInt. Used by @ref CECCO::Rationals so callers can
- * trade speed for unbounded precision in numerator and denominator.
+ * Satisfied by any `std::signed_integral` type (`int`, `long`, `long long`, …) and by
+ * @c InfInt. Used by @ref CECCO::Rationals so callers can trade speed for unbounded precision
+ * in numerator and denominator.
  */
 template <typename T>
-concept SignedIntType = (std::is_integral_v<T> && std::is_signed_v<T>) || std::is_same_v<T, InfInt>;
+concept SignedIntType = std::signed_integral<T> || std::same_as<T, InfInt>;
 
-// Forward declaration for Rationals (full definition in fields.hpp)
 template <SignedIntType T>
 class Rationals;
+
+/**
+ * @concept CoefficientType
+ * @brief Admissible coefficient type for @ref CECCO::Polynomial (scalar-like types)
+ *
+ * @tparam T Candidate type
+ *
+ * Satisfied by any @ref FieldType, by `double`, by `std::complex<double>`, and by any
+ * @ref SignedIntType. @ref CECCO::Vector and @ref CECCO::Matrix are templated on the wider
+ * @ref ComponentType, which additionally admits polynomial components.
+ */
+template <typename T>
+concept CoefficientType =
+    FieldType<T> || std::same_as<T, double> || std::same_as<T, std::complex<double>> || SignedIntType<T>;
+
+template <CoefficientType T>
+class Polynomial;
+
+namespace details {
+
+/**
+ * @brief Detect whether T is a `Polynomial` specialization
+ *
+ * @tparam T Any type
+ *
+ * Primary template: `false`. The partial specialization for `Polynomial<C>` (any
+ * @ref CECCO::CoefficientType C) is `true`. This is the primitive that backs the user-facing
+ * @ref CECCO::PolynomialType concept.
+ */
+template <typename T>
+struct is_polynomial : std::false_type {};
+
+template <typename T>
+constexpr bool is_polynomial_v = is_polynomial<T>::value;
+
+/// @brief Specialization of @ref is_polynomial for `Polynomial<C>`
+template <CoefficientType C>
+struct is_polynomial<Polynomial<C>> : std::true_type {};
+
+/**
+ * @brief Coefficient type of a `Polynomial`; identity for all other types
+ *
+ * @tparam T Any type
+ *
+ * `coefficient_of_t<Polynomial<C>>` is `C`, and `coefficient_of_t<T>` is `T` for every
+ * non-polynomial T. Lets a concept apply one scalar-level test uniformly to scalars and to
+ * polynomials over scalars (see @ref CECCO::ReliablyComparableType).
+ */
+template <typename T>
+struct coefficient_of {
+    using type = T;
+};
+
+/// @brief Specialization of @ref coefficient_of for `Polynomial<C>`
+template <CoefficientType C>
+struct coefficient_of<Polynomial<C>> {
+    using type = C;
+};
+
+template <typename T>
+using coefficient_of_t = typename coefficient_of<T>::type;
+
+}  // namespace details
+
+/**
+ * @concept PolynomialType
+ * @brief T is a `Polynomial<C>` over some @ref CoefficientType C
+ *
+ * @tparam T Candidate type
+ */
+template <typename T>
+concept PolynomialType = details::is_polynomial_v<T>;
 
 /**
  * @concept ReliablyComparableType
@@ -175,26 +247,31 @@ class Rationals;
  *
  * @tparam T Candidate type
  *
- * Satisfied by @ref FiniteFieldType, @ref SignedIntType, and `Rationals<InfInt>`. Excludes
- * `double` and `std::complex<double>` because rounding makes comparison unreliable. Used by
- * algorithms that need stable equality (e.g. Hamming weight, structural matrix tests).
+ * Satisfied by @ref FiniteFieldType, @ref SignedIntType, `Rationals<InfInt>`, and by
+ * `Polynomial<C>` exactly when C is itself reliably comparable (polynomials are kept in
+ * canonical pruned form, so coefficient-wise comparison is mathematical equality). Excludes
+ * `double` and `std::complex<double>` — and polynomials over them — because rounding makes
+ * comparison unreliable. Used by algorithms that need stable equality (e.g. Hamming weight,
+ * structural matrix tests).
  */
 template <typename T>
-concept ReliablyComparableType = FiniteFieldType<T> || std::is_same_v<T, Rationals<InfInt>> || SignedIntType<T>;
+concept ReliablyComparableType = FiniteFieldType<details::coefficient_of_t<T>> ||
+                                 std::same_as<details::coefficient_of_t<T>, Rationals<InfInt>> ||
+                                 SignedIntType<details::coefficient_of_t<T>>;
 
 /**
  * @concept ComponentType
- * @brief Admissible component type for @ref CECCO::Vector, @ref CECCO::Polynomial, @ref CECCO::Matrix
+ * @brief Admissible component type for @ref CECCO::Vector and @ref CECCO::Matrix
  *
  * @tparam T Candidate type
  *
- * Satisfied by any @ref FieldType, by `double`, by `std::complex<double>`, and by any
- * @ref SignedIntType. This is the umbrella concept used to template the linear-algebra and
- * polynomial classes.
+ * Extends @ref CoefficientType by @ref PolynomialType, so vectors and matrices can hold
+ * polynomial components (e.g. `Matrix<Polynomial<Fp<2>>>`). Polynomial coefficients remain
+ * restricted to @ref CoefficientType, so nested polynomials such as
+ * `Polynomial<Polynomial<Fp<2>>>` stay unsupported by design.
  */
 template <typename T>
-concept ComponentType =
-    FieldType<T> || std::same_as<T, double> || std::same_as<T, std::complex<double>> || SignedIntType<T>;
+concept ComponentType = CoefficientType<T> || PolynomialType<T>;
 
 /**
  * @concept BelongsTo
@@ -211,7 +288,7 @@ concept ComponentType =
  * @endcode
  */
 template <typename T, typename... Types>
-concept BelongsTo = (std::is_same_v<T, Types> || ...);
+concept BelongsTo = (std::same_as<T, Types> || ...);
 
 /**
  * @def MOD
@@ -222,15 +299,12 @@ concept BelongsTo = (std::is_same_v<T, Types> || ...);
  */
 #define MOD std::array
 
-// Forward declaration for Fp (full definition in fields.hpp)
 template <uint16_t p>
 class Fp;
 
-// Forward declaration for Ext (full definition in fields.hpp)
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 class Ext;
 
-// Forward declaration for Iso (full definition in fields.hpp)
 template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
 class Iso;
 
@@ -277,7 +351,7 @@ template <FiniteFieldType T>
 struct degree_over_prime;
 
 template <FiniteFieldType T>
-inline constexpr size_t degree_over_prime_v = degree_over_prime<T>::value;
+constexpr size_t degree_over_prime_v = degree_over_prime<T>::value;
 
 // Base case: Prime fields have degree 1 over themselves
 template <uint16_t p>
@@ -420,9 +494,32 @@ namespace details {
  * @tparam Types Variadic list of types
  */
 template <typename... Types>
-struct type_list {
-    static constexpr size_t size = sizeof...(Types);
+struct type_list {};
+
+/**
+ * @brief Concatenation of type_lists (duplicates preserved)
+ * @tparam Lists type_lists to concatenate
+ */
+template <typename... Lists>
+struct concat;
+
+template <>
+struct concat<> {
+    using type = type_list<>;
 };
+
+template <typename... Types>
+struct concat<type_list<Types...>> {
+    using type = type_list<Types...>;
+};
+
+template <typename... Types1, typename... Types2, typename... Rest>
+struct concat<type_list<Types1...>, type_list<Types2...>, Rest...> {
+    using type = typename concat<type_list<Types1..., Types2...>, Rest...>::type;
+};
+
+template <typename... Lists>
+using concat_t = typename concat<Lists...>::type;
 
 /**
  * @brief Check if a type exists in a type_list
@@ -452,21 +549,8 @@ struct union_type_lists<type_list<Types1...>, type_list<Types2...>> {
     template <typename T>
     using add_if_not_present = std::conditional_t<contains_v<T, type_list<Types1...>>, type_list<>, type_list<T>>;
 
-    template <typename... Lists>
-    struct concat;
-
-    template <typename... Types>
-    struct concat<type_list<Types...>> {
-        using type = type_list<Types...>;
-    };
-
-    template <typename... Types1_, typename... Types2_, typename... Rest>
-    struct concat<type_list<Types1_...>, type_list<Types2_...>, Rest...> {
-        using type = typename concat<type_list<Types1_..., Types2_...>, Rest...>::type;
-    };
-
    public:
-    using type = typename concat<type_list<Types1...>, add_if_not_present<Types2>...>::type;
+    using type = concat_t<type_list<Types1...>, add_if_not_present<Types2>...>;
 };
 
 template <typename List1, typename List2>
@@ -486,21 +570,8 @@ struct intersect_type_lists<type_list<Types1...>, type_list<Types2...>> {
     template <typename T>
     using add_if_in_both = std::conditional_t<contains_v<T, type_list<Types2...>>, type_list<T>, type_list<>>;
 
-    template <typename... Lists>
-    struct concat;
-
-    template <typename... Types>
-    struct concat<type_list<Types...>> {
-        using type = type_list<Types...>;
-    };
-
-    template <typename... Types1_, typename... Types2_, typename... Rest>
-    struct concat<type_list<Types1_...>, type_list<Types2_...>, Rest...> {
-        using type = typename concat<type_list<Types1_..., Types2_...>, Rest...>::type;
-    };
-
    public:
-    using type = typename concat<add_if_in_both<Types1>...>::type;
+    using type = concat_t<add_if_in_both<Types1>...>;
 };
 
 template <typename List1, typename List2>
@@ -536,8 +607,8 @@ using largest_field_in_list_t = typename largest_field_in_list<List>::type;
  * @tparam F Finite-field type
  *
  * Recurses through the construction tower: `Fp<p>` is the base case, `Ext<B, …>` extends
- * `collect_subfields_t<B> ∪ {B}` with itself, and `Iso<…>` unions the subfield lists of all
- * its representations. Used by @ref largest_common_subfield_t.
+ * `collect_subfields_t<B>` with itself, and `Iso<…>` unions the subfield lists of all its
+ * representations (and itself). Used by @ref largest_common_subfield_t.
  */
 template <typename F>
 struct collect_subfields;
@@ -551,12 +622,7 @@ struct collect_subfields<Fp<p>> {
 // Specialization for extension fields - recursive case
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 struct collect_subfields<Ext<B, modulus, mode>> {
-   private:
-    using base_subfields = typename collect_subfields<B>::type;
-    using with_base = union_type_lists_t<base_subfields, type_list<B>>;
-
-   public:
-    using type = union_type_lists_t<with_base, type_list<Ext<B, modulus, mode>>>;
+    using type = union_type_lists_t<typename collect_subfields<B>::type, type_list<Ext<B, modulus, mode>>>;
 };
 
 // Helper to compute union of all subfields for Iso types
@@ -568,31 +634,44 @@ struct union_all_subfields<> {
     using type = type_list<>;
 };
 
-template <typename T>
-struct union_all_subfields<T> {
-    using type = typename collect_subfields<T>::type;
-};
-
-template <typename T1, typename T2, typename... Rest>
-struct union_all_subfields<T1, T2, Rest...> {
+template <typename First, typename... Rest>
+struct union_all_subfields<First, Rest...> {
     using type =
-        union_type_lists_t<typename collect_subfields<T1>::type, typename union_all_subfields<T2, Rest...>::type>;
+        union_type_lists_t<typename collect_subfields<First>::type, typename union_all_subfields<Rest...>::type>;
 };
 
 // Specialization for isomorphic fields - union of all representations
 template <typename MAIN, typename... OTHERS>
 struct collect_subfields<Iso<MAIN, OTHERS...>> {
-   private:
-    using main_subfields = typename collect_subfields<MAIN>::type;
-    using others_subfields = typename details::union_all_subfields<OTHERS...>::type;
-    using all_subfields = union_type_lists_t<main_subfields, others_subfields>;
-
-   public:
-    using type = union_type_lists_t<all_subfields, type_list<Iso<MAIN, OTHERS...>>>;
+    using type =
+        union_type_lists_t<typename union_all_subfields<MAIN, OTHERS...>::type, type_list<Iso<MAIN, OTHERS...>>>;
 };
 
 template <typename F>
 using collect_subfields_t = typename collect_subfields<F>::type;
+
+/**
+ * @brief Detect whether T is an `Iso` and expose its components
+ *
+ * @tparam T Any type
+ *
+ * Primary template: `is_iso = false`, `main_type = void`. The specialization for
+ * `Iso<MAIN, OTHERS...>` (below) sets `is_iso = true`, `main_type = MAIN`, and packages
+ * `OTHERS...` into `others_tuple`.
+ */
+template <typename T>
+struct iso_info {
+    static constexpr bool is_iso = false;
+    using main_type = void;
+};
+
+/// @brief Specialization of @ref iso_info for `Iso<MAIN, OTHERS...>`
+template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
+struct iso_info<Iso<MAIN, OTHERS...>> {
+    static constexpr bool is_iso = true;
+    using main_type = MAIN;
+    using others_tuple = std::tuple<OTHERS...>;
+};
 
 /**
  * @brief Largest field that appears as a subfield of both F and G
@@ -629,16 +708,10 @@ struct largest_common_subfield {
     using common_subfields = intersect_type_lists_t<subfields_F, subfields_G>;
     using raw_largest = largest_field_in_list_t<common_subfields>;
 
-    // Detect Iso types
-    template <typename T>
-    struct is_iso : std::false_type {};
-    template <typename MAIN, typename... OTHERS>
-    struct is_iso<Iso<MAIN, OTHERS...>> : std::true_type {};
-
     template <typename Largest, typename Param1, typename Param2>
-    using prefer_iso =
-        std::conditional_t<is_iso<Param1>::value && Isomorphic<Largest, Param1>, Param1,
-                           std::conditional_t<is_iso<Param2>::value && Isomorphic<Largest, Param2>, Param2, Largest>>;
+    using prefer_iso = std::conditional_t<
+        iso_info<Param1>::is_iso && Isomorphic<Largest, Param1>, Param1,
+        std::conditional_t<iso_info<Param2>::is_iso && Isomorphic<Largest, Param2>, Param2, Largest>>;
 
    public:
     using type = prefer_iso<raw_largest, F, G>;
@@ -646,29 +719,6 @@ struct largest_common_subfield {
 
 template <typename F, typename G>
 using largest_common_subfield_t = typename largest_common_subfield<F, G>::type;
-
-/**
- * @brief Detect whether T is an `Iso` and expose its components
- *
- * @tparam T Any type
- *
- * Primary template: `is_iso = false`, `main_type = void`. The specialization for
- * `Iso<MAIN, OTHERS...>` (below) sets `is_iso = true`, `main_type = MAIN`, and packages
- * `OTHERS...` into `others_tuple`.
- */
-template <typename T>
-struct iso_info {
-    static constexpr bool is_iso = false;
-    using main_type = void;
-};
-
-/// @brief Specialization of @ref iso_info for `Iso<MAIN, OTHERS...>`
-template <FiniteFieldType MAIN, FiniteFieldType... OTHERS>
-struct iso_info<Iso<MAIN, OTHERS...>> {
-    static constexpr bool is_iso = true;
-    using main_type = MAIN;
-    using others_tuple = std::tuple<OTHERS...>;
-};
 
 /// @brief True iff T is not the same as any of `Types...`
 template <typename T, typename... Types>
@@ -678,20 +728,16 @@ constexpr bool is_distinct_from_all = (!std::is_same_v<T, Types> && ...);
  * @brief True iff all types in the pack are pairwise distinct
  *
  * @tparam Types Parameter pack
- * @return `true` if no two types in `Types...` are identical
  *
  * Used by @ref CECCO::Iso to reject duplicate representations.
  */
 template <typename... Types>
-constexpr bool pairwise_distinct() {
-    if constexpr (sizeof...(Types) <= 1) {
-        return true;
-    } else {
-        return []<typename First, typename... Rest>(std::type_identity<First>, std::type_identity<Rest>...) {
-            return details::is_distinct_from_all<First, Rest...> && pairwise_distinct<Rest...>();
-        }(std::type_identity<Types>{}...);
-    }
-}
+constexpr bool pairwise_distinct_v = true;
+
+/// @brief Specialization of @ref pairwise_distinct_v splitting off the first type
+template <typename First, typename... Rest>
+constexpr bool pairwise_distinct_v<First, Rest...> =
+    is_distinct_from_all<First, Rest...> && pairwise_distinct_v<Rest...>;
 
 /**
  * @brief Mixin that deletes the copy operations and defaults the move operations

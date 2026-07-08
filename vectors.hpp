@@ -2,7 +2,7 @@
  * @file vectors.hpp
  * @brief Vector arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.8
+ * @version 2.1.9
  * @date 2026
  *
  * @copyright
@@ -76,15 +76,10 @@ namespace CECCO {
 
 template <ComponentType T>
 class Vector;
-template <ComponentType T>
+template <CoefficientType T>
 class Polynomial;
 template <ComponentType T>
 class Matrix;
-
-namespace details {
-template <FiniteFieldType T>
-struct FiniteFieldHasher;
-}  // namespace details
 
 template <ComponentType T>
 T inner_product(const Vector<T>& lhs, const Vector<T>& rhs);
@@ -127,12 +122,14 @@ template <ComponentType T>
 class Vector {
     template <ReliablyComparableType U>
     friend constexpr bool operator==(const Vector<U>& lhs, const Vector<U>& rhs);
-    friend constexpr T inner_product<>(const Vector<T>& lhs, const Vector<T>& rhs);
-    friend constexpr Vector<T> Schur_product<>(const Vector<T>& lhs, const Vector<T>& rhs);
+    friend T inner_product<>(const Vector<T>& lhs, const Vector<T>& rhs);
+    friend Vector<T> Schur_product<>(const Vector<T>& lhs, const Vector<T>& rhs);
     friend Vector unit_vector<>(size_t length, size_t i);
     friend std::ostream& operator<< <>(std::ostream& os, const Vector& rhs);
     friend double dE(const Vector<std::complex<double>>& lhs, const Vector<std::complex<double>>& rhs);
     friend class Matrix<T>;
+    template <CoefficientType U>
+    friend class Polynomial;
 
    public:
     // Cache configuration for this class
@@ -145,8 +142,10 @@ class Vector {
     /// @brief Default constructor: empty vector (length 0)
     constexpr Vector() noexcept = default;
 
-    /// @brief Length-`n` vector with default-initialised components (T() = 0)
-    explicit Vector(size_t n) : data(n) {}
+    /// @brief Length-`n` vector with zero-initialised components
+    explicit Vector(size_t n) : data(n, T(0)) {
+        if constexpr (ReliablyComparableType<T>) cache.template set<Weight>(0);
+    }
 
     /// @brief Length-`n` vector with every component equal to `l`
     Vector(size_t n, const T& l);
@@ -186,8 +185,13 @@ class Vector {
      *
      * Resulting length is `poly.degree() + 1`. For cross-field conversion, convert the
      * polynomial first.
+     *
+     * @note Member template with U fixed to T, so that instantiating a vector over polynomial
+     * components does not form the unsupported type `Polynomial<Polynomial<...>>`.
      */
-    Vector(const Polynomial<T>& poly);
+    template <CoefficientType U>
+        requires std::same_as<U, T>
+    Vector(const Polynomial<U>& poly);
 
     /** @} */
 
@@ -252,7 +256,8 @@ class Vector {
      * @note Round-trip `(v / s) * s == v` is only guaranteed when T satisfies @ref CECCO::FieldType
      * (otherwise integer rounding may corrupt components).
      */
-    Vector& operator/=(const T& s);
+    Vector& operator/=(const T& s)
+        requires CoefficientType<T>;
 
     /** @} */
 
@@ -265,8 +270,12 @@ class Vector {
      *
      * Distribution per component: finite-field types draw uniformly from the field; signed
      * integers from [−100, 100]; `double` and the parts of `std::complex<double>` from [−1, 1].
+     *
+     * @note Unavailable for polynomial components: randomizing a polynomial needs a degree —
+     * see @ref CECCO::Polynomial::randomize.
      */
-    Vector& randomize();
+    Vector& randomize()
+        requires CoefficientType<T>;
 
     /// @brief Like @ref randomize but every component is guaranteed non-zero
     Vector& randomize_nonzero()
@@ -309,13 +318,14 @@ class Vector {
         requires ReliablyComparableType<T>
     {
         if (data.empty()) throw std::invalid_argument("Support of an empty (length zero) vector is undefined!");
+        const T zero(0);
         std::vector<size_t> supp;
         for (size_t i = 0; i < data.size(); ++i) {
 #ifdef CECCO_ERASURE_SUPPORT
             if constexpr (FieldType<T>)
                 if (data[i].is_erased()) continue;
 #endif
-            if (data[i] != T(0)) supp.push_back(i);
+            if (data[i] != zero) supp.push_back(i);
         }
         return supp;
     }
@@ -329,11 +339,13 @@ class Vector {
 
     /// @brief Burst length R − L + 1, where L, R are the first and last non-zero indices; 0 for an all-zero or empty
     /// vector
-    constexpr size_t burst_length() const;
+    constexpr size_t burst_length() const
+        requires ReliablyComparableType<T>;
 
     /// @brief Cyclic burst length: shortest circular arc covering all non-zero positions; 0 for an all-zero or empty
     /// vector
-    constexpr size_t cyclic_burst_length() const;
+    constexpr size_t cyclic_burst_length() const
+        requires ReliablyComparableType<T>;
 
     /** @} */
 
@@ -538,8 +550,14 @@ class Vector {
         requires ReliablyComparableType<T>;
 };
 
+/// @brief Deduction guide: a vector constructed from a polynomial deduces the coefficient type
+template <CoefficientType T>
+Vector(const Polynomial<T>&) -> Vector<T>;
+
 template <ComponentType T>
-Vector<T>::Vector(size_t n, const T& l) : data(n, l) {}
+Vector<T>::Vector(size_t n, const T& l) : data(n) {
+    fill(l);
+}
 
 template <ComponentType T>
 Vector<T>::Vector(const Vector<T>& other) : data(other.data), cache(other.cache) {}
@@ -567,12 +585,14 @@ template <FiniteFieldType S>
 Vector<T>::Vector(const Vector<S>& other) {
     data.resize(other.get_n());
     for (size_t i = 0; i < other.get_n(); ++i) {
-        data[i] = T(other[i]);  // Uses enhanced cross-field constructors
+        data[i] = T(other[i]);
     }
 }
 
 template <ComponentType T>
-Vector<T>::Vector(const Polynomial<T>& poly) {
+template <CoefficientType U>
+    requires std::same_as<U, T>
+Vector<T>::Vector(const Polynomial<U>& poly) {
     data.resize(poly.degree() + 1);
     for (size_t i = 0; i <= poly.degree(); ++i) {
         data[i] = poly[i];
@@ -597,9 +617,7 @@ constexpr Vector<T>& Vector<T>::operator=(Vector<T>&& rhs) noexcept {
 
 template <ComponentType T>
 constexpr Vector<T>& Vector<T>::operator=(const T& rhs) {
-    std::fill(data.begin(), data.end(), rhs);
-    cache.invalidate();
-    return *this;
+    return fill(rhs);
 }
 
 template <ComponentType T>
@@ -608,7 +626,7 @@ template <FiniteFieldType S>
 Vector<T>& Vector<T>::operator=(const Vector<S>& other) {
     data.resize(other.get_n());
     for (size_t i = 0; i < other.get_n(); ++i) {
-        data[i] = T(other[i]);  // Uses enhanced cross-field constructors
+        data[i] = T(other[i]);
     }
     cache.invalidate();
     return *this;
@@ -650,7 +668,6 @@ template <ComponentType T>
 constexpr Vector<T>& Vector<T>::operator*=(const T& s) {
     if (s == T(0)) {
         fill(T(0));
-        cache.invalidate();
     } else {
         std::ranges::for_each(data, [&s](T& v) { v *= s; });
     }
@@ -659,10 +676,16 @@ constexpr Vector<T>& Vector<T>::operator*=(const T& s) {
 }
 
 template <ComponentType T>
-Vector<T>& Vector<T>::operator/=(const T& s) {
+Vector<T>& Vector<T>::operator/=(const T& s)
+    requires CoefficientType<T>
+{
     if (s == T(0)) throw std::invalid_argument("trying to divide components of vector by zero");
-    std::ranges::for_each(data, [&s](T& v) { v /= s; });
-    if constexpr (!FieldType<T>) cache.invalidate();
+    if constexpr (FieldType<T>) {
+        operator*=(T(1) / s);
+    } else {
+        std::ranges::for_each(data, [&s](T& v) { v /= s; });
+        cache.invalidate();
+    }
     return *this;
 }
 
@@ -748,13 +771,11 @@ template <ComponentType T>
 Vector<T>& Vector<T>::delete_components(const std::vector<size_t>& v) {
     if (v.empty()) return *this;
 
-    // Validate and create sorted set of unique indices (deduplicate)
     std::set<size_t> indices(v.begin(), v.end());
     for (size_t idx : indices) {
         if (idx >= data.size()) throw std::invalid_argument("trying to delete non-existent component");
     }
 
-    // Single-pass filtering: copy components that should be kept
     std::vector<T> new_data;
     new_data.reserve(data.size() - indices.size());
 
@@ -775,7 +796,6 @@ Vector<T>& Vector<T>::erase_components(const std::vector<size_t>& v)
 {
     if (v.empty()) return *this;
 
-    // Validate and create sorted set of unique indices (deduplicate)
     std::set<size_t> indices(v.begin(), v.end());
     for (size_t idx : indices) {
         if (idx >= data.size()) throw std::invalid_argument("trying to erase non-existent component");
@@ -793,7 +813,6 @@ Vector<T>& Vector<T>::unerase_components(const std::vector<size_t>& v)
 {
     if (v.empty()) return *this;
 
-    // Validate and create sorted set of unique indices (deduplicate)
     std::set<size_t> indices(v.begin(), v.end());
     for (size_t idx : indices) {
         if (idx >= data.size()) throw std::invalid_argument("trying to un-erase non-existent component");
@@ -825,29 +844,29 @@ template <ComponentType T>
 Vector<T>& Vector<T>::pad_front(size_t n) {
     if (n <= data.size()) return *this;
 
-    std::vector<T> new_data(n);
+    std::vector<T> new_data(n, T(0));
     std::copy(data.begin(), data.end(), new_data.begin() + (n - data.size()));
     data = std::move(new_data);
-    cache.invalidate();
-    return *this;
+    return *this;  // padding with zeros leaves the Hamming weight unchanged
 }
 
 template <ComponentType T>
 Vector<T>& Vector<T>::pad_back(size_t n) {
     if (n <= data.size()) return *this;
 
-    data.resize(n);  // Automatically fills with T() (zeros)
-    cache.invalidate();
-    return *this;
+    data.resize(n, T(0));
+    return *this;  // padding with zeros leaves the Hamming weight unchanged
 }
 
 template <ComponentType T>
 constexpr Vector<T>& Vector<T>::fill(const T& value) {
     std::fill(data.begin(), data.end(), value);
-    if (value == T(0))
-        cache.template set<Weight>(0);
-    else
-        cache.template set<Weight>(data.size());
+    if constexpr (ReliablyComparableType<T>) {
+        if (value == T(0))
+            cache.template set<Weight>(0);
+        else
+            cache.template set<Weight>(data.size());
+    }
 
     return *this;
 }
@@ -880,7 +899,9 @@ Vector<T>& Vector<T>::set_component(size_t i, U&& c)
     T& old_value = data[i];
 
     T new_value(std::forward<U>(c));
-    if (old_value == new_value) return *this;
+    if constexpr (ReliablyComparableType<T>) {
+        if (old_value == new_value) return *this;
+    }
     old_value = std::move(new_value);
 
     cache.invalidate();
@@ -923,9 +944,8 @@ Vector<T>& Vector<T>::set_subvector(const Vector& v, size_t i) {
         throw std::invalid_argument(
             "trying to replace subvector with "
             "vector of incompatible length");
-    for (size_t j = 0; j < v.get_n(); ++j) {
-        data[i + j] = v.data[j];
-    }
+    if (this == &v) return *this;  // only reachable with i == 0: overwriting the vector with itself
+    std::copy(v.data.begin(), v.data.end(), data.begin() + i);
     cache.invalidate();
     return *this;
 }
@@ -936,9 +956,8 @@ Vector<T>& Vector<T>::set_subvector(Vector&& v, size_t i) {
         throw std::invalid_argument(
             "trying to replace subvector with "
             "vector of incompatible length");
-    for (size_t j = 0; j < v.get_n(); ++j) {
-        data[i + j] = std::move(v.data[j]);
-    }
+    if (this == &v) return *this;  // only reachable with i == 0: overwriting the vector with itself
+    std::move(v.data.begin(), v.data.end(), data.begin() + i);
     cache.invalidate();
     return *this;
 }
@@ -947,7 +966,8 @@ template <ComponentType T>
 constexpr bool Vector<T>::is_zero() const
     requires ReliablyComparableType<T>
 {
-    return std::all_of(data.cbegin(), data.cend(), [](const T& x) { return x == T(0); });
+    const T zero(0);
+    return std::all_of(data.cbegin(), data.cend(), [&zero](const T& x) { return x == zero; });
 }
 
 template <ComponentType T>
@@ -977,14 +997,16 @@ constexpr size_t Vector<T>::calculate_weight() const
 }
 
 template <ComponentType T>
-constexpr size_t Vector<T>::burst_length() const {
-    // Find first non-zero element
-    auto first_nonzero = std::find_if(data.begin(), data.end(), [](const T& x) { return x != T(0); });
+constexpr size_t Vector<T>::burst_length() const
+    requires ReliablyComparableType<T>
+{
+    const T zero(0);
+
+    auto first_nonzero = std::find_if(data.begin(), data.end(), [&zero](const T& x) { return x != zero; });
 
     if (first_nonzero == data.end()) return 0;  // All zeros
 
-    // Find last non-zero component(search from end)
-    auto last_nonzero = std::find_if(data.rbegin(), data.rend(), [](const T& x) { return x != T(0); });
+    auto last_nonzero = std::find_if(data.rbegin(), data.rend(), [&zero](const T& x) { return x != zero; });
 
     size_t L = std::distance(data.begin(), first_nonzero);
     size_t R = data.size() - 1 - std::distance(data.rbegin(), last_nonzero);
@@ -993,19 +1015,21 @@ constexpr size_t Vector<T>::burst_length() const {
 }
 
 template <ComponentType T>
-constexpr size_t Vector<T>::cyclic_burst_length() const {
+constexpr size_t Vector<T>::cyclic_burst_length() const
+    requires ReliablyComparableType<T>
+{
     if (data.empty()) return 0;
 
     // Handle all-zero vector
     if (burst_length() == 0) return 0;
 
+    const T zero(0);
     size_t n = data.size();
     size_t max_zero_run = 0;
     size_t current_zero_run = 0;
 
-    // First pass: find longest zero run within the vector
     for (size_t i = 0; i < n; ++i) {
-        if (data[i] == T(0)) {
+        if (data[i] == zero) {
             current_zero_run++;
             max_zero_run = std::max(max_zero_run, current_zero_run);
         } else {
@@ -1013,21 +1037,18 @@ constexpr size_t Vector<T>::cyclic_burst_length() const {
         }
     }
 
-    // Second pass: check for wraparound zeros only if needed
-    if (data[0] == T(0) && data[n - 1] == T(0)) {
-        // Count zeros from start
+    // a zero run may wrap around from the end of the vector to its start
+    if (data[0] == zero && data[n - 1] == zero) {
         size_t zeros_from_start = 0;
-        for (size_t i = 0; i < n && data[i] == T(0); ++i) {
+        for (size_t i = 0; i < n && data[i] == zero; ++i) {
             zeros_from_start++;
         }
 
-        // Count zeros from end
         size_t zeros_from_end = 0;
-        for (size_t i = n; i > 0 && data[i - 1] == T(0); --i) {
+        for (size_t i = n; i > 0 && data[i - 1] == zero; --i) {
             zeros_from_end++;
         }
 
-        // Update max if wraparound creates longer run
         if (zeros_from_start + zeros_from_end < n) {  // Avoid double counting all-zero case
             max_zero_run = std::max(max_zero_run, zeros_from_start + zeros_from_end);
         }
@@ -1037,7 +1058,9 @@ constexpr size_t Vector<T>::cyclic_burst_length() const {
 }
 
 template <ComponentType T>
-Vector<T>& Vector<T>::randomize() {
+Vector<T>& Vector<T>::randomize()
+    requires CoefficientType<T>
+{
     if constexpr (FieldType<T>) {
         std::ranges::for_each(data, std::mem_fn(&T::randomize));
     } else if constexpr (std::same_as<T, double>) {
@@ -1059,11 +1082,12 @@ template <ComponentType T>
 Vector<T>& Vector<T>::randomize_nonzero()
     requires FieldType<T>
 {
+    const T zero(0);
     for (size_t i = 0; i < data.size(); ++i) {
-        data[i] = T(0);
+        data[i] = zero;
         data[i].randomize_force_change();
     }
-    cache.invalidate();
+    if constexpr (ReliablyComparableType<T>) cache.template set<Weight>(data.size());
     return *this;
 }
 
@@ -1079,8 +1103,13 @@ Vector<T>& Vector<T>::randomize_pairwise_distinct()
     std::vector<size_t> labels(q);
     std::iota(labels.begin(), labels.end(), 0);
     std::shuffle(labels.begin(), labels.end(), gen());
-    for (size_t i = 0; i < n; ++i) data[i] = T(labels[i]);
-    cache.invalidate();
+    bool zero_drawn = false;
+    for (size_t i = 0; i < n; ++i) {
+        if (labels[i] == 0) zero_drawn = true;
+        data[i] = T(labels[i]);
+    }
+    // labels are pairwise distinct, so the zero element occurs at most once
+    cache.template set<Weight>(zero_drawn ? n - 1 : n);
     return *this;
 }
 
@@ -1156,15 +1185,10 @@ Matrix<T> Vector<T>::to_matrix(size_t m) const {
                                     std::string(") is not a divisor of vector length n (") + std::to_string(get_n()) +
                                     ")!");
 
-    const size_t cols = get_n() / m;
-    Matrix<T> M(m, cols);
-    size_t k = 0;
-    for (size_t i = 0; i < m; ++i) {
-        for (size_t j = 0; j < cols; ++j) {
-            M.set_component(i, j, data[k]);
-            ++k;
-        }
-    }
+    Matrix<T> M(m, get_n() / m);
+    std::copy(data.begin(), data.end(), M.data.begin());
+    M.type = details::Generic;  // raw writes bypass set_component's tag tracking
+    M.determine_type_tag();
     return M;
 }
 
@@ -1274,14 +1298,14 @@ constexpr Vector<T> operator*(const T& lhs, Vector<T>&& rhs) {
  * vector / T
  */
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Vector<T> operator/(const Vector<T>& lhs, const T& rhs) {
     Vector res(lhs);
     res /= rhs;
     return res;
 }
 
-template <FieldType T>
+template <CoefficientType T>
 constexpr Vector<T> operator/(Vector<T>&& lhs, const T& rhs) {
     Vector res(std::move(lhs));
     res /= rhs;
@@ -1289,19 +1313,19 @@ constexpr Vector<T> operator/(Vector<T>&& lhs, const T& rhs) {
 }
 
 /// @brief Discrete linear convolution (= coefficients of `Polynomial(v) * Polynomial(w)`)
-template <ComponentType T>
+template <CoefficientType T>
 Vector<T> convolve(const Vector<T>& v, const Vector<T>& w) {
     return Vector(Polynomial(v) * Polynomial(w));
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 Vector<T> randomize(const Vector<T>& v) {
     Vector<T> result = v;
     result.randomize();
     return result;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 Vector<T> randomize(Vector<T>&& v) {
     Vector<T> result = std::move(v);
     result.randomize();
@@ -1554,14 +1578,14 @@ Vector<T> Schur_product(const Vector<T>& lhs, const Vector<T>& rhs) {
         throw std::invalid_argument(
             "trying to calculate Schur product of "
             "vectors of different lengths");
-    auto res = lhs;
-    for (size_t i = 0; i < res.get_n(); ++i) res.set_component(i, res[i] * rhs[i]);
+    Vector<T> res(lhs.get_n());
+    for (size_t i = 0; i < res.get_n(); ++i) res.data[i] = lhs.data[i] * rhs.data[i];
+    res.cache.invalidate();
     return res;
 }
 
 template <ReliablyComparableType T>
 constexpr bool operator==(const Vector<T>& lhs, const Vector<T>& rhs) {
-    if (lhs.data.size() != rhs.data.size()) return false;
     return lhs.data == rhs.data;
 }
 
@@ -1579,7 +1603,7 @@ Vector<T> unit_vector(size_t length, size_t i) {
     if (i >= length) throw std::invalid_argument("trying to create invalid unit vector");
     Vector<T> res(length);
     res.set_component(i, T(1));
-    res.cache.template set<Vector<T>::Weight>(1);
+    if constexpr (ReliablyComparableType<T>) res.cache.template set<Vector<T>::Weight>(1);
     return res;
 }
 
@@ -1587,11 +1611,10 @@ Vector<T> unit_vector(size_t length, size_t i) {
 template <ComponentType T>
 std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) {
     os << "( ";
-    for (auto it = rhs.data.cbegin(); it != rhs.data.cend(); ++it) {
-        os << *it;
-        if (it != rhs.data.cend() - 1) {
-            os << ", ";
-        }
+    const char* sep = "";
+    for (const auto& elem : rhs.data) {
+        os << sep << elem;
+        sep = ", ";
     }
     os << " )";
     return os;

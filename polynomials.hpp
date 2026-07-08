@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.10
+ * @version 2.2.11
  * @date 2026
  *
  * @copyright
@@ -14,7 +14,7 @@
  *
  * @section Description
  *
- * Univariate polynomials over any @ref CECCO::ComponentType (finite fields, `double`,
+ * Univariate polynomials over any @ref CECCO::CoefficientType (finite fields, `double`,
  * `std::complex<double>`, signed integers). Algorithms that need division — long division,
  * GCD, LCM, derivatives, normalisation, irreducibility test — require @ref CECCO::FieldType
  * coefficients. Cross-field constructors between two finite fields of the same characteristic
@@ -79,21 +79,19 @@ namespace CECCO {
 
 template <ComponentType T>
 class Vector;
-template <ComponentType T>
+template <CoefficientType T>
 class Polynomial;
 
-template <ComponentType T>
-constexpr bool operator==(const Polynomial<T>& lhs, const Polynomial<T>& rhs);
-template <ComponentType T>
+template <CoefficientType T>
 std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs);
 
-template <ComponentType T>
-Polynomial<T> ZeroPolynomial();
+template <CoefficientType T>
+const Polynomial<T>& ZeroPolynomial();
 
 /**
- * @brief Univariate polynomial p(x) = a₀ + a₁x + … + aₙxⁿ over a @ref CECCO::ComponentType
+ * @brief Univariate polynomial p(x) = a₀ + a₁x + … + aₙxⁿ over a @ref CECCO::CoefficientType
  *
- * @tparam T Coefficient type satisfying @ref CECCO::ComponentType (finite field, `double`,
+ * @tparam T Coefficient type satisfying @ref CECCO::CoefficientType (finite field, `double`,
  *           `std::complex<double>`, or signed integer including `InfInt`)
  *
  * Coefficients are stored low-to-high in a contiguous buffer; the leading-zero invariant is
@@ -117,9 +115,10 @@ Polynomial<T> ZeroPolynomial();
  * size_t w = p.wH();                               // Hamming weight (cached)
  * @endcode
  */
-template <ComponentType T>
+template <CoefficientType T>
 class Polynomial {
-    friend bool operator== <>(const Polynomial& lhs, const Polynomial& rhs);
+    template <ReliablyComparableType U>
+    friend constexpr bool operator==(const Polynomial<U>& lhs, const Polynomial<U>& rhs);
     friend std::ostream& operator<< <>(std::ostream& os, const Polynomial& rhs);
 
    public:
@@ -259,11 +258,11 @@ class Polynomial {
      * @note Round-trip `(p / s) * s == p` is only guaranteed when T satisfies @ref CECCO::FieldType
      * (otherwise integer rounding may corrupt coefficients).
      */
-    Polynomial& operator/=(const T& s);
-
-    /// @brief Multiply every coefficient by the integer @p n; reduces @p n modulo characteristic
-    constexpr Polynomial& operator*=(size_t n)
+    Polynomial& operator/=(const T& s)
         requires FieldType<T>;
+
+    /// @brief Multiply every coefficient by the integer @p n; reduces @p n modulo characteristic if available
+    constexpr Polynomial& operator*=(size_t n);
 
     /**
      * @brief Long division: returns `(q, r)` with `*this == q · rhs + r` and `r == 0` or `deg(r) < deg(rhs)`
@@ -417,12 +416,12 @@ class Polynomial {
 
             for (size_t k = 0; k < count; ++k) {
                 size_t x = k;
-                Vector<T> v;
+                Polynomial<T> p;
                 for (size_t j = 0; j < i; ++j) {
-                    v = v.append(T(x % q));
+                    p.set_coefficient(j, T(x % q));
                     x /= q;
                 }
-                auto p = Polynomial(v.append(T(1)));
+                p.set_coefficient(i, T(1));
                 if (((*this) % p).is_zero()) return false;
             }
         }
@@ -489,22 +488,23 @@ class Polynomial {
 
 /* member functions for Polynomial */
 
-template <ComponentType T>
+template <CoefficientType T>
 template <FiniteFieldType S>
     requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
 Polynomial<T>::Polynomial(const Polynomial<S>& other) {
     if (other.is_empty()) return;
-    const size_t deg = other.degree();
-    for (size_t i = 0; i <= deg; ++i) set_coefficient(i, T(other[i]));  // Uses enhanced cross-field constructors
+    // cross-field conversion maps nonzero to nonzero, so canonical form survives without prune()
+    data.resize(other.degree() + 1);
+    for (size_t i = 0; i < data.size(); ++i) data[i] = T(other[i]);
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 Polynomial<T>::Polynomial(const Vector<T>& v) : data(v.get_n()) {
     for (size_t i = 0; i < data.size(); ++i) data[i] = v[i];
     prune();
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T>& Polynomial<T>::operator=(const T& rhs) {
     data.resize(1);
     data.back() = rhs;
@@ -515,7 +515,7 @@ constexpr Polynomial<T>& Polynomial<T>::operator=(const T& rhs) {
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T>& Polynomial<T>::operator=(const Polynomial<T>& rhs) {
     if (this == &rhs) return *this;
     if (rhs.data.empty()) {
@@ -528,7 +528,7 @@ constexpr Polynomial<T>& Polynomial<T>::operator=(const Polynomial<T>& rhs) {
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T>& Polynomial<T>::operator=(Polynomial<T>&& rhs) noexcept {
     if (this == &rhs) return *this;
     if (rhs.data.empty()) {
@@ -541,79 +541,74 @@ constexpr Polynomial<T>& Polynomial<T>::operator=(Polynomial<T>&& rhs) noexcept 
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 template <FiniteFieldType S>
     requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
 Polynomial<T>& Polynomial<T>::operator=(const Polynomial<S>& rhs) {
-    if (rhs.data.empty()) {
+    if (rhs.is_empty()) {
         data.clear();
-        cache.invalidate();
-        return *this;
+    } else {
+        data.resize(rhs.degree() + 1);
+        for (size_t i = 0; i < data.size(); ++i) data[i] = T(rhs[i]);
     }
-    data.resize(0);
-    for (size_t i = 0; i <= rhs.degree(); ++i)
-        this->set_coefficient(i, T(rhs[i]));  // Uses enhanced cross-field constructors
     cache.invalidate();
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> Polynomial<T>::operator-() const& {
     Polynomial res(*this);
     std::ranges::for_each(res.data, [](T& c) { c = -c; });
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> Polynomial<T>::operator-() && {
     std::ranges::for_each(data, [](T& c) { c = -c; });
-    cache.invalidate();
     return std::move(*this);
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 T Polynomial<T>::operator()(const T& s) const {
     if (data.empty()) throw std::invalid_argument("trying to evaluate empty polynomial");
     if (data.size() == 1) return data.front();
 
-    // Use std::accumulate with Horner's method for polynomial evaluation
     return std::accumulate(data.crbegin() + 1, data.crend(), data.back(),
                            [&s](const T& acc, const T& coeff) { return acc * s + coeff; });
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T>& Polynomial<T>::operator+=(const Polynomial<T>& rhs) {
-    if (data.size() < rhs.data.size()) data.resize(rhs.data.size());
+    if (data.size() < rhs.data.size()) data.resize(rhs.data.size(), T(0));
     std::transform(data.begin(), data.begin() + rhs.data.size(), rhs.data.begin(), data.begin(), std::plus<T>{});
     cache.invalidate();
     prune();
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T>& Polynomial<T>::operator-=(const Polynomial<T>& rhs) {
-    if (data.size() < rhs.data.size()) data.resize(rhs.data.size());
+    if (data.size() < rhs.data.size()) data.resize(rhs.data.size(), T(0));
     std::transform(data.begin(), data.begin() + rhs.data.size(), rhs.data.begin(), data.begin(), std::minus<T>{});
     cache.invalidate();
     prune();
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T>& Polynomial<T>::operator*=(const Polynomial<T>& rhs) {
     if (is_empty() || rhs.is_empty()) throw std::invalid_argument("trying to multiply with empty polynomial");
-    Polynomial res;
-    res.data.resize(data.size() + rhs.data.size() - 1);
+    std::vector<T> res(data.size() + rhs.data.size() - 1, T(0));
     for (size_t i = 0; i < data.size(); ++i) {
-        for (size_t j = 0; j < rhs.data.size(); ++j) res.add_to_coefficient(i + j, data[i] * rhs.data[j]);
+        for (size_t j = 0; j < rhs.data.size(); ++j) res[i + j] += data[i] * rhs.data[j];
     }
-    data = std::move(res.data);
+    data = std::move(res);
     cache.invalidate();
     prune();
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 Polynomial<T>& Polynomial<T>::operator/=(const Polynomial<T>& rhs)
     requires FieldType<T>
 {
@@ -623,7 +618,7 @@ Polynomial<T>& Polynomial<T>::operator/=(const Polynomial<T>& rhs)
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 Polynomial<T>& Polynomial<T>::operator%=(const Polynomial<T>& rhs)
     requires FieldType<T>
 {
@@ -647,7 +642,7 @@ Polynomial<T>& Polynomial<T>::operator%=(const Polynomial<T>& rhs)
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T>& Polynomial<T>::operator*=(const T& s) {
     if (s == T(0)) {
         cache.template set<Weight>(0);
@@ -655,17 +650,14 @@ constexpr Polynomial<T>& Polynomial<T>::operator*=(const T& s) {
         data.back() = T(0);
     } else {
         std::ranges::for_each(data, [&s](T& c) { c *= s; });
-        cache.invalidate();
     }
     return *this;
 }
 
-template <ComponentType T>
-constexpr Polynomial<T>& Polynomial<T>::operator*=(size_t n)
-    requires FieldType<T>
-{
-    if (T::get_characteristic() != 0) {
-        n = n % T::get_characteristic();
+template <CoefficientType T>
+constexpr Polynomial<T>& Polynomial<T>::operator*=(size_t n) {
+    if constexpr (FieldType<T>) {
+        if (T::get_characteristic() != 0) n = n % T::get_characteristic();
     }
     if (n == 0) {
         cache.template set<Weight>(0);
@@ -673,20 +665,20 @@ constexpr Polynomial<T>& Polynomial<T>::operator*=(size_t n)
         data.back() = T(0);
     } else {
         std::ranges::for_each(data, [&n](T& c) { c *= n; });
-        cache.invalidate();
     }
     return *this;
 }
 
-template <ComponentType T>
-Polynomial<T>& Polynomial<T>::operator/=(const T& s) {
+template <CoefficientType T>
+Polynomial<T>& Polynomial<T>::operator/=(const T& s)
+    requires FieldType<T>
+{
     if (s == T(0)) throw std::invalid_argument("division by zero (polynomial)");
     std::ranges::for_each(data, [&s](T& c) { c /= s; });
-    cache.invalidate();
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 std::pair<Polynomial<T>, Polynomial<T>> Polynomial<T>::poly_long_div(const Polynomial<T>& rhs) const
     requires FieldType<T>
 {
@@ -695,9 +687,9 @@ std::pair<Polynomial<T>, Polynomial<T>> Polynomial<T>::poly_long_div(const Polyn
     const auto rhs_degree = rhs.degree();
     const auto rhs_lc = rhs.leading_coefficient();
 
-    if (rhs_degree == 0) return std::make_pair(*this / rhs[0], Polynomial<T>({0}));
+    if (rhs_degree == 0) return std::make_pair(*this / rhs[0], ZeroPolynomial<T>());
 
-    if (degree() < rhs_degree) return std::make_pair(Polynomial<T>({0}), *this);
+    if (degree() < rhs_degree) return std::make_pair(ZeroPolynomial<T>(), *this);
 
     Polynomial<T> q;
     Polynomial<T> r = *this;
@@ -712,39 +704,40 @@ std::pair<Polynomial<T>, Polynomial<T>> Polynomial<T>::poly_long_div(const Polyn
     return std::make_pair(std::move(q), std::move(r));
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 Polynomial<T>& Polynomial<T>::randomize(size_t d) {
     data.resize(d + 1);
+    const T zero(0);
     if constexpr (FieldType<T>) {
         std::ranges::for_each(data, std::mem_fn(&T::randomize));
         do {
             data.back().randomize();
-        } while (data.back() == T(0));
+        } while (data.back() == zero);
     } else if constexpr (std::same_as<T, double>) {
         std::uniform_real_distribution<double> dist(-1.0, 1.0);
         std::ranges::for_each(data, [&](double& val) { val = dist(gen()); });
         do {
             data.back() = dist(gen());
-        } while (data.back() == T(0));
+        } while (data.back() == zero);
     } else if constexpr (std::same_as<T, std::complex<double>>) {
         std::uniform_real_distribution<double> dist(-1.0, 1.0);
         std::ranges::for_each(data,
                               [&](std::complex<double>& val) { val = std::complex<double>(dist(gen()), dist(gen())); });
         do {
             data.back() = std::complex<double>(dist(gen()), dist(gen()));
-        } while (data.back() == T(0));
+        } while (data.back() == zero);
     } else if constexpr (SignedIntType<T>) {
         std::uniform_int_distribution<long long> dist(-100, 100);
         std::ranges::for_each(data, [&](T& val) { val = T(dist(gen())); });
         do {
             data.back() = dist(gen());
-        } while (data.back() == T(0));
+        } while (data.back() == zero);
     }
     cache.invalidate();
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 Polynomial<T>& Polynomial<T>::differentiate(size_t s)
     requires FieldType<T>
 {
@@ -778,7 +771,7 @@ Polynomial<T>& Polynomial<T>::differentiate(size_t s)
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 Polynomial<T>& Polynomial<T>::Hasse_differentiate(size_t s)
     requires FieldType<T>
 {
@@ -799,7 +792,7 @@ Polynomial<T>& Polynomial<T>::Hasse_differentiate(size_t s)
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 size_t Polynomial<T>::degree() const
     requires ReliablyComparableType<T>
 {
@@ -807,14 +800,15 @@ size_t Polynomial<T>::degree() const
     return (data.size() - 1);
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 Vector<T> Polynomial<T>::get_coefficients() const {
     Vector<T> res(data.size());
-    for (size_t i = 0; i < data.size(); ++i) res.set_component(i, data[i]);
+    std::copy(data.begin(), data.end(), res.data.begin());
+    res.cache.invalidate();  // raw writes bypass set_component's cache handling
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 size_t Polynomial<T>::trailing_degree() const
     requires ReliablyComparableType<T>
 {
@@ -822,11 +816,13 @@ size_t Polynomial<T>::trailing_degree() const
     const size_t d = degree();
     if (d == 0) return 0;
 
-    const auto first_nonzero = std::find_if(data.begin(), data.end(), [](const T& coeff) { return coeff != T(0); });
+    const T zero(0);
+    const auto first_nonzero =
+        std::find_if(data.begin(), data.end(), [&zero](const T& coeff) { return coeff != zero; });
     return std::distance(data.begin(), first_nonzero);
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 const T& Polynomial<T>::trailing_coefficient() const
     requires ReliablyComparableType<T>
 {
@@ -837,7 +833,7 @@ const T& Polynomial<T>::trailing_coefficient() const
     return data[trailing_degree()];
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 const T& Polynomial<T>::leading_coefficient() const {
     if (is_empty())
         throw std::invalid_argument(
@@ -846,7 +842,7 @@ const T& Polynomial<T>::leading_coefficient() const {
     return data.back();
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 template <typename U>
 constexpr Polynomial<T>& Polynomial<T>::add_to_coefficient(size_t i, U&& c)
     requires std::convertible_to<std::decay_t<U>, T>
@@ -857,7 +853,7 @@ constexpr Polynomial<T>& Polynomial<T>::add_to_coefficient(size_t i, U&& c)
     cache.invalidate();
     if (data.empty() || i >= data.size()) {
         // automatic growth, change zero coefficient beyond degree
-        data.resize(i + 1);
+        data.resize(i + 1, T(0));
         data.back() = std::move(c_converted);
     } else if (i == data.size() - 1) {
         // change MSC
@@ -870,7 +866,7 @@ constexpr Polynomial<T>& Polynomial<T>::add_to_coefficient(size_t i, U&& c)
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 template <typename U>
 constexpr Polynomial<T>& Polynomial<T>::set_coefficient(size_t i, U&& c)
     requires std::convertible_to<std::decay_t<U>, T>
@@ -879,7 +875,7 @@ constexpr Polynomial<T>& Polynomial<T>::set_coefficient(size_t i, U&& c)
     if (data.empty() || i >= data.size()) {
         if (new_value == T(0)) return *this;
         cache.invalidate();
-        data.resize(i + 1);
+        data.resize(i + 1, T(0));
         data[i] = std::move(new_value);
     } else {
         if (data[i] == new_value) return *this;
@@ -890,14 +886,14 @@ constexpr Polynomial<T>& Polynomial<T>::set_coefficient(size_t i, U&& c)
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T>& Polynomial<T>::reciprocal() {
     std::reverse(data.begin(), data.end());
     prune();  // a zero constant term in the original becomes a leading zero after reversal
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T>& Polynomial<T>::normalize()
     requires FieldType<T>
 {
@@ -906,13 +902,13 @@ constexpr Polynomial<T>& Polynomial<T>::normalize()
     return *this;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr T Polynomial<T>::operator[](size_t i) const {
     if (i >= data.size()) return T(0);
     return data[i];
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr size_t Polynomial<T>::calculate_weight() const
     requires ReliablyComparableType<T>
 {
@@ -925,157 +921,157 @@ constexpr size_t Polynomial<T>::calculate_weight() const
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T>& Polynomial<T>::prune() {
     if (data.empty()) return *this;
 
-    const auto lc = std::find_if(data.crbegin(), data.crend(), [](const T& e) { return e != T(0); });
+    const T zero(0);
+    const auto lc = std::find_if(data.crbegin(), data.crend(), [&zero](const T& e) { return e != zero; });
     if (lc != data.crend()) {
         data.resize(data.size() - std::distance(data.crbegin(), lc));
     } else {
         data.resize(1);
-        data.back() = T(0);
+        data.back() = zero;
     }
     return *this;
 }
 
 /* free functions wrt. Polynomial */
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator+(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(lhs);
     res += rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator+(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(std::move(lhs));
     res += rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator+(const Polynomial<T>& lhs, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(rhs));
     res += lhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator+(Polynomial<T>&& lhs, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(lhs));
     res += rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator-(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(lhs);
     res -= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator-(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(std::move(lhs));
     res -= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator-(const Polynomial<T>& lhs, Polynomial<T>&& rhs) {
-    Polynomial<T> res(std::move(rhs));
-    res = -res;
+    Polynomial<T> res(-std::move(rhs));
     res += lhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator-(Polynomial<T>&& lhs, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(lhs));
     res -= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator*(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(lhs);
     res *= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator*(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(std::move(lhs));
     res *= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator*(const Polynomial<T>& lhs, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(rhs));
     res *= lhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator*(Polynomial<T>&& lhs, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(lhs));
     res *= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator/(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(lhs);
     res /= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator/(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(std::move(lhs));
     res /= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator%(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(lhs);
     res %= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator%(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(std::move(lhs));
     res %= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator*(const Polynomial<T>& lhs, const T& rhs) {
     Polynomial<T> res(lhs);
     res *= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator*(Polynomial<T>&& lhs, const T& rhs) {
     Polynomial<T> res(std::move(lhs));
     res *= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator*(const T& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> res(rhs);
     res *= lhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator*(const T& lhs, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(rhs));
     res *= lhs;
@@ -1083,60 +1079,60 @@ constexpr Polynomial<T> operator*(const T& lhs, Polynomial<T>&& rhs) {
 }
 
 // polynomial / scalar (corresponding to operator/= with T)
-template <ComponentType T>
+template <FieldType T>
 constexpr Polynomial<T> operator/(const Polynomial<T>& lhs, const T& rhs) {
     Polynomial<T> res(lhs);
     res /= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <FieldType T>
 constexpr Polynomial<T> operator/(Polynomial<T>&& lhs, const T& rhs) {
     Polynomial<T> res(std::move(lhs));
     res /= rhs;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator*(const Polynomial<T>& lhs, size_t n) {
     Polynomial<T> res(lhs);
     res *= n;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator*(Polynomial<T>&& lhs, size_t n) {
     Polynomial<T> res(std::move(lhs));
     res *= n;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator*(size_t n, const Polynomial<T>& rhs) {
     Polynomial<T> res(rhs);
     res *= n;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator*(size_t n, Polynomial<T>&& rhs) {
     Polynomial<T> res(std::move(rhs));
     res *= n;
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 std::pair<Polynomial<T>, Polynomial<T>> poly_long_div(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> temp(lhs);
     return temp.poly_long_div(rhs);
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 std::pair<Polynomial<T>, Polynomial<T>> poly_long_div(Polynomial<T>&& lhs, const Polynomial<T>& rhs) {
     Polynomial<T> temp(std::move(lhs));
     return temp.poly_long_div(rhs);
 }
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> derivative(const Polynomial<T>& poly, size_t s)
     requires FieldType<T>
 {
@@ -1145,7 +1141,7 @@ constexpr Polynomial<T> derivative(const Polynomial<T>& poly, size_t s)
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> derivative(Polynomial<T>&& poly, size_t s)
     requires FieldType<T>
 {
@@ -1154,7 +1150,7 @@ constexpr Polynomial<T> derivative(Polynomial<T>&& poly, size_t s)
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> Hasse_derivative(const Polynomial<T>& poly, size_t s)
     requires FieldType<T>
 {
@@ -1163,7 +1159,7 @@ constexpr Polynomial<T> Hasse_derivative(const Polynomial<T>& poly, size_t s)
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> Hasse_derivative(Polynomial<T>&& poly, size_t s)
     requires FieldType<T>
 {
@@ -1172,21 +1168,21 @@ constexpr Polynomial<T> Hasse_derivative(Polynomial<T>&& poly, size_t s)
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> reciprocal(const Polynomial<T>& poly) {
     Polynomial<T> res(poly);
     res.reciprocal();
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> reciprocal(Polynomial<T>&& poly) {
     Polynomial<T> res(std::move(poly));
     res.reciprocal();
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> normalize(const Polynomial<T>& poly)
     requires FieldType<T>
 {
@@ -1195,7 +1191,7 @@ constexpr Polynomial<T> normalize(const Polynomial<T>& poly)
     return res;
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> normalize(Polynomial<T>&& poly)
     requires FieldType<T>
 {
@@ -1204,53 +1200,55 @@ constexpr Polynomial<T> normalize(Polynomial<T>&& poly)
     return res;
 }
 
-template <ComponentType T>
+template <ReliablyComparableType T>
 constexpr bool operator==(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     return lhs.data == rhs.data;
 }
 
-template <ComponentType T>
+template <ReliablyComparableType T>
 constexpr bool operator!=(const Polynomial<T>& lhs, const Polynomial<T>& rhs) {
     return !(lhs == rhs);
 }
 
-template <ComponentType T>
+template <CoefficientType T>
 std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) {
     if (rhs.data.empty()) {
         os << "()";
         return os;
     }
 
-    bool next_negative = false;
+    auto is_positive = [](const T& c) {
+        if constexpr (FieldType<T>) {
+            return c.has_positive_sign();
+        } else if constexpr (std::is_same_v<T, std::complex<double>>) {
+            return c.real() >= 0 || c.imag() >= 0;
+        } else {
+            return c >= 0;
+        }
+    };
+
+    const T zero(0);
+    const T one(1);
+    const T minus_one(-one);
+
+    bool first = true;
     for (size_t i = 0; i < rhs.data.size(); ++i) {
         auto coeff = rhs.data[i];
-        if (next_negative) coeff *= -T(1);
-        if (coeff != T(0) || rhs.data.size() == 1) {
-            if (coeff != T(1) || i == 0) {
-                os << coeff;
-            }
+        if (coeff != zero || rhs.data.size() == 1) {
+            const bool negative = !is_positive(coeff);
+            if (negative) coeff *= minus_one;
+
+            if (first)
+                os << (negative ? "-" : "");
+            else
+                os << (negative ? " - " : " + ");
+
+            if (coeff != one || i == 0) os << coeff;
             if (i > 0) {
                 os << "x";
                 if (i > 1) os << "^" << i;
             }
-            if (i < rhs.data.size() - 1) {
-                bool positive_sign;
-                if constexpr (FieldType<T>) {
-                    positive_sign = rhs.data[i + 1].has_positive_sign();
-                } else if constexpr (std::is_same_v<T, std::complex<double>>) {
-                    positive_sign = rhs.data[i + 1].real() >= 0 || rhs.data[i + 1].imag() >= 0;
-                } else {
-                    positive_sign = rhs.data[i + 1] >= 0;
-                }
-
-                if (positive_sign) {
-                    next_negative = false;
-                    os << " + ";
-                } else {
-                    next_negative = true;
-                    os << " - ";
-                }
-            }
+            first = false;
         }
     }
 
@@ -1263,7 +1261,7 @@ std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) {
  * @param i Power of x
  * @param a Coefficient (defaults to T(1))
  */
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> Monomial(size_t i, auto&& a = T(1))
     requires std::convertible_to<std::decay_t<decltype(a)>, T>
 {
@@ -1273,15 +1271,15 @@ constexpr Polynomial<T> Monomial(size_t i, auto&& a = T(1))
 }
 
 /// @brief Constant polynomial 0 (cached)
-template <ComponentType T>
-Polynomial<T> ZeroPolynomial() {
+template <CoefficientType T>
+const Polynomial<T>& ZeroPolynomial() {
     static const Polynomial<T> zero(0);
     return zero;
 }
 
 /// @brief Constant polynomial 1 (cached)
-template <ComponentType T>
-Polynomial<T> OnePolynomial() {
+template <CoefficientType T>
+const Polynomial<T>& OnePolynomial() {
     static const Polynomial<T> one(1);
     return one;
 }
@@ -1297,17 +1295,17 @@ Polynomial<T> OnePolynomial() {
  *
  * Operands are reordered internally so that the higher-degree one drives the recursion.
  */
-template <ComponentType T>
+template <CoefficientType T>
 Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, Polynomial<T>* t = nullptr)
     requires FieldType<T>
 {
     if (a.degree() < b.degree()) std::swap(a, b);
 
     if (s != nullptr && t != nullptr) {  // extended EA
-        *s = Polynomial<T>({1});
-        *t = Polynomial<T>({0});
-        Polynomial<T> u = Polynomial<T>({0});
-        Polynomial<T> v = Polynomial<T>({1});
+        *s = OnePolynomial<T>();
+        *t = ZeroPolynomial<T>();
+        Polynomial<T> u = ZeroPolynomial<T>();
+        Polynomial<T> v = OnePolynomial<T>();
         // while (b.degree() > 0) {
         while (!b.is_zero()) {
             const Polynomial<T> q = a / b;
@@ -1339,7 +1337,7 @@ Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, 
  * @return gcd(p₁, p₂, …, pₙ)
  * @throws std::invalid_argument if @p polys is empty
  */
-template <ComponentType T>
+template <CoefficientType T>
 Polynomial<T> GCD(const std::vector<Polynomial<T>>& polys)
     requires FieldType<T>
 {
@@ -1355,7 +1353,7 @@ Polynomial<T> GCD(const std::vector<Polynomial<T>>& polys)
 }
 
 /// @brief Least common multiple `lcm(a, b) = (a · b) / gcd(a, b)`
-template <ComponentType T>
+template <CoefficientType T>
 Polynomial<T> LCM(const Polynomial<T>& a, const Polynomial<T>& b)
     requires FieldType<T>
 {
@@ -1368,7 +1366,7 @@ Polynomial<T> LCM(const Polynomial<T>& a, const Polynomial<T>& b)
  * @return lcm(p₁, p₂, …, pₙ)
  * @throws std::invalid_argument if @p polys is empty
  */
-template <ComponentType T>
+template <CoefficientType T>
 Polynomial<T> LCM(const std::vector<Polynomial<T>>& polys)
     requires FieldType<T>
 {
@@ -1392,7 +1390,7 @@ Polynomial<T> LCM(const std::vector<Polynomial<T>>& polys)
  * evaluates `(b * base) ^ exponent`. Parenthesise as `b * (base ^ exponent)`, or call
  * @ref CECCO::sqm directly.
  */
-template <ComponentType T>
+template <CoefficientType T>
 constexpr Polynomial<T> operator^(const Polynomial<T>& base, int exponent) {
     return sqm<Polynomial<T>>(base, exponent);
 }

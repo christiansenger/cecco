@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.4.3
+ * @version 2.4.4
  * @date 2026
  *
  * @copyright
@@ -113,34 +113,51 @@ Polynomial<InfInt> MacWilliamsIdentity(const Polynomial<InfInt>& A, size_t n, si
             K.set_component(i, j, sum);
         }
     }
-    return Polynomial<InfInt>(Vector<InfInt>(a) * Matrix<InfInt>(K) / sqm<InfInt>(q, k));
+    return Polynomial<InfInt>(a * K / sqm<InfInt>(q, k));
 }
 
 namespace details {
 
 inline const int index = std::ios_base::xalloc();
 
+/// @brief Verbosity levels stored in `os.iword(index)`, set by the show* manipulators
+inline constexpr long basic = 0;
+inline constexpr long most = 1;
+inline constexpr long all = 2;
+inline constexpr long special = 3;
+
+/// @brief Restores the stream's verbosity level on scope exit (used when printing nested codes)
+class verbosity_guard {
+   public:
+    explicit verbosity_guard(std::ostream& os) : os(os), saved(os.iword(index)) {}
+    ~verbosity_guard() { os.iword(index) = saved; }
+
+   private:
+    std::ostream& os;
+    long saved;
+};
+
 struct CodewordSentinel {};
 
 }  // namespace details
 
 inline std::ostream& showbasic(std::ostream& os) {
-    os.iword(details::index) = 0;
+    os.iword(details::index) = details::basic;
     return os;
 }
 
 inline std::ostream& showmost(std::ostream& os) {
-    os.iword(details::index) = 1;
+    os.iword(details::index) = details::most;
     return os;
 }
 
 inline std::ostream& showall(std::ostream& os) {
-    os.iword(details::index) = 2;
+    os.iword(details::index) = details::all;
     return os;
 }
 
 inline std::ostream& showspecial(std::ostream& os) {
-    os.iword(details::index) = 3;
+    os.iword(details::index) = details::special;
     return os;
 }
 
@@ -166,7 +183,7 @@ class Code {
 
     size_t get_n() const noexcept { return n; }
 
-    virtual void get_info(std::ostream&) const {};
+    virtual void get_info(std::ostream&) const {}
     virtual Vector<T> enc(const Vector<T>&) const { throw std::logic_error("Encoding not supported for this code!"); }
     virtual Vector<T> encinv(const Vector<T>&) const {
         throw std::logic_error("Inverse encoding not supported for this code!");
@@ -284,6 +301,19 @@ class Code {
 #endif
 
    protected:
+    // Docu note: shared framing of the get_info overrides. Prints the BASE layer (qualified call,
+    // so no virtual dispatch) followed by a line break, except at details::special, which requests
+    // the derived payload only. Returns whether the payload should be printed.
+    template <class BASE>
+    bool info_prelude(std::ostream& os) const {
+        const long level = os.iword(details::index);
+        if (level < details::special) {
+            static_cast<const BASE&>(*this).BASE::get_info(os);
+            if (level > details::basic) os << std::endl;
+        }
+        return level > details::basic;
+    }
+
     size_t n;
 #ifdef CECCO_ERASURE_SUPPORT
     std::vector<size_t> erasure_positions(const Vector<T>& r) const {
@@ -301,16 +331,8 @@ class EmptyCode : public Code<T> {
    public:
     EmptyCode(size_t n) noexcept : Code<T>(n) {}
 
-    EmptyCode(const EmptyCode&) noexcept = default;
-    EmptyCode(EmptyCode&&) noexcept = default;
-    EmptyCode& operator=(const EmptyCode&) noexcept = default;
-    EmptyCode& operator=(EmptyCode&&) noexcept = default;
-
     void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) > 0) {
-            Code<T>::get_info(os);
-            os << "Empty code";
-        }
+        if (os.iword(details::index) > details::basic) os << "Empty code";
     }
 };
 
@@ -387,8 +409,10 @@ class CodewordIterator {
             for (size_t i = 0; i < d.size(); ++i) {
                 const size_t rem = (s % q).toInt();
                 d[i] = rem;
-                if (rem != 0)
-                    for (size_t j = 0; j < n; ++j) c.set_component(j, c[j] + T(rem) * G(i, j));
+                if (rem != 0) {
+                    const T coeff(rem);
+                    for (size_t j = 0; j < n; ++j) c.set_component(j, c[j] + coeff * G(i, j));
+                }
                 s /= q;
             }
         }
@@ -460,8 +484,8 @@ class LinearCode : public Code<T> {
             if (X.rank() != k)
                 throw std::invalid_argument("Cannot construct linear code: G must have full rank " + std::to_string(k));
             G = X;
-            HT = G.basis_of_nullspace().rref().transpose();
             const auto Gp = rref(G);
+            HT = Gp.basis_of_nullspace().rref().transpose();
             size_t i = 0;
             for (size_t j = 0; j < k; ++j) {
                 const auto u = unit_vector<T>(k, j);
@@ -528,6 +552,7 @@ class LinearCode : public Code<T> {
 #endif
           polynomial(other.polynomial),
           gamma(other.gamma),
+          shift_index(other.shift_index),
           minimal_trellis(other.minimal_trellis),
           tanner_graph(other.tanner_graph) {
     }
@@ -553,6 +578,7 @@ class LinearCode : public Code<T> {
 #endif
           polynomial(std::move(other.polynomial)),
           gamma(std::move(other.gamma)),
+          shift_index(std::move(other.shift_index)),
           minimal_trellis(std::move(other.minimal_trellis)),
           tanner_graph(std::move(other.tanner_graph)) {
     }
@@ -579,6 +605,7 @@ class LinearCode : public Code<T> {
 #endif
             polynomial = other.polynomial;
             gamma = other.gamma;
+            shift_index = other.shift_index;
             minimal_trellis = other.minimal_trellis;
             tanner_graph = other.tanner_graph;
         }
@@ -607,6 +634,7 @@ class LinearCode : public Code<T> {
 #endif
             polynomial = std::move(other.polynomial);
             gamma = std::move(other.gamma);
+            shift_index = std::move(other.shift_index);
             minimal_trellis = std::move(other.minimal_trellis);
             tanner_graph = std::move(other.tanner_graph);
         }
@@ -635,7 +663,6 @@ class LinearCode : public Code<T> {
             if (dmin.has_value()) return;
             if (k == 0) throw std::logic_error("Cannot calculate dmin of a dimension zero code!");
 
-            // if weight enumerator is calculated, use it...
             if (weight_enumerator.has_value()) {
                 if constexpr (FiniteFieldType<T>) {
                     for (size_t i = 1; i <= weight_enumerator.value().degree(); ++i) {
@@ -645,7 +672,6 @@ class LinearCode : public Code<T> {
                         }
                     }
                 }
-                // ... otherwise:
             } else {
                 if (k == 1) {
                     dmin = G.get_row(0).wH();
@@ -1171,10 +1197,11 @@ class LinearCode : public Code<T> {
                 if (P_ptr != nullptr) *P_ptr = Pperp;
 
                 if (L_ptr != nullptr) {
+                    const T one(1);
                     std::vector<size_t> p(n, n);
                     for (size_t i = 0; i < n; ++i) {
                         for (size_t j = 0; j < n; ++j) {
-                            if (Pperp(i, j) == T(1)) {
+                            if (Pperp(i, j) == one) {
                                 p[i] = j;
                                 break;
                             }
@@ -1307,11 +1334,8 @@ class LinearCode : public Code<T> {
                10 * std::numeric_limits<long double>::epsilon();
     }
 
-    bool is_weakly_self_dual() const { return G * transpose(G) == ZeroMatrix<T>(k, k); }
-    bool is_dual_containing() const {
-        const size_t redundancy = this->n - k;
-        return transpose(HT) * HT == ZeroMatrix<T>(redundancy, redundancy);
-    }
+    bool is_weakly_self_dual() const { return (G * transpose(G)).is_zero(); }
+    bool is_dual_containing() const { return (transpose(HT) * HT).is_zero(); }
     bool is_self_dual() const { return 2 * k == this->n && is_weakly_self_dual() && is_dual_containing(); }
 
     bool is_polynomial() const {
@@ -1330,7 +1354,7 @@ class LinearCode : public Code<T> {
 
             auto g = ZeroPolynomial<T>();
             for (size_t i = 0; i < k; ++i) {
-                g = GCD(g, Polynomial<T>(G.get_row(i)));
+                g = GCD(std::move(g), Polynomial<T>(G.get_row(i)));
                 if (g.degree() < n - k && !g.is_zero()) {
                     polynomial.emplace(false);
                     return;
@@ -1349,48 +1373,68 @@ class LinearCode : public Code<T> {
 
     bool is_cyclic() const {
         if (!is_polynomial()) return false;
-        if (k == 0) return true;
+        if (k == 0) {
+            shift_index.emplace(1);
+            return true;
+        }
 
         auto p = ZeroPolynomial<T>();
         p.set_coefficient(0, -T(1));
         p.set_coefficient(gamma.value().degree() + k, T(1));
         p %= gamma.value();
-        if (p.is_zero())
+        if (p.is_zero()) {
+            shift_index.emplace(1);
             return true;
-        else
-            return false;
+        }
+        return false;
     }
 
-    virtual void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) != 3) {
-            if (os.iword(details::index) > 0) Code<T>::get_info(os);
-            if constexpr (FiniteFieldType<T>) {
-                os << "[F_" << T::get_size() << "; " << this->n << ", " << k << "]";
-                if (os.iword(details::index) > 1) {
-                    get_weight_enumerator();
-                    os << ", dmin = ";
-                    try {
-                        os << get_dmin();
-                    } catch (const std::logic_error& e) {
-                        os << "undefined";
-                    }
+    // Docu note: the shift amounts that leave a code invariant form a subgroup of Z_n, so they are
+    // exactly the multiples of a single divisor of n; ell_ptr receives this minimal shift index (1 for
+    // cyclic codes, n when only the trivial full rotation applies). Testing divisors suffices because
+    // invariance under any shift implies invariance under its gcd with n.
+    bool is_quasi_cyclic(size_t* ell_ptr = nullptr) const {
+        shift_index.call_once([this] {
+            if (shift_index.has_value()) return;
+            const size_t n = this->n;
+            const auto A = rref(G);
+            for (size_t ell = 1; ell < n; ++ell) {
+                if (n % ell != 0) continue;
+                const auto rotated = horizontal_join(G.get_submatrix(0, n - ell, G.get_m(), ell),
+                                                     G.get_submatrix(0, 0, G.get_m(), n - ell));
+                if (rref(rotated) == A) {
+                    shift_index.emplace(ell);
+                    return;
                 }
-            } else {
+            }
+            shift_index.emplace(n);
+        });
+        if (ell_ptr != nullptr) *ell_ptr = shift_index.value();
+        return shift_index.value() < this->n;
+    }
+
+    void get_info(std::ostream& os) const override {
+        const long level = os.iword(details::index);
+        if (level != details::special) {
+            if (level > details::basic) Code<T>::get_info(os);
+            if constexpr (FiniteFieldType<T>)
+                os << "[F_" << T::get_size() << "; " << this->n << ", " << k << "]";
+            else
                 os << "[Q; " << this->n << ", " << k << "]";
-                if (os.iword(details::index) > 1) {
-                    os << ", dmin = ";
-                    try {
-                        os << get_dmin();
-                    } catch (const std::logic_error& e) {
-                        os << "undefined";
-                    }
+            if (level > details::most) {
+                if constexpr (FiniteFieldType<T>) get_weight_enumerator();
+                os << ", dmin = ";
+                try {
+                    os << get_dmin();
+                } catch (const std::logic_error&) {
+                    os << "undefined";
                 }
             }
         }
-        if (os.iword(details::index) > 0) {
-            if (os.iword(details::index) != 3) os << std::endl;
+        if (level > details::basic) {
+            if (level != details::special) os << std::endl;
             os << BOLD("Linear code") " with properties: { ";
-            if (os.iword(details::index) != 3) {
+            if (level != details::special) {
                 os << std::endl;
                 os << "G = " << std::endl;
                 os << G << std::endl;
@@ -1398,34 +1442,42 @@ class LinearCode : public Code<T> {
                 os << get_H();
                 os << std::endl;
             }
+            os << std::flush;
         }
-        if (os.iword(details::index) > 1 && os.iword(details::index) < 3) {
+        if (level > details::most && level < details::special) {
             if constexpr (FiniteFieldType<T>) os << "A(x) = " << get_weight_enumerator() << std::setfill(' ') << " ";
             os << "tmax = ";
             try {
                 os << get_tmax() << " ";
-            } catch (const std::logic_error& e) {
+            } catch (const std::logic_error&) {
                 os << "undefined ";
             }
         }
 
-        if (os.iword(details::index) > 1) {
+        if (level > details::most) {
             if (is_polynomial()) {
                 os << "polynomial(";
                 if (is_cyclic()) os << "cyclic, ";
-                os << "gamma = " << get_gamma() << ") " << std::flush;
+                os << "gamma = " << get_gamma() << ") ";
+            }
+            if (!is_cyclic()) {
+                size_t ell;
+                if (is_quasi_cyclic(&ell)) os << "quasi-cyclic(ell = " << ell << ") ";
             }
             if constexpr (FiniteFieldType<T>)
-                if (is_perfect()) os << "perfect " << std::flush;
-            if (is_MDS()) os << "MDS " << std::flush;
+                if (is_perfect()) os << "perfect ";
+            if (is_MDS()) os << "MDS ";
             if constexpr (FiniteFieldType<T>)
-                if (is_equidistant()) os << "equidistant " << std::flush;
+                if (is_equidistant()) os << "equidistant ";
         }
-        if (os.iword(details::index) > 0) {
-            if (!is_self_dual() && is_weakly_self_dual()) os << "weakly_self-dual " << std::flush;
-            if (!is_self_dual() && is_dual_containing()) os << "dual-containing " << std::flush;
-            if (is_self_dual()) os << "self-dual " << std::flush;
-            if (os.iword(details::index) != 3) os << std::endl;
+        if (level > details::basic) {
+            const bool weakly_self_dual = is_weakly_self_dual();
+            const bool dual_containing = is_dual_containing();
+            const bool self_dual = is_self_dual();
+            if (!self_dual && weakly_self_dual) os << "weakly_self-dual ";
+            if (!self_dual && dual_containing) os << "dual-containing ";
+            if (self_dual) os << "self-dual ";
+            if (level != details::special) os << std::endl;
             os << "}" << std::flush;
         }
     }
@@ -1488,6 +1540,9 @@ class LinearCode : public Code<T> {
 
     Matrix<T> get_G_in_trellis_oriented_form() const {
         const size_t n = this->n;
+        const T zero(0);
+        const T one(1);
+        const T minus_one(-one);
         auto Gp = G;
         for (;;) {
             // find start and end indices
@@ -1495,13 +1550,13 @@ class LinearCode : public Code<T> {
             std::vector<size_t> ends(k);
             for (size_t i = 0; i < k; ++i) {
                 for (size_t j = 0; j < n; ++j) {
-                    if (Gp(i, j) != T(0)) {
+                    if (Gp(i, j) != zero) {
                         starts[i] = j;
                         break;
                     }
                 }
                 for (size_t j = n; j-- > 0;) {
-                    if (Gp(i, j) != T(0)) {
+                    if (Gp(i, j) != zero) {
                         ends[i] = j;
                         break;
                     }
@@ -1519,12 +1574,12 @@ class LinearCode : public Code<T> {
                 for (size_t j = i + 1; j < k; ++j) {
                     if (starts[i] == starts[j]) {
                         const size_t s = starts[i];
-                        Gp.scale_row(T(1) / Gp(i, s), i);
-                        Gp.scale_row(T(1) / Gp(j, s), j);
+                        Gp.scale_row(one / Gp(i, s), i);
+                        Gp.scale_row(one / Gp(j, s), j);
                         if (ends[i] < ends[j])
-                            Gp.add_scaled_row(-T(1), i, j);
+                            Gp.add_scaled_row(minus_one, i, j);
                         else
-                            Gp.add_scaled_row(-T(1), j, i);
+                            Gp.add_scaled_row(minus_one, j, i);
                         found_start = true;
                         break;
                     }
@@ -1538,12 +1593,12 @@ class LinearCode : public Code<T> {
                     for (size_t j = i + 1; j < k; ++j) {
                         if (ends[i] == ends[j]) {
                             const size_t e = ends[i];
-                            Gp.scale_row(T(1) / Gp(i, e), i);
-                            Gp.scale_row(T(1) / Gp(j, e), j);
+                            Gp.scale_row(one / Gp(i, e), i);
+                            Gp.scale_row(one / Gp(j, e), j);
                             if (starts[i] > starts[j])
-                                Gp.add_scaled_row(-T(1), i, j);
+                                Gp.add_scaled_row(minus_one, i, j);
                             else
-                                Gp.add_scaled_row(-T(1), j, i);
+                                Gp.add_scaled_row(minus_one, j, i);
                             found_end = true;
                             break;
                         }
@@ -1583,21 +1638,22 @@ class LinearCode : public Code<T> {
             constexpr size_t q = T::get_size();
             const size_t n = this->n;
             const auto Gp = get_G_in_trellis_oriented_form();
+            const T zero(0);
 
             std::clog << "--> Calculating minimal trellis for code with " << sqm<InfInt>(q, k) << " codewords"
                       << std::endl;
 
-            auto row_trellis = [n, &Gp](size_t i) {
+            auto row_trellis = [n, &Gp, &zero](size_t i) {
                 size_t s = 0, e = 0;
 
                 for (size_t j = 0; j < n; ++j) {
-                    if (Gp(i, j) != T(0)) {
+                    if (Gp(i, j) != zero) {
                         s = j;
                         break;
                     }
                 }
                 for (size_t j = n; j-- > 0;) {
-                    if (Gp(i, j) != T(0)) {
+                    if (Gp(i, j) != zero) {
                         e = j;
                         break;
                     }
@@ -1610,12 +1666,12 @@ class LinearCode : public Code<T> {
 
                 for (size_t j = 0; j < n; ++j) {
                     if (j < s || (!open_ended && j > (span_one ? s + 1 : e)) || (open_ended && j > e)) {
-                        tr.add_edge(j, 0, 0, T(0));
+                        tr.add_edge(j, 0, 0, zero);
                     } else if (j == s) {
                         for (uint32_t a = 0; a < q; ++a) tr.add_edge(j, 0, a, T(a) * Gp(i, s));
                     } else if (!open_ended && j == (span_one ? s + 1 : e)) {
                         if (span_one) {
-                            for (uint32_t a = 0; a < q; ++a) tr.add_edge(j, a, 0, T(0));
+                            for (uint32_t a = 0; a < q; ++a) tr.add_edge(j, a, 0, zero);
                         } else {
                             for (uint32_t a = 0; a < q; ++a) tr.add_edge(j, a, 0, T(a) * Gp(i, j));
                         }
@@ -1649,7 +1705,7 @@ class LinearCode : public Code<T> {
         return c_sub * MI;
     }
 
-    virtual Vector<T> dec_BD(const Vector<T>& r) const override {
+    Vector<T> dec_BD(const Vector<T>& r) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("BD decoding only available for codes over finite fields!");
         } else {
@@ -1666,7 +1722,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_boosted_BD(const Vector<T>& r) const override {
+    Vector<T> dec_boosted_BD(const Vector<T>& r) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("BD decoding only available for codes over finite fields!");
         } else {
@@ -1678,15 +1734,15 @@ class LinearCode : public Code<T> {
             if (k == 0) return Vector<T>(this->n);
 
             get_standard_array();
-            const auto s = r * HT;  // calculate syndrome...
+            const auto s = r * HT;
             if (s.is_zero()) return r;
-            const size_t i = s.as_integer();  // ... and interpret it as q-ary number
+            const size_t i = s.as_integer();
             if (tainted.value()[i]) throw decoding_failure("Linear code boosted BD decoder failed!");
             return r - standard_array.value()[i];
         }
     }
 
-    virtual Vector<T> dec_ML(const Vector<T>& r) const override {
+    Vector<T> dec_ML(const Vector<T>& r) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("ML decoding only available for codes over finite fields!");
         } else {
@@ -1698,14 +1754,14 @@ class LinearCode : public Code<T> {
             if (k == 0) return Vector<T>(this->n);
 
             get_standard_array();
-            const auto s = r * HT;  // calculate syndrome...
+            const auto s = r * HT;
             if (s.is_zero()) return r;
-            const size_t i = s.as_integer();  // ... and interpret it as q-ary number
+            const size_t i = s.as_integer();
             return r - standard_array.value()[i];
         }
     }
 
-    virtual Vector<T> dec_Meggitt(const Vector<T>& r) const override {
+    Vector<T> dec_Meggitt(const Vector<T>& r) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Meggitt BD decoding only available for codes over finite fields!");
         } else {
@@ -1746,7 +1802,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_Viterbi(const Vector<T>& r, const std::string& filename = "") const override {
+    Vector<T> dec_Viterbi(const Vector<T>& r, const std::string& filename = "") const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Viterbi decoding only available for codes over finite fields!");
         } else {
@@ -1767,7 +1823,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_Viterbi_soft(const Vector<double>& llrs, const std::string& filename = "") const override {
+    Vector<T> dec_Viterbi_soft(const Vector<double>& llrs, const std::string& filename = "") const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Soft-input Viterbi decoding only available for codes over finite fields!");
         } else if constexpr (T::get_size() != 2) {
@@ -1779,7 +1835,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_Viterbi_soft(const Matrix<double>& llrs, const std::string& filename = "") const override {
+    Vector<T> dec_Viterbi_soft(const Matrix<double>& llrs, const std::string& filename = "") const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Soft-input Viterbi decoding only available for codes over finite fields!");
         } else {
@@ -1796,11 +1852,11 @@ class LinearCode : public Code<T> {
         }
     }
 
-    // Documentation note: the first entry of every returned list is a Viterbi-optimal codeword,
+    // Docu note: the first entry of every returned list is a Viterbi-optimal codeword,
     // reservoir-selected among the ML-optimal candidates as elsewhere in the library; remaining entries
     // follow in nondecreasing trellis metric. Like the other soft decoders it agrees in cost with the
     // single-output dec_Viterbi but, under ties, need not select the same tied codeword.
-    virtual std::vector<Vector<T>> dec_Viterbi_list(const Vector<T>& r, size_t list_size) const override {
+    std::vector<Vector<T>> dec_Viterbi_list(const Vector<T>& r, size_t list_size) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Viterbi decoding only available for codes over finite fields!");
         } else {
@@ -1815,7 +1871,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual std::vector<Vector<T>> dec_Viterbi_soft_list(const Vector<double>& llrs, size_t list_size) const override {
+    std::vector<Vector<T>> dec_Viterbi_soft_list(const Vector<double>& llrs, size_t list_size) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Soft-input Viterbi decoding only available for codes over finite fields!");
         } else if constexpr (T::get_size() != 2) {
@@ -1827,7 +1883,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual std::vector<Vector<T>> dec_Viterbi_soft_list(const Matrix<double>& llrs, size_t list_size) const override {
+    std::vector<Vector<T>> dec_Viterbi_soft_list(const Matrix<double>& llrs, size_t list_size) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Soft-input Viterbi decoding only available for codes over finite fields!");
         } else {
@@ -1843,8 +1899,8 @@ class LinearCode : public Code<T> {
     }
 
     // Docu note: pass nullptr as Lambda when only the filename argument is needed.
-    virtual Vector<T> dec_BCJR(const Vector<double>& llrs, Matrix<double>* Lambda = nullptr,
-                               const std::string& filename = "") const override {
+    Vector<T> dec_BCJR(const Vector<double>& llrs, Matrix<double>* Lambda = nullptr,
+                       const std::string& filename = "") const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("BCJR decoding only available for codes over finite fields!");
         } else if constexpr (T::get_size() != 2) {
@@ -1855,8 +1911,8 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_BCJR(const Matrix<double>& llrs, Matrix<double>* Lambda = nullptr,
-                               const std::string& filename = "") const override {
+    Vector<T> dec_BCJR(const Matrix<double>& llrs, Matrix<double>* Lambda = nullptr,
+                       const std::string& filename = "") const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("BCJR decoding only available for codes over finite fields!");
         } else {
@@ -1864,7 +1920,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t ml_soft_cache_limit = 1000) const override {
+    Vector<T> dec_ML_soft(const Vector<double>& llrs, size_t ml_soft_cache_limit = 1000) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Soft-input ML decoding only available for codes over finite fields!");
         } else if constexpr (T::get_size() != 2) {
@@ -1875,7 +1931,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_ML_soft(const Matrix<double>& llrs, size_t ml_soft_cache_limit = 1000) const override {
+    Vector<T> dec_ML_soft(const Matrix<double>& llrs, size_t ml_soft_cache_limit = 1000) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Soft-input ML decoding only available for codes over finite fields!");
         } else {
@@ -1927,7 +1983,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_OSD(const Vector<double>& llrs, size_t w = OSD_ORDER) const override {
+    Vector<T> dec_OSD(const Vector<double>& llrs, size_t w = OSD_ORDER) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("OSD decoding only available for codes over finite fields!");
         } else if constexpr (T::get_size() != 2) {
@@ -1939,7 +1995,7 @@ class LinearCode : public Code<T> {
     }
 
     // Docu note: OSD is the delta = 0 special case of LC-OSD, so it needs no separate implementation.
-    virtual Vector<T> dec_OSD(const Matrix<double>& llrs, size_t w = OSD_ORDER) const override {
+    Vector<T> dec_OSD(const Matrix<double>& llrs, size_t w = OSD_ORDER) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("OSD decoding only available for codes over finite fields!");
         } else {
@@ -1947,8 +2003,8 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_LC_OSD(const Vector<double>& llrs, size_t w = OSD_ORDER, size_t delta = LC_OSD_DELTA,
-                                 size_t ell_max = std::numeric_limits<size_t>::max()) const override {
+    Vector<T> dec_LC_OSD(const Vector<double>& llrs, size_t w = OSD_ORDER, size_t delta = LC_OSD_DELTA,
+                         size_t ell_max = std::numeric_limits<size_t>::max()) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("LC-OSD decoding only available for codes over finite fields!");
         } else if constexpr (T::get_size() != 2) {
@@ -1959,8 +2015,8 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_LC_OSD(const Matrix<double>& llrs, size_t w = OSD_ORDER, size_t delta = LC_OSD_DELTA,
-                                 size_t ell_max = std::numeric_limits<size_t>::max()) const override {
+    Vector<T> dec_LC_OSD(const Matrix<double>& llrs, size_t w = OSD_ORDER, size_t delta = LC_OSD_DELTA,
+                         size_t ell_max = std::numeric_limits<size_t>::max()) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("LC-OSD decoding only available for codes over finite fields!");
         } else {
@@ -1998,6 +2054,7 @@ class LinearCode : public Code<T> {
 
             std::vector<size_t> order(n);
             std::iota(order.begin(), order.end(), 0);
+            std::shuffle(order.begin(), order.end(), gen());
             std::stable_sort(order.begin(), order.end(),
                              [&](size_t a, size_t b) { return reliability[a] > reliability[b]; });
 
@@ -2007,19 +2064,23 @@ class LinearCode : public Code<T> {
                 return M;
             };
 
-            std::vector<size_t> mris;
-            mris.reserve(k);
-            for (size_t idx = 0; idx < n && mris.size() < k; ++idx) {
-                std::vector<size_t> trial = mris;
-                trial.push_back(order[idx]);
-                if (columns(trial).rank() == trial.size()) mris = std::move(trial);
+            // Docu note: the MRIS is read off as the pivot columns of a single rref over the
+            // reliability-ordered columns (same extraction as infoset in the LinearCode constructor);
+            // the leftmost-pivot property of rref makes this exactly the greedy most reliable
+            // independent set.
+            const auto Gord = rref(columns(order));
+            std::vector<size_t> perm;
+            perm.reserve(n);
+            std::vector<bool> pivot(n, false);
+            size_t pos = 0;
+            for (size_t j = 0; j < k; ++j) {
+                const auto u = unit_vector<T>(k, j);
+                while (Gord.get_col(pos) != u) ++pos;
+                pivot[pos] = true;
+                perm.push_back(order[pos]);
             }
-
-            std::vector<size_t> perm = mris;
-            std::vector<bool> in_mris(n, false);
-            for (size_t i = 0; i < mris.size(); ++i) in_mris[mris[i]] = true;
             for (size_t i = 0; i < n; ++i)
-                if (!in_mris[order[i]]) perm.push_back(order[i]);
+                if (!pivot[i]) perm.push_back(order[i]);
 
             const Matrix<T> Gsys = rref(columns(perm));
 
@@ -2032,14 +2093,15 @@ class LinearCode : public Code<T> {
                 throw std::out_of_range("LC-OSD trellis too big (more than 10^6 states) to compute");
             const size_t stages = k + d;
 
-            // Documentation note: state = (local syndrome, deviation count from the hard MRIS word u0).
+            // Docu note: state = (local syndrome, deviation count from the hard MRIS word u0).
             // Baking the deviation count into the trellis state lets the generic list Viterbi enforce
             // the OSD order limit w, and restricting the last stage to syndrome 0 makes every
             // final-layer vertex an accepting local codeword.
             std::vector<std::vector<T>> hcol(stages, std::vector<T>(d, T(0)));
             for (size_t i = 0; i < k; ++i)
                 for (size_t j = 0; j < d; ++j) hcol[i][j] = -Gsys(i, k + j);
-            for (size_t l = 0; l < d; ++l) hcol[k + l][l] = T(1);
+            const T one(1);
+            for (size_t l = 0; l < d; ++l) hcol[k + l][l] = one;
 
             Trellis<T> local;
             std::vector<std::unordered_map<size_t, uint32_t>> vid(stages + 1);
@@ -2052,9 +2114,10 @@ class LinearCode : public Code<T> {
                     for (size_t a = 0; a < q; ++a) {
                         const size_t ndev = dev + ((i < k && a != u0[i].get_label()) ? 1 : 0);
                         if (ndev > ww) continue;
+                        const T alpha(a);
                         size_t ns = 0, pw = 1;
                         for (size_t j = 0; j < d; ++j) {
-                            ns += (T((s / pw) % q) + T(a) * hcol[i][j]).get_label() * pw;
+                            ns += (T((s / pw) % q) + alpha * hcol[i][j]).get_label() * pw;
                             pw *= q;
                         }
                         if (i + 1 == stages && ns != 0) continue;
@@ -2111,9 +2174,9 @@ class LinearCode : public Code<T> {
         return tanner_graph.value();
     }
 
-    virtual Vector<T> dec_BP(const Vector<double>& llrs, size_t max_iterations = BP_MAX_ITERATIONS,
-                             Matrix<double>* Lambda = nullptr, const std::string& filename = "",
-                             size_t* nof_iterations = nullptr) const override {
+    Vector<T> dec_BP(const Vector<double>& llrs, size_t max_iterations = BP_MAX_ITERATIONS,
+                     Matrix<double>* Lambda = nullptr, const std::string& filename = "",
+                     size_t* nof_iterations = nullptr) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Belief-propagation decoding only available for codes over finite fields!");
         } else if constexpr (T::get_size() != 2) {
@@ -2124,9 +2187,9 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_BP(const Matrix<double>& llrs, size_t max_iterations = BP_MAX_ITERATIONS,
-                             Matrix<double>* Lambda = nullptr, const std::string& filename = "",
-                             size_t* nof_iterations = nullptr) const override {
+    Vector<T> dec_BP(const Matrix<double>& llrs, size_t max_iterations = BP_MAX_ITERATIONS,
+                     Matrix<double>* Lambda = nullptr, const std::string& filename = "",
+                     size_t* nof_iterations = nullptr) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Belief-propagation decoding only available for codes over finite fields!");
         } else {
@@ -2135,7 +2198,7 @@ class LinearCode : public Code<T> {
     }
 
 #ifdef CECCO_ERASURE_SUPPORT
-    virtual Vector<T> dec_BD_EE(const Vector<T>& r) const override {
+    Vector<T> dec_BD_EE(const Vector<T>& r) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("BD error/erasure decoding only available for codes over finite fields!");
         } else {
@@ -2204,7 +2267,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_Viterbi_EE(const Vector<T>& r, const std::string& filename = "") const override {
+    Vector<T> dec_Viterbi_EE(const Vector<T>& r, const std::string& filename = "") const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("Viterbi error/erasure decoding only available for codes over finite fields!");
         } else {
@@ -2222,7 +2285,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_ML_EE(const Vector<T>& r) const override {
+    Vector<T> dec_ML_EE(const Vector<T>& r) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("ML error/erasure decoding only available for codes over finite fields!");
         } else {
@@ -2333,7 +2396,7 @@ class LinearCode : public Code<T> {
         return std::move(*best);
     }
 
-    virtual Vector<T> dec_GMD(const Vector<double>& llrs) const override {
+    Vector<T> dec_GMD(const Vector<double>& llrs) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("GMD decoding only available for codes over finite fields!");
         } else if constexpr (T::get_size() != 2) {
@@ -2344,7 +2407,7 @@ class LinearCode : public Code<T> {
         }
     }
 
-    virtual Vector<T> dec_GMD(const Matrix<double>& llrs) const override {
+    Vector<T> dec_GMD(const Matrix<double>& llrs) const override {
         if constexpr (!FiniteFieldType<T>) {
             throw std::logic_error("GMD decoding only available for codes over finite fields!");
         } else {
@@ -2423,6 +2486,7 @@ class LinearCode : public Code<T> {
 #endif
     mutable details::OnceCache<bool> polynomial;
     mutable details::OnceCache<Polynomial<T>> gamma;
+    mutable details::OnceCache<size_t> shift_index;
     mutable details::OnceCache<Trellis<T>> minimal_trellis;
     mutable details::OnceCache<TannerGraph<T>> tanner_graph;
 
@@ -2521,7 +2585,7 @@ class LinearCode : public Code<T> {
         return c_est;
     }
 
-    // Documentation note: priority-first (A*) enumeration of complete trellis paths in nondecreasing
+    // Docu note: priority-first (A*) enumeration of complete trellis paths in nondecreasing
     // metric. The exact backward cost-to-go is an admissible, consistent heuristic, so the first path
     // returned is Viterbi-optimal. The head is a reservoir pick over the whole minimum-metric group,
     // which is enumerated in full even when it exceeds list_size, so the tie-break is proper down to
@@ -2971,19 +3035,10 @@ class UniverseCode : public LinearCode<T> {
         if (this->n != this->k) throw std::invalid_argument("Linear code cannot be converted into universe code!");
     }
 
-    UniverseCode(const UniverseCode&) = default;
-    UniverseCode(UniverseCode&&) = default;
-    UniverseCode& operator=(const UniverseCode&) = default;
-    UniverseCode& operator=(UniverseCode&&) = default;
-
     UniverseCode<T> get_equivalent_code_in_standard_form() const { return UniverseCode<T>(this->n); }
 
     void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) os << "Universe code";
+        if (this->template info_prelude<LinearCode<T>>(os)) os << "Universe code";
     }
 
     ZeroCode<T> get_dual() const { return ZeroCode<T>(this->n); }
@@ -3017,8 +3072,9 @@ class UniverseCode : public LinearCode<T> {
     Vector<T> dec_ML_EE(const Vector<T>& r) const override {
         this->validate_length(r);
         auto c_est = r;
+        const T zero(0);
         for (size_t i = 0; i < this->n; ++i) {
-            if (c_est[i].is_erased()) c_est.set_component(i, T(0));
+            if (c_est[i].is_erased()) c_est.set_component(i, zero);
         }
         return c_est;
     }
@@ -3034,19 +3090,10 @@ class ZeroCode : public LinearCode<T> {
         if (this->k != 0) throw std::invalid_argument("Linear code cannot be converted into zero code!");
     }
 
-    ZeroCode(const ZeroCode&) = default;
-    ZeroCode(ZeroCode&&) = default;
-    ZeroCode& operator=(const ZeroCode&) = default;
-    ZeroCode& operator=(ZeroCode&&) = default;
-
     ZeroCode<T> get_equivalent_code_in_standard_form() const { return ZeroCode<T>(this->n); }
 
     void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) os << "Zero code";
+        if (this->template info_prelude<LinearCode<T>>(os)) os << "Zero code";
     }
 };
 
@@ -3073,12 +3120,13 @@ class HammingCode : public LinearCode<T> {
             std::vector<size_t> seen;
             seen.reserve(this->n);
             bool valid = true;
+            const T one(1);
             for (size_t i = 0; i < this->n && valid; ++i) {
                 const auto h = this->HT.get_row(i);
                 T inv;
                 for (size_t j = 0; j < h.get_n(); ++j)
                     if (!h[j].is_zero()) {
-                        inv = T(1) / h[j];
+                        inv = one / h[j];
                         break;
                     }
                 if (inv.is_zero()) {
@@ -3101,11 +3149,6 @@ class HammingCode : public LinearCode<T> {
         throw std::invalid_argument("Linear code cannot be converted into Hamming code!");
     }
 
-    HammingCode(const HammingCode&) = default;
-    HammingCode(HammingCode&&) = default;
-    HammingCode& operator=(const HammingCode&) = default;
-    HammingCode& operator=(HammingCode&&) = default;
-
     HammingCode<T> get_equivalent_code_in_standard_form() const {
         return HammingCode<T>(LinearCode<T>::get_equivalent_code_in_standard_form());
     }
@@ -3113,11 +3156,8 @@ class HammingCode : public LinearCode<T> {
     size_t get_s() const noexcept { return s; }
 
     void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) os << BOLD("Hamming code") " with properties: { s = " << s << " }";
+        if (this->template info_prelude<LinearCode<T>>(os))
+            os << BOLD("Hamming code") " with properties: { s = " << s << " }";
     }
 
     SimplexCode<T> get_dual() const { return SimplexCode<T>(s); }
@@ -3212,12 +3252,13 @@ class HammingCode : public LinearCode<T> {
     static Matrix<T> Hamming_H(size_t s) {
         const size_t n = Hamming_n(s);
         auto H = Matrix<T>(n, s);
+        const T one(1);
         size_t i = 0;
         // topmost element loop
         for (size_t top = 0; top < s; ++top) {
             const auto v = IdentityMatrix<T>(s - top - 1).rowspace();
             for (size_t j = 0; j < v.size(); ++j) {
-                H.set_component(n - i - 1, top, T(1));
+                H.set_component(n - i - 1, top, one);
                 H.set_submatrix(n - i - 1, top + 1, Matrix(v[v.size() - j - 1]));
                 ++i;
             }
@@ -3257,11 +3298,6 @@ class SimplexCode : public LinearCode<T> {
         throw std::invalid_argument("Linear code cannot be converted into Simplex code!");
     }
 
-    SimplexCode(const SimplexCode&) = default;
-    SimplexCode(SimplexCode&&) = default;
-    SimplexCode& operator=(const SimplexCode&) = default;
-    SimplexCode& operator=(SimplexCode&&) = default;
-
     SimplexCode<T> get_equivalent_code_in_standard_form() const {
         return SimplexCode<T>(LinearCode<T>::get_equivalent_code_in_standard_form());
     }
@@ -3269,11 +3305,8 @@ class SimplexCode : public LinearCode<T> {
     size_t get_s() const noexcept { return s; }
 
     void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) os << BOLD("Simplex code") " with properties: { s = " << s << " }";
+        if (this->template info_prelude<LinearCode<T>>(os))
+            os << BOLD("Simplex code") " with properties: { s = " << s << " }";
     }
 
     HammingCode<T> get_dual() const { return HammingCode<T>(s); }
@@ -3437,22 +3470,13 @@ class RepetitionCode : public LinearCode<T> {
             throw std::invalid_argument("Linear code cannot be converted into repetition code!");
     }
 
-    RepetitionCode(const RepetitionCode&) = default;
-    RepetitionCode(RepetitionCode&&) = default;
-    RepetitionCode& operator=(const RepetitionCode&) = default;
-    RepetitionCode& operator=(RepetitionCode&&) = default;
-
     RepetitionCode<T> get_equivalent_code_in_standard_form() const { return RepetitionCode<T>(this->n); }
     RepetitionCode<T> get_identical_code_in_polynomial_form() const {
         return RepetitionCode<T>(LinearCode<T>::get_identical_code_in_polynomial_form());
     }
 
     void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) os << "Repetition code";
+        if (this->template info_prelude<LinearCode<T>>(os)) os << "Repetition code";
     }
 
     SingleParityCheckCode<T> get_dual() const { return SingleParityCheckCode<T>(this->n); }
@@ -3523,7 +3547,7 @@ class RepetitionCode : public LinearCode<T> {
         return c_est;
     }
 
-    virtual Vector<T> dec_ML_EE(const Vector<T>& r) const override {
+    Vector<T> dec_ML_EE(const Vector<T>& r) const override {
         this->validate_length(r);
 
         const size_t n = this->n;
@@ -3573,11 +3597,6 @@ class SingleParityCheckCode : public LinearCode<T> {
                 throw std::invalid_argument("Linear code cannot be converted into single parity check code!");
     }
 
-    SingleParityCheckCode(const SingleParityCheckCode&) = default;
-    SingleParityCheckCode(SingleParityCheckCode&&) = default;
-    SingleParityCheckCode& operator=(const SingleParityCheckCode&) = default;
-    SingleParityCheckCode& operator=(SingleParityCheckCode&&) = default;
-
     SingleParityCheckCode<T> get_equivalent_code_in_standard_form() const {
         auto Gp = this->G;
         Gp.rref();
@@ -3588,11 +3607,7 @@ class SingleParityCheckCode : public LinearCode<T> {
     }
 
     void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) os << "Single parity check code";
+        if (this->template info_prelude<LinearCode<T>>(os)) os << "Single parity check code";
     }
 
     RepetitionCode<T> get_dual() const { return RepetitionCode<T>(this->n); }
@@ -3657,7 +3672,8 @@ class SingleParityCheckCode : public LinearCode<T> {
 
         Vector<T> c_est = r;
         c_est.set_component(X[0], -s / (this->HT)(X[0], 0));
-        for (size_t i = 1; i < tau; ++i) c_est.set_component(X[i], T(0));
+        const T zero(0);
+        for (size_t i = 1; i < tau; ++i) c_est.set_component(X[i], zero);
         return c_est;
     }
 #endif
@@ -3689,11 +3705,6 @@ class GolayCode : public LinearCode<T> {
         throw std::invalid_argument("Linear code cannot be converted into Golay code!");
     }
 
-    GolayCode(const GolayCode&) = default;
-    GolayCode(GolayCode&&) = default;
-    GolayCode& operator=(const GolayCode&) = default;
-    GolayCode& operator=(GolayCode&&) = default;
-
     GolayCode<T> get_equivalent_code_in_standard_form() const {
         return GolayCode<T>(LinearCode<T>::get_equivalent_code_in_standard_form());
     }
@@ -3701,12 +3712,8 @@ class GolayCode : public LinearCode<T> {
         return GolayCode<T>(LinearCode<T>::get_identical_code_in_polynomial_form());
     }
 
-    virtual void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) {
+    void get_info(std::ostream& os) const override {
+        if (this->template info_prelude<LinearCode<T>>(os)) {
             if constexpr (std::is_same_v<T, Fp<2>>) {
                 os << "Binary Golay code";
             } else {
@@ -3859,12 +3866,8 @@ class GRSCode : public LinearCode<T> {
 
     bool is_normalized() const { return a == d; }
 
-    virtual void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) {
+    void get_info(std::ostream& os) const override {
+        if (this->template info_prelude<LinearCode<T>>(os)) {
             os << BOLD("GRS code") " with properties: { a = " << a << ", d = " << d;
             if (is_singly_extended()) {
                 os << " singly-extended";
@@ -3982,11 +3985,11 @@ class GRSCode : public LinearCode<T> {
         const auto sx = Polynomial<T>(s);
 
         // erasure locator
-        auto Psi = Monomial<T>(0, T(1));
+        auto Psi = OnePolynomial<T>();
         for (size_t i = 0; i < tau; ++i) Psi *= Polynomial<T>({-a[X[i]], T(1)});
 
         // updated syndrome
-        auto sxp = Polynomial<T>(T(0));
+        auto sxp = ZeroPolynomial<T>();
         for (size_t i = 0; i < redundancy - tau; ++i) {
             T coeff(0);
             for (size_t j = 0; j <= tau; ++j) coeff += Psi[j] * s[i + j];
@@ -3994,9 +3997,9 @@ class GRSCode : public LinearCode<T> {
         }
 
         // error locator (Berlekamp-Massey)
-        auto Lambda_e = Monomial<T>(0, T(1));
+        auto Lambda_e = OnePolynomial<T>();
         size_t t = 0;
-        auto B_ref = Monomial<T>(0, T(1));
+        auto B_ref = OnePolynomial<T>();
         size_t t_ref = 0;
         T discrepancy_ref(1);
         size_t last_update = 0;
@@ -4041,7 +4044,7 @@ class GRSCode : public LinearCode<T> {
             throw decoding_failure("GRS code BMA error/erasure decoder failed (true error beyond BD radius)!");
 
         // Forney
-        auto Omega = Polynomial<T>(T(0));
+        auto Omega = ZeroPolynomial<T>();
         for (size_t j = 0; j < tau + t; ++j) {
             T coeff(0);
             for (size_t m = j + 1; m <= tau + t; ++m) coeff += Lambda[m] * sx[m - j - 1];
@@ -4073,11 +4076,6 @@ class RSCode : public GRSCode<T> {
         throw std::invalid_argument(std::string("Cannot construct RS code: ") + e.what());
     }
 
-    RSCode(const RSCode&) = default;
-    RSCode(RSCode&&) = default;
-    RSCode& operator=(const RSCode&) = default;
-    RSCode& operator=(RSCode&&) = default;
-
     T get_alpha() const { return alpha; }
     size_t get_b() const noexcept { return b; }
 
@@ -4105,12 +4103,8 @@ class RSCode : public GRSCode<T> {
     }
 
     void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            GRSCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) {
-            os << "RS code: { alpha = " << alpha << ", b = " << b;
+        if (this->template info_prelude<GRSCode<T>>(os)) {
+            os << BOLD("RS code") " with properties: { alpha = " << alpha << ", b = " << b;
             if (this->is_primitive()) os << ", primitive";
             if (this->is_narrow_sense()) os << ", narrow-sense";
             if (this->is_normalized()) os << ", normalized";
@@ -4128,8 +4122,8 @@ class RSCode : public GRSCode<T> {
         for (size_t i = 0; i < n; ++i) {
             a.set_component(i, a_pow);
             d.set_component(i, d_pow);
-            a_pow = a_pow * alpha;
-            d_pow = d_pow * alpha_1mb;
+            a_pow *= alpha;
+            d_pow *= alpha_1mb;
         }
         return {std::move(a), std::move(d)};
     }
@@ -4137,14 +4131,8 @@ class RSCode : public GRSCode<T> {
     static Polynomial<T> RS_gamma(const Vector<T>& a, size_t b, size_t k) {
         const size_t n = a.get_n();
         const size_t start = b % n;  // index of alpha^b in a
-        auto gamma = ZeroPolynomial<T>();
-        gamma.set_coefficient(0, T(1));
-        for (size_t j = 0; j < n - k; ++j) {
-            auto factor = ZeroPolynomial<T>();
-            factor.set_coefficient(0, -a[(start + j) % n]);
-            factor.set_coefficient(1, T(1));
-            gamma = gamma * factor;
-        }
+        auto gamma = OnePolynomial<T>();
+        for (size_t j = 0; j < n - k; ++j) gamma *= Polynomial<T>({-a[(start + j) % n], T(1)});
         return gamma;
     }
 
@@ -4193,11 +4181,6 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
             throw std::invalid_argument("Linear code cannot be converted into Cordaro-Wagner code!");
     }
 
-    CordaroWagnerCode(const CordaroWagnerCode&) = default;
-    CordaroWagnerCode(CordaroWagnerCode&&) = default;
-    CordaroWagnerCode& operator=(const CordaroWagnerCode&) = default;
-    CordaroWagnerCode& operator=(CordaroWagnerCode&&) = default;
-
     CordaroWagnerCode get_equivalent_code_in_standard_form() const {
         return CordaroWagnerCode(LinearCode<Fp<2>>::get_equivalent_code_in_standard_form());
     }
@@ -4205,12 +4188,8 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
     size_t get_r() const noexcept { return r; }
     int8_t get_m() const noexcept { return m; }
 
-    virtual void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<Fp<2>>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0)
+    void get_info(std::ostream& os) const override {
+        if (info_prelude<LinearCode<Fp<2>>>(os))
             os << BOLD("Cordaro-Wagner code") " with properties: { r = " << r << ", m = " << static_cast<int>(m)
                << " }";
     }
@@ -4334,6 +4313,369 @@ class CordaroWagnerCode : public LinearCode<Fp<2>> {
 
 namespace details {
 
+enum class termination_t { zero_terminated, tailbitten };
+
+}  // namespace details
+
+template <FiniteFieldType T>
+class ConvolutionalCode : public LinearCode<T> {
+   public:
+    // Docu note: the encoder image must be a free module of rank L * k_cc; a rank-deficient block
+    // generator matrix is rejected by convolutional_G with a message naming the cause. Under either
+    // termination rank loss occurs when the rows of G_cc are T[D]-linearly dependent with a
+    // dependency of degree below L (zero rows, shifted duplicates, more rows than columns); under
+    // tailbiting it additionally strikes encoders of full rank over T(D) whenever they share factors
+    // with D^L - 1.
+    ConvolutionalCode(const Matrix<Polynomial<T>>& G_cc, size_t L, details::termination_t termination) try
+        : ConvolutionalCode(G_cc, L, convolutional_G(G_cc, L, termination), termination) {
+    } catch (const std::invalid_argument& e) {
+        throw std::invalid_argument(std::string("Cannot construct convolutional code: ") + e.what());
+    }
+
+    ConvolutionalCode(const Vector<Polynomial<T>>& G_cc, size_t L, details::termination_t termination)
+        : ConvolutionalCode(Matrix<Polynomial<T>>(G_cc), L, termination) {}
+
+    // Docu note: This constructor performs complete recognition over the
+    // enumerated parameter tuples (every k_cc dividing k with L = k / k_cc >= 2, every compatible
+    // n_cc and u, both terminations). A code is accepted exactly when some enumerated tuple admits
+    // a structured generator matrix whose rows lie in C and reach rank k — which forces row-space
+    // equality with C — and rejection means that no zero-terminated or tailbitten convolutional
+    // representation exists within those enumerated tuples, including realizations by encoders
+    // with unequal row degrees and codes presented through an arbitrary generator matrix of the
+    // same row space. Among multiple admissible representations the canonical one is selected:
+    // minimal k_cc, then minimal n_cc, then minimal u, zero-terminated preferred over tailbitten on ties; G_cc is
+    // recovered in RREF over the window coordinates, the canonical representative of the
+    // invertible-input-transform ambiguity. The result is rebuilt through the polynomial
+    // constructor, so a recognized code carries the structured band generator matrix instead of
+    // C's representation.
+    ConvolutionalCode(const LinearCode<T>& C) : ConvolutionalCode(recognize(C)) {}
+
+    const Matrix<Polynomial<T>>& get_G_cc() const noexcept { return G_cc; }
+    size_t get_k_cc() const noexcept { return G_cc.get_m(); }
+    size_t get_n_cc() const noexcept { return G_cc.get_n(); }
+    size_t get_L() const noexcept { return this->k / get_k_cc(); }
+
+    size_t get_u() const noexcept {
+        size_t u = 0;
+        for (size_t i = 0; i < G_cc.get_m(); ++i)
+            for (size_t j = 0; j < G_cc.get_n(); ++j) u = std::max(u, G_cc(i, j).degree());
+        return u;
+    }
+
+    details::termination_t get_termination() const noexcept { return termination; }
+    bool is_zero_terminated() const noexcept { return termination == details::termination_t::zero_terminated; }
+    bool is_tailbitten() const noexcept { return termination == details::termination_t::tailbitten; }
+
+    void get_info(std::ostream& os) const override {
+        if (this->template info_prelude<LinearCode<T>>(os)) {
+            const size_t k_cc = get_k_cc();
+            const size_t n_cc = get_n_cc();
+            os << BOLD("Convolutional code") " with properties: { k_cc = " << k_cc << ", n_cc = " << n_cc
+               << ", L = " << get_L() << ", u = " << get_u() << ", "
+               << (is_tailbitten() ? "tailbitten" : "zero-terminated") << ", G_cc = [";
+            for (size_t i = 0; i < k_cc; ++i) {
+                os << (i == 0 ? "[" : ", [");
+                for (size_t j = 0; j < n_cc; ++j) {
+                    if (j != 0) os << ", ";
+                    os << G_cc(i, j);
+                }
+                os << "]";
+            }
+            os << "] }";
+        }
+    }
+
+   private:
+    // Docu note: row t*k_cc + i of G is the shift-register encoding of the basis message with a unit
+    // impulse on input stream i at time t: output stream j receives the coefficients of D^t * G_cc[i][j].
+    // The output-time modulus never wraps in the zero-terminated case; under tailbiting wrapped
+    // contributions accumulate, which is exactly reduction modulo D^L - 1 (so u >= L is handled
+    // correctly).
+    static Matrix<T> convolutional_G(const Matrix<Polynomial<T>>& G_cc, size_t L, details::termination_t termination) {
+        if (L == 0) throw std::invalid_argument("L must be positive");
+        if (G_cc.is_empty()) throw std::invalid_argument("G_cc must contain at least one generator polynomial");
+        const size_t k_cc = G_cc.get_m();
+        const size_t n_cc = G_cc.get_n();
+
+        size_t u = 0;
+        for (size_t i = 0; i < k_cc; ++i) {
+            for (size_t j = 0; j < n_cc; ++j) {
+                if (G_cc(i, j).is_empty()) throw std::invalid_argument("generator polynomials must not be empty");
+                u = std::max(u, G_cc(i, j).degree());
+            }
+        }
+        const size_t time_steps = (termination == details::termination_t::zero_terminated) ? L + u : L;
+
+        Matrix<T> G(L * k_cc, time_steps * n_cc);
+        for (size_t t = 0; t < L; ++t)
+            for (size_t i = 0; i < k_cc; ++i) {
+                const size_t row = t * k_cc + i;
+                for (size_t j = 0; j < n_cc; ++j)
+                    for (size_t ell = 0; ell <= G_cc(i, j).degree(); ++ell) {
+                        const size_t col = ((t + ell) % time_steps) * n_cc + j;
+                        G.set_component(row, col, G(row, col) + G_cc(i, j)[ell]);
+                    }
+            }
+        if (G.rank() != L * k_cc)
+            throw std::invalid_argument(
+                termination == details::termination_t::tailbitten
+                    ? "tailbiting rank loss, the block-circulant generator matrix has rank smaller than L * k_cc"
+                    : "rank loss, the block generator matrix has rank smaller than L * k_cc");
+        return G;
+    }
+
+    // Docu note: necessary-condition-driven recognition. Candidates (k_cc, n_cc, L, u, termination)
+    // are screened by necessary conditions only — parameter arithmetic, trellis-oriented span,
+    // support, and boundary projection bounds, quasi-cyclicity — and surviving candidates enter a
+    // structured recovery that is complete per tuple; a successful selection provably spans C, so
+    // acceptance requires no separate certificate and every screen can only save work, never accept
+    // falsely.
+    static ConvolutionalCode recognize(const LinearCode<T>& C) {
+        const size_t n = C.get_n();
+        const size_t k = C.get_k();
+
+        if (k > 1) {
+            const Matrix<T>& HT = C.get_HT();
+
+            // Docu note: trellis-oriented form as algebraic minimal-trellis proxy — in a minimal-span
+            // generator basis (all row starts distinct, all row ends distinct) the rows with span
+            // inside a coordinate window form a basis of the subcode supported there, so the rank of
+            // the projection of C onto the first (last) m coordinates equals the number of rows
+            // starting (ending) inside, and the minimal-trellis state profile equals the number of
+            // straddling spans. The span multiset is a code invariant, so these counts do not depend
+            // on the particular reduced basis; all boundary screens below therefore reduce to span
+            // counting without building the trellis.
+            const Matrix<T> Gtof = C.get_G_in_trellis_oriented_form();
+            const T zero(0);
+            std::vector<size_t> prefix_rank(n + 1, 0);
+            std::vector<size_t> suffix_rank(n + 1, 0);
+            size_t span_max = 0;
+            for (size_t i = 0; i < k; ++i) {
+                size_t start = 0;
+                size_t end = 0;
+                for (size_t j = 0; j < n; ++j)
+                    if (Gtof(i, j) != zero) {
+                        start = j;
+                        break;
+                    }
+                for (size_t j = n; j-- > 0;)
+                    if (Gtof(i, j) != zero) {
+                        end = j;
+                        break;
+                    }
+                ++prefix_rank[start + 1];
+                ++suffix_rank[n - end];
+                span_max = std::max(span_max, end - start + 1);
+            }
+            for (size_t m = 1; m <= n; ++m) prefix_rank[m] += prefix_rank[m - 1];
+            for (size_t m = 1; m <= n; ++m) suffix_rank[m] += suffix_rank[m - 1];
+
+            const auto attempt = [&](size_t kcc, size_t ncc, size_t L, size_t u,
+                                     details::termination_t term) -> std::optional<ConvolutionalCode> {
+                const size_t window = (u + 1) * ncc;
+
+                // Docu note: membership constraints — every row of the structured block-Toeplitz
+                // (zero-terminated) or block-circulant (tailbitten) generator template must satisfy
+                // row * H^T = 0; the constraints decouple per input stream, so the admissible window
+                // space S = { w : all L block shifts of w lie in C } is the nullspace of one
+                // homogeneous system stacked from window slices of H^T, wrapped modulo n under
+                // tailbiting.
+                Matrix<T> B = IdentityMatrix<T>(window);
+                if (k < n) {
+                    Matrix<T> W(window, L * (n - k));
+                    for (size_t t = 0; t < L; ++t) {
+                        const size_t start = t * ncc;
+                        if (start + window <= n)
+                            W.set_submatrix(0, t * (n - k), HT.get_submatrix(start, 0, window, n - k));
+                        else {
+                            W.set_submatrix(0, t * (n - k), HT.get_submatrix(start, 0, n - start, n - k));
+                            W.set_submatrix(n - start, t * (n - k), HT.get_submatrix(0, 0, start + window - n, n - k));
+                        }
+                    }
+                    B = rref(transpose(W).basis_of_nullspace());
+                }
+
+                // Docu note: the rows of any valid G_cc are k_cc linearly independent elements of S.
+                const size_t s = B.get_m();
+                if (s < kcc) return std::nullopt;
+
+                // Docu note: projective window space — scalar multiples of a window row span the
+                // same orbit rows, so one representative per projective class of S suffices, and
+                // enumerating all (q^s - 1)/(q - 1) projective points of S makes the row-selection
+                // step complete over finite fields: coefficient vectors over the basis rows whose
+                // first nonzero entry is one form a transversal (the basis rows are linearly
+                // independent), so normalization and deduplication hold by construction. The pool
+                // is only large for degenerate tuples — for a zero-terminated candidate realized by
+                // an encoder of full rank over T(D), uniqueness of the representation m(D) G_cc(D)
+                // with deg m < L forces S to be exactly the span of the k_cc encoder rows — and the
+                // search is finite but may exceed addressable matrix dimensions, so InfInt prevents
+                // arithmetic overflow before converting the point count to size_t.
+                const size_t q = T::get_size();
+                const InfInt count = (sqm<InfInt>(q, s) - 1) / InfInt(q - 1);
+                if (count > InfInt(std::numeric_limits<size_t>::max()))
+                    throw std::overflow_error("Convolutional recognition projective search space too large");
+                const size_t points = static_cast<size_t>(count.toUnsignedLongLong());
+                Matrix<T> pool(points, window);
+                size_t r = 0;
+                for (size_t lead = 0; lead < s; ++lead) {
+                    std::vector<size_t> digits(s, 0);
+                    bool more = true;
+                    while (more) {
+                        for (size_t p = 0; p < window; ++p) {
+                            T v = B(lead, p);
+                            for (size_t i = lead + 1; i < s; ++i)
+                                if (digits[i] != 0) v += T(digits[i]) * B(i, p);
+                            pool.set_component(r, p, v);
+                        }
+                        ++r;
+                        more = false;
+                        for (size_t i = lead + 1; i < s; ++i) {
+                            if (++digits[i] < q) {
+                                more = true;
+                                break;
+                            }
+                            digits[i] = 0;
+                        }
+                    }
+                }
+
+                // Docu note: exhaustive row selection with rank pruning — a valid G_cc exists for
+                // the tuple iff some k_cc projective representatives stack to orbit rank k, where
+                // window position p = ell n_cc + j of the row started at time t lands in column
+                // (t n_cc + p) mod n, the column ordering of convolutional_G. In any valid selection
+                // all L k_cc orbit rows are linearly independent, so every member orbit adds exactly
+                // rank L in any order; a candidate whose orbit adds less is skipped without loss of
+                // completeness, and branches with fewer remaining representatives than missing rows
+                // are cut.
+                std::vector<size_t> chosen;
+                const auto search = [&](auto&& self, size_t start, const Matrix<T>* stack) -> bool {
+                    if (chosen.size() == kcc) return true;
+                    for (size_t c = start; c + (kcc - chosen.size()) <= points; ++c) {
+                        Matrix<T> trial(L, n);
+                        for (size_t t = 0; t < L; ++t)
+                            for (size_t p = 0; p < window; ++p) trial.set_component(t, (t * ncc + p) % n, pool(c, p));
+                        if (stack != nullptr) trial.vertical_join(*stack);
+                        if (trial.rank() != (chosen.size() + 1) * L) continue;
+                        chosen.push_back(c);
+                        if (self(self, c + 1, &trial)) return true;
+                        chosen.pop_back();
+                    }
+                    return false;
+                };
+                if (!search(search, 0, nullptr)) return std::nullopt;
+
+                Matrix<T> R(kcc, window);
+                for (size_t i = 0; i < kcc; ++i)
+                    for (size_t p = 0; p < window; ++p) R.set_component(i, p, pool(chosen[i], p));
+                R.rref();
+                Matrix<Polynomial<T>> Gp(kcc, ncc);
+                for (size_t i = 0; i < kcc; ++i)
+                    for (size_t j = 0; j < ncc; ++j) {
+                        auto g = ZeroPolynomial<T>();
+                        for (size_t ell = 0; ell <= u; ++ell)
+                            if (!R(i, ell * ncc + j).is_zero()) g.set_coefficient(ell, R(i, ell * ncc + j));
+                        Gp.set_component(i, j, std::move(g));
+                    }
+
+                // Docu note: acceptance needs no separate row-space certificate — the selected rows
+                // lie in S, so every band row lies in C, and the selection has rank k = dim C, so
+                // the band row space equals C; for zero-terminated candidates the trailing-support
+                // screen forces the recovered memory to be exactly u, so the rebuilt band matrix
+                // has length n (the tailbitten length is L n_cc regardless). This subsumes the rank
+                // checks of convolutional_G and the base constructor, so the construction cannot
+                // throw.
+                return ConvolutionalCode(Gp, L, term);
+            };
+
+            // Docu note: canonical candidate policy — minimal k_cc, then minimal n_cc, then minimal
+            // u, zero-terminated preferred on ties. A code may admit several convolutional
+            // representations; minimal k_cc selects the one with the fewest independent input
+            // streams, so a genuine rate-1 tailbitten code is never reported as an artificial
+            // higher-input zero-terminated representation merely because that is found first.
+            // Within one k_cc the shared arithmetic k = L k_cc fixes the time-step count L = k /
+            // k_cc; L = 1 is excluded because every linear code is trivially convolutional with a
+            // single time step.
+            for (size_t kcc = 1; 2 * kcc <= k; ++kcc) {
+                if (k % kcc != 0) continue;
+                const size_t L = k / kcc;
+
+                for (size_t ncc = 1; ncc * L <= n; ++ncc) {
+                    // Docu note: zero-terminated arithmetic — n = (L + u) n_cc with u >= 0
+                    // determines the memory once n_cc divides n into at least L output blocks.
+                    if (n % ncc != 0) continue;
+                    const size_t u = n / ncc - L;
+
+                    // Docu note: trailing-support screen — some row of a zero-terminated encoder
+                    // with memory u has degree exactly u, and its top coefficient block makes C
+                    // nonzero on the final n_cc coordinates; conversely, a full-rank selection of
+                    // window rows all of degree below u would span a code vanishing there, so this
+                    // screen is what forces the recovered memory to be exactly u.
+                    if (suffix_rank[ncc] == 0) continue;
+
+                    // Docu note: span-length screen — every row of a zero-terminated band basis is
+                    // supported in a window of u + 1 output blocks, and span reduction preserves
+                    // this bound: rows sharing a start both end before start + (u + 1) n_cc, so
+                    // their difference starts later and ends no later, and end collisions are
+                    // symmetric. Since the span multiset is basis-independent, every
+                    // trellis-oriented row of a representable code has span length at most
+                    // (u + 1) n_cc; wrapped tailbitten rows break the bound, so the screen applies
+                    // to zero-terminated candidates only.
+                    if (span_max > (u + 1) * ncc) continue;
+
+                    // Docu note: zero-terminated boundary bounds — row (t, i) of the band matrix
+                    // occupies output blocks t through t plus its row degree, so at most h k_cc rows
+                    // intersect the first h (equally: last h) blocks, and the projection of C onto
+                    // them has rank at most h k_cc for every h < L, regardless of the individual row
+                    // degrees.
+                    bool bounded = true;
+                    for (size_t h = 1; h < L && bounded; ++h)
+                        if (prefix_rank[h * ncc] > h * kcc || suffix_rank[h * ncc] > h * kcc) bounded = false;
+                    if (!bounded) continue;
+
+                    if (auto res = attempt(kcc, ncc, L, u, details::termination_t::zero_terminated))
+                        return std::move(*res);
+                }
+
+                // Docu note: tailbiting arithmetic — n = L n_cc with memory 0 <= u < L; u = 0
+                // coincides with memoryless zero termination, which is already enumerated above, and
+                // generators of degree at least L reduce coefficient-wise modulo D^L - 1 to an
+                // equivalent representative with u < L and the identical block-circulant matrix.
+                if (n % L != 0) continue;
+                const size_t ncc = n / L;
+
+                // Docu note: a tailbitten convolutional block code is invariant under rotation by
+                // one time block of n_cc symbols, hence quasi-cyclic with minimal shift index
+                // dividing n_cc.
+                size_t shift;
+                if (!C.is_quasi_cyclic(&shift) || ncc % shift != 0) continue;
+
+                for (size_t u = 1; u < L; ++u) {
+                    // Docu note: block-circulant projection bound — a row of degree at most u
+                    // intersects a cyclic window of h consecutive blocks for at most h + u start
+                    // times, so the projection of C onto the first h blocks (representative for all
+                    // windows by quasi-cyclicity) has rank at most k_cc (h + u).
+                    bool bounded = true;
+                    for (size_t h = 1; h < L && kcc * (h + u) < k && bounded; ++h)
+                        if (prefix_rank[h * ncc] > kcc * (h + u)) bounded = false;
+                    if (!bounded) continue;
+
+                    if (auto res = attempt(kcc, ncc, L, u, details::termination_t::tailbitten)) return std::move(*res);
+                }
+            }
+        }
+        throw std::invalid_argument("Linear code cannot be converted into convolutional code!");
+    }
+
+    ConvolutionalCode(const Matrix<Polynomial<T>>& G_cc, size_t L, const Matrix<T>& G,
+                      details::termination_t termination)
+        : LinearCode<T>(G.get_n(), L * G_cc.get_m(), G), G_cc(G_cc), termination(termination) {}
+
+    Matrix<Polynomial<T>> G_cc;
+    details::termination_t termination;
+};
+
+namespace details {
+
 template <FieldType T>
 Matrix<T> LDC_G(const Matrix<T>& G_U, const Matrix<T>& G_V) {
     const size_t n = G_U.get_n();
@@ -4365,33 +4707,23 @@ class LDCCode : public LinearCode<typename BU::FIELD> {
         throw std::invalid_argument(std::string("Trying to perform invalid length-doubling construction: ") + e.what());
     }
 
-    LDCCode(const LDCCode&) = default;
-    LDCCode(LDCCode&&) = default;
-    LDCCode& operator=(const LDCCode&) = default;
-    LDCCode& operator=(LDCCode&&) = default;
-
     const BU& get_U() const noexcept { return U; }
     const BV& get_V() const noexcept { return V; }
 
-    virtual size_t get_dmin() const override {
+    size_t get_dmin() const override {
         if constexpr (std::is_same_v<T, Fp<2>>) this->set_dmin(std::min({2 * U.get_dmin(), V.get_dmin()}));
         return this->LinearCode<T>::get_dmin();
     }
 
-    virtual void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) {
-            const auto old = os.iword(details::index);
+    void get_info(std::ostream& os) const override {
+        if (this->template info_prelude<LinearCode<T>>(os)) {
+            details::verbosity_guard guard(os);
             os << BOLD("LDC code") " with properties: { ";
             os << "U = " << showbasic;
             U.LinearCode<T>::get_info(os);
             os << ", V = ";
             V.LinearCode<T>::get_info(os);
             os << " }";
-            os.iword(details::index) = old;
         }
     }
 
@@ -4488,22 +4820,12 @@ class RMCode : public LinearCode<Fp<2>> {
         throw std::invalid_argument(std::string("Trying to construct invalid RM code: ") + e.what());
     }
 
-    RMCode(const RMCode&) = default;
-    RMCode(RMCode&&) = default;
-    RMCode& operator=(const RMCode&) = default;
-    RMCode& operator=(RMCode&&) = default;
-
     size_t get_r() const noexcept { return r; }
     size_t get_m() const noexcept { return m; }
 
     void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) {
+        if (info_prelude<LinearCode<T>>(os))
             os << BOLD("RM code") " with properties: { r = " << r << ", m = " << m << " }";
-        }
     }
 
     // Docu note: there is no dec_ML, falls back to LinearCode since dec_recursive is only approximative
@@ -4592,8 +4914,9 @@ class RMCode : public LinearCode<Fp<2>> {
 
         if (r == m) {
             auto c = v;
+            const T zero(0);
             for (size_t i = 0; i < n; ++i)
-                if (c[i].is_erased()) c.set_component(i, T(0));
+                if (c[i].is_erased()) c.set_component(i, zero);
             return c;
         }
 
@@ -4652,11 +4975,6 @@ class SubfieldSubcode : public LinearCode<typename B::FIELD::BASE_FIELD> {
             e.what());
     }
 
-    SubfieldSubcode(const SubfieldSubcode&) = default;
-    SubfieldSubcode(SubfieldSubcode&&) = default;
-    SubfieldSubcode& operator=(const SubfieldSubcode&) = default;
-    SubfieldSubcode& operator=(SubfieldSubcode&&) = default;
-
     const B& get_SuperCode() const noexcept { return SuperCode; }
 
     Vector<SUB> dec_supercode_BD(const Vector<SUB>& r) const {
@@ -4683,20 +5001,15 @@ class SubfieldSubcode : public LinearCode<typename B::FIELD::BASE_FIELD> {
     }
 #endif
 
-    virtual void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<SUB>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) {
-            const auto old = os.iword(details::index);
+    void get_info(std::ostream& os) const override {
+        if (this->template info_prelude<LinearCode<SUB>>(os)) {
+            details::verbosity_guard guard(os);
             os << BOLD("Subfield-subcode") " with properties: {" << std::endl;
             os << "Gamma = " << std::endl << Gamma << ", " << std::endl;
             os << "Supercode = " << showbasic;
             SuperCode.get_info(os);
             os << " " << showspecial << SuperCode << std::endl;
             os << "}";
-            os.iword(details::index) = old;
         }
     }
 
@@ -4725,12 +5038,12 @@ class SubfieldSubcode : public LinearCode<typename B::FIELD::BASE_FIELD> {
             return ToeplitzMatrix<SUB>(v, m, 2 * m - 1);
         };
 
+        const auto E = Matrix<SUB>(unit_vector<SUB>(m, 0));
+        const auto C = CompanionMatrix<SUB>(Vector(SUPER::get_modulus())).transpose();
+        const auto EC = vertical_join(E, C);
         auto R = IdentityMatrix<SUB>(2 * m - 1);
         for (size_t j = 2 * m - 1; j-- > m;) {
-            const auto I = IdentityMatrix<SUB>(j - m);
-            const auto E = Matrix<SUB>(unit_vector<SUB>(m, 0));
-            const auto C = CompanionMatrix<SUB>(Vector(SUPER::get_modulus())).transpose();
-            const auto Rj = diagonal_join(I, vertical_join(E, C));
+            const auto Rj = diagonal_join(IdentityMatrix<SUB>(j - m), EC);
             R *= Rj;
         }
 
@@ -4781,21 +5094,12 @@ class AlternantCode : public SubfieldSubcode<B> {
         throw std::invalid_argument(std::string("Cannot construct alternant code: ") + e.what());
     }
 
-    AlternantCode(const AlternantCode&) = default;
-    AlternantCode(AlternantCode&&) = default;
-    AlternantCode& operator=(const AlternantCode&) = default;
-    AlternantCode& operator=(AlternantCode&&) = default;
-
     const Vector<SUPER>& get_a() const noexcept { return this->get_SuperCode().get_a(); }
     const Vector<SUPER>& get_d() const noexcept { return this->get_SuperCode().get_d(); }
     virtual size_t get_delta() const noexcept { return delta; }
 
-    virtual void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            Base::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) {
+    void get_info(std::ostream& os) const override {
+        if (this->template info_prelude<Base>(os)) {
             os << BOLD("Alternant code") " with properties: { delta = " << get_delta();
             if (this->get_SuperCode().is_primitive()) os << ", primitive";
             if (this->get_SuperCode().is_narrow_sense()) os << ", narrow-sense";
@@ -4834,20 +5138,11 @@ class BCHCode : public AlternantCode<B> {
         throw std::invalid_argument(std::string("Cannot construct BCH code: ") + e.what());
     }
 
-    BCHCode(const BCHCode&) = default;
-    BCHCode(BCHCode&&) = default;
-    BCHCode& operator=(const BCHCode&) = default;
-    BCHCode& operator=(BCHCode&&) = default;
-
     SUPER get_alpha() const { return this->get_SuperCode().get_alpha(); }
     size_t get_b() const noexcept { return this->get_SuperCode().get_b(); }
 
-    virtual void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            Base::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) os << BOLD("BCH code");
+    void get_info(std::ostream& os) const override {
+        if (this->template info_prelude<Base>(os)) os << BOLD("BCH code");
     }
 };
 
@@ -4909,11 +5204,7 @@ class GoppaCode : public AlternantCode<GRSCode<SUPER>> {
     }
 
     void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            Base::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) {
+        if (this->template info_prelude<Base>(os)) {
             os << BOLD("Goppa code") " with properties: { g = " << g;
             if (squarefree) os << ", square-free";
             os << " }";
@@ -4936,13 +5227,15 @@ class GoppaCode : public AlternantCode<GRSCode<SUPER>> {
         calculate_Patterson_inv_cache();
         const auto& inv = *Patterson_inv_cache;
 
-        const auto one = Monomial<SUPER>(0, SUPER(1));
+        const auto one = OnePolynomial<SUPER>();
         const auto x = Monomial<SUPER>(1, SUPER(1));
         const auto zero = ZeroPolynomial<SUPER>();
 
+        // every inv[i] is reduced modulo g, so the accumulated syndrome stays below deg(g) without reduction
+        const SUB sub_one(1);
         auto S = zero;
         for (size_t i = 0; i < n; ++i)
-            if (r[i] == SUB(1)) S = (S + inv[i]) % g;
+            if (r[i] == sub_one) S += inv[i];
         if (S.is_zero()) return r;
 
         Polynomial<SUPER> v, u;
@@ -4982,7 +5275,7 @@ class GoppaCode : public AlternantCode<GRSCode<SUPER>> {
         if (E.size() > t) throw decoding_failure("Patterson decoder failed (too many errors)");
 
         Vector<SUB> c_est = r;
-        for (size_t i = 0; i < E.size(); ++i) c_est.set_component(E[i], r[E[i]] + SUB(1));
+        for (size_t i = 0; i < E.size(); ++i) c_est.set_component(E[i], r[E[i]] + sub_one);
 
         return c_est;
     }
@@ -5043,9 +5336,7 @@ class ExtendedCode : public LinearCode<T> {
     ExtendedCode(const B& BaseCode, size_t i, const Vector<T>& v) try : LinearCode
         <T>(BaseCode.get_n() + 1, BaseCode.get_k() == 0 ? v.wH() : BaseCode.get_k(),
             Extended_G(BaseCode.get_G(), i, v)),
-            BaseCode(BaseCode), i(i), v(v), parity(false) {
-            if (v == Extended_v(this->BaseCode.get_G())) parity = true;
-        }
+            BaseCode(BaseCode), i(i), v(v), parity(v == Extended_v(this->BaseCode.get_G())) {}
     catch (const std::invalid_argument& e) {
         throw std::invalid_argument(std::string("Trying to extend a code with invalid extension parameters: ") +
                                     e.what());
@@ -5067,11 +5358,6 @@ class ExtendedCode : public LinearCode<T> {
           i(0),
           v(this->G.get_col(i)),
           parity(true) {}
-
-    ExtendedCode(const ExtendedCode&) = default;
-    ExtendedCode(ExtendedCode&&) = default;
-    ExtendedCode& operator=(const ExtendedCode&) = default;
-    ExtendedCode& operator=(ExtendedCode&&) = default;
 
     size_t get_i() const noexcept { return i; }
     const B& get_BaseCode() const noexcept { return BaseCode; }
@@ -5099,13 +5385,9 @@ class ExtendedCode : public LinearCode<T> {
         }
     }
 
-    virtual void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) {
-            const auto old = os.iword(details::index);
+    void get_info(std::ostream& os) const override {
+        if (this->template info_prelude<LinearCode<T>>(os)) {
+            details::verbosity_guard guard(os);
             os << BOLD("Extended code") " with properties: { i = " << i;
             os << ", v = " << v;
             if (parity) os << ", zero sum parity";
@@ -5113,18 +5395,17 @@ class ExtendedCode : public LinearCode<T> {
             BaseCode.LinearCode<T>::get_info(os);
             os << " " << showspecial << BaseCode;
             os << " }";
-            os.iword(details::index) = old;
         }
     }
 
-    virtual Vector<T> dec_BD(const Vector<T>& r) const override {
+    Vector<T> dec_BD(const Vector<T>& r) const override {
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_BD_EE(r);
 #endif
         return LinearCode<T>::dec_BD(r);
     }
 
-    virtual Vector<T> dec_ML(const Vector<T>& r) const override {
+    Vector<T> dec_ML(const Vector<T>& r) const override {
 #ifdef CECCO_ERASURE_SUPPORT
         if (LinearCode<T>::erasures_present(r)) return dec_ML_EE(r);
 #endif
@@ -5233,28 +5514,18 @@ class AugmentedCode : public LinearCode<T> {
         throw std::invalid_argument(std::string("Trying to augment a code by an invalid w: ") + e.what());
     }
 
-    AugmentedCode(const AugmentedCode&) = default;
-    AugmentedCode(AugmentedCode&&) = default;
-    AugmentedCode& operator=(const AugmentedCode&) = default;
-    AugmentedCode& operator=(AugmentedCode&&) = default;
-
     const B& get_BaseCode() const noexcept { return BaseCode; }
     size_t get_j() const noexcept { return j; }
     const Vector<T>& get_w() const noexcept { return w; }
 
-    virtual void get_info(std::ostream& os) const override {
-        if (os.iword(details::index) < 3) {
-            LinearCode<T>::get_info(os);
-            if (os.iword(details::index) > 0) os << std::endl;
-        }
-        if (os.iword(details::index) > 0) {
-            const auto old = os.iword(details::index);
+    void get_info(std::ostream& os) const override {
+        if (this->template info_prelude<LinearCode<T>>(os)) {
+            details::verbosity_guard guard(os);
             os << BOLD("Augmented code") " with properties: { w = " << w;
             os << ", BaseCode = " << showbasic;
             BaseCode.LinearCode<T>::get_info(os);
             os << " " << showspecial << BaseCode;
             os << " }";
-            os.iword(details::index) = old;
         }
     }
 
@@ -5431,12 +5702,12 @@ class AugmentedCode : public LinearCode<T> {
 };
 
 template <FieldType T>
-auto dual(const T& C) {
+auto dual(const LinearCode<T>& C) {
     return C.get_dual();
 }
 
 namespace details {
-bool validate(const std::vector<size_t>& v, std::size_t n) {
+inline bool validate(const std::vector<size_t>& v, std::size_t n) {
     std::vector<bool> seen(n, false);
     for (auto it = v.begin(); it != v.end(); ++it) {
         if (*it >= n || seen[*it]) return false;
