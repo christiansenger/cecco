@@ -1,5 +1,3 @@
-#include <bit>
-#include <iomanip>
 #include <iostream>
 
 #include "cecco.hpp"
