@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta name="generator" content="HTML Tidy for HTML5 for Apple macOS version 5.8.0">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CECCO: Convolutional Codes</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="../site.css" rel="stylesheet">
+</head>
+
+<body>
+  <main class="container py-5">
+    <div class="row justify-content-center">
+      <div class="col-lg-11 col-xl-10">
+        <div class="page-logo-wrap">
+  <a href="../index.html"><img src="../cecco.png" alt="Cecco logo" class="page-logo"></a>
+</div>
+<h1 class="display-5 fw-semibold mb-3">CECCO: Convolutional
+          Codes</h1>
+        <p class="mt-4">CECCO supports convolutional codes in their two
+          block code incarnations: zero-terminated and tailbitten. <b>Both
+            are treated as linear codes with special structure</b>, similarly
+          as the polynomial and cyclic codes in the <a href="../5_polynomial_and_cyclic_codes/index.html">corresponding
+            demo</a>. A convolutional code is defined by a k<sub>cc</sub> ×
+          n<sub>cc</sub> generator matrix G<sub>cc</sub>(x) over the
+          polynomial ring F[x] (we write x for the customary delay variable D
+          because CECCO prints polynomials in x) with memory u, the largest
+          degree among its entries. F can be any finite field, cf. the demos
+          on <a href="../1_prime_fields/index.html">prime fields</a> and
+          <a href="../3_extension_fields/index.html">extension
+            fields</a>.
+        </p>
+        <p class="mt-4">The encoder processes L blocks of k<sub>cc</sub>
+          information symbols each. Zero termination appends u zero-blocks
+          that drive the encoder back to the all-zero state, giving linear
+          code C[F; (L+u)n<sub>cc</sub>, Lk<sub>cc</sub>]. Tailbiting wraps
+          the encoder output around modulo x<sup>L</sup>−1, giving a linear
+          code C[F; Ln<sub>cc</sub>, Lk<sub>cc</sub>] without any rate loss.
+          Since <code>ConvolutionalCode</code> is derived from
+          <code>LinearCode</code>, everything from <a href="../4_linear_codes_and_decoding/index.html">the demo on
+            linear
+            codes and their decoding</a> and <a href="../6_soft_decoding/index.html">the demo on soft decoding</a>
+          (minimum distance, weight enumerator, duals, hard- and soft-input
+          decoders) is immediately available. Note that streaming
+          (continuous, unterminated) encoding and decoding of convolutional
+          codes is currently not supported by CECCO.
+        </p>
+        <p class="mt-4">Binary convolutional encoders are traditionally
+          specified in octal notation, for example the ubiquitous (5, 7)
+          encoder with memory 2 or the (133, 171) encoder with memory 6.
+          CECCO accepts this notation directly: a dedicated
+          <code>ConvolutionalCode</code> constructor takes the octal values
+          (typed verbatim, exploiting that C++ allows octal integer literals
+          (leading 0)) and converts them to generator polynomials. The u+1
+          binary digits of each value are read MSB-first, the leading digit
+          being the x<sup>0</sup> tap. No explicit memory parameter is
+          needed: the width of each row of G<sub>cc</sub>(x) is derived as
+          the bit width of the row's largest entry, which is exact because
+          tabulated encoders are row-wise delay-free (no row is divisible by
+          x).
+        </p>
+        <p class="mt-4">Here we zero-terminate the (5, 7) encoder after L =
+          8 information blocks and obtain C[F2; 20, 8]. Its minimal trellis
+          (cf. <a href="../4_linear_codes_and_decoding/index.html">the linear
+            codes demo</a>) is the classic convolutional trellis, sectionalized
+          at symbol level (one segment per code symbol, the format consumed
+          by the trellis-based decoders): at block boundaries it has the
+          familiar q<sup>u</sup> = 4 states, but between the two symbols of
+          an output block the current information bit has already influenced
+          the first symbol and is still needed for the second — it is part of
+          the state, giving up to q<sup>u+k<sub>cc</sub></sup> = 8 states
+          there. The state complexity reported below is the maximum over all
+          layers, hence 8. The trellis can be exported for inspection with
+          the <code>export_as_tikz</code> member of the <code>Trellis</code>
+          class template, and <code>merge_segments</code> recombines the two
+          symbol-level segments of each output block into one, recovering the
+          conventional time-step trellis. Since n<sub>cc</sub> = 2 and the
+          code is binary, its edge labels live in F<sub>4</sub>.</p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 23&ndash;31</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="c1">// classic rate-1/2 encoder (5, 7) with memory 2, given in octal notation</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">05</span><span class="p">,</span><span class="w"> </span><span class="mo">07</span><span class="p">},</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">zero_terminated</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showall</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">T1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">get_minimal_trellis</span><span class="p">();</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Trellis state complexity: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">T1</span><span class="p">.</span><span class="n">get_maximum_depth</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="n">T1</span><span class="p">.</span><span class="n">export_as_tikz</span><span class="p">(</span><span class="s">&quot;trellis1.tikz&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">T2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">T1</span><span class="p">.</span><span class="n">merge_segments</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="w">    </span><span class="n">T2</span><span class="p">.</span><span class="n">export_as_tikz</span><span class="p">(</span><span class="s">&quot;trellis2.tikz&quot;</span><span class="p">);</span>
+</pre></div>
+
+</div>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+[F_2; 20, 8], dmin = 5
+Linear code with properties: { 
+G = 
+  ⌈1 1 0 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0⌉
+  |0 0 1 1 0 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0|
+  |0 0 0 0 1 1 0 1 1 1 0 0 0 0 0 0 0 0 0 0|
+  |0 0 0 0 0 0 1 1 0 1 1 1 0 0 0 0 0 0 0 0|
+  |0 0 0 0 0 0 0 0 1 1 0 1 1 1 0 0 0 0 0 0|
+  |0 0 0 0 0 0 0 0 0 0 1 1 0 1 1 1 0 0 0 0|
+  |0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 1 1 0 0|
+  ⌊0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 1 1⌋
+H = 
+  ⌈1 0 0 0 0 1 0 1 0 0 0 1 0 1 0 0 0 1 0 1⌉
+  |0 1 0 0 0 1 0 1 0 0 0 1 0 1 0 0 0 1 0 1|
+  |0 0 1 0 0 0 0 1 0 1 0 0 0 1 0 1 0 0 0 1|
+  |0 0 0 1 0 1 0 0 0 1 0 1 0 0 0 1 0 1 0 0|
+  |0 0 0 0 1 1 0 1 0 1 0 0 0 1 0 1 0 0 0 1|
+  |0 0 0 0 0 0 1 1 0 1 0 1 0 0 0 1 0 1 0 0|
+  |0 0 0 0 0 0 0 0 1 1 0 1 0 1 0 0 0 1 0 1|
+  |0 0 0 0 0 0 0 0 0 0 1 1 0 1 0 1 0 0 0 1|
+  |0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 0 1 0 0|
+  |0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 0 1|
+  |0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1|
+  ⌊0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1⌋
+A(x) = 1 + 8x^5 + 13x^6 + 20x^7 + 28x^8 + 32x^9 + 38x^10 + 40x^11 + 40x^12 + 24x^13 + 5x^14 + 4x^15 + 3x^16
+tmax = 2 
+}
+Convolutional code with properties: { k_cc = 1, n_cc = 2, L = 8, u = 2, zero-terminated,
+G_cc = [[1 + x^2, 1 + x + x^2]] }
+Trellis state complexity: 8
+            </pre>
+          </div>
+        </div>
+        <p class="mt-4">The code reports its convolutional parameters
+          k<sub>cc</sub>, n<sub>cc</sub>, L, u, the termination, and the
+          generator matrix G<sub>cc</sub>(x) in addition to the usual linear
+          code properties. As everywhere in CECCO, the IO manipulators
+          <code>showbasic</code>, <code>showmost</code>, and
+          <code>showall</code> select how much of this information is
+          printed. The reported minimum distance equals the widely known free
+          distance 5 of the (5, 7) encoder: the zero-terminated codewords are
+          exactly the state-sequence paths of the encoder that start and end
+          in the all-zero state, and the lowest-weight such path realizes the
+          free distance already for small L. The exported symbol-level
+          minimal trellis renders as follows:
+        </p>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body text-center">
+            <!-- placeholder: convert trellis1.tikz to trellis1.png and place it next to index.html -->
+            <img src="trellis1.png" alt="Minimal trellis of the zero-terminated (5, 7) convolutional code"
+              class="img-fluid">
+          </div>
+        </div>
+        <p class="mt-4">The merged trellis has one segment per output block
+          and at most q<sup>u</sup> = 4 states. Each branch carries one
+          F<sub>4</sub> symbol standing for the two output bits of the block;
+          the edge colors encode these labels: black = 00, red = 11, green =
+          01, blue = 10. Trellis-based decoding in CECCO is based on the
+          symbol-level minimal trellis and not the merged one.</p>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body text-center">
+            <!-- placeholder: convert trellis2.tikz to trellis2.png and place it next to index.html -->
+            <img src="trellis2.png" alt="Merged F4 trellis of the zero-terminated (5, 7) convolutional code"
+              class="img-fluid">
+          </div>
+        </div>
+        <p class="mt-4">Sweeping over L shows the characteristic behavior
+          of the two terminations. Zero termination pays for the state flush
+          with rate: R = L/(2(L+u)) approaches the encoder rate 1/2 only
+          asymptotically, while dmin stays pinned at the free distance:</p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 33&ndash;38</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="mi">16</span><span class="p">})</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">CL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">05</span><span class="p">,</span><span class="w"> </span><span class="mo">07</span><span class="p">},</span><span class="w"> </span><span class="n">L</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">zero_terminated</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;zero-terminated, L = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">setw</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;: [&quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_n</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_k</span><span class="p">()</span>
+<span class="w">                  </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;], R = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">double</span><span class="o">&gt;</span><span class="p">(</span><span class="n">CL</span><span class="p">.</span><span class="n">get_k</span><span class="p">())</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_n</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, dmin = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">()</span>
+<span class="w">                  </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+</pre></div>
+
+</div>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+zero-terminated, L =  2: [8, 2], R = 0.25, dmin = 5
+zero-terminated, L =  4: [12, 4], R = 0.333333, dmin = 5
+zero-terminated, L =  8: [20, 8], R = 0.4, dmin = 5
+zero-terminated, L = 16: [36, 16], R = 0.444444, dmin = 5
+                    </pre>
+          </div>
+        </div>
+        <p class="mt-4">Tailbiting maintains R = 1/2 exactly for every L.
+          The price is paid at short lengths: codewords that wrap around the
+          circular trellis can have lower weight than any terminated path, so
+          dmin falls below the free distance for small L and recovers it as L
+          grows:</p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 40&ndash;45</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="mi">16</span><span class="p">})</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">CL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">05</span><span class="p">,</span><span class="w"> </span><span class="mo">07</span><span class="p">},</span><span class="w"> </span><span class="n">L</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">tailbitten</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;tailbitten,      L = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">setw</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;: [&quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_n</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_k</span><span class="p">()</span>
+<span class="w">                  </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;], R = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">double</span><span class="o">&gt;</span><span class="p">(</span><span class="n">CL</span><span class="p">.</span><span class="n">get_k</span><span class="p">())</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_n</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, dmin = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">()</span>
+<span class="w">                  </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+</pre></div>
+
+</div>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+tailbitten,      L =  3: [6, 3], R = 0.5, dmin = 2
+tailbitten,      L =  4: [8, 4], R = 0.5, dmin = 2
+tailbitten,      L =  8: [16, 8], R = 0.5, dmin = 4
+tailbitten,      L = 16: [32, 16], R = 0.5, dmin = 5
+            </pre>
+          </div>
+        </div>
+        <p class="mt-4">Encoding and decoding work exactly as for any other
+          linear code. Due to the bounded state complexity of convolutional
+          codes, Viterbi decoding on the minimal trellis is the natural
+          choice for convolutional codes. It performs per-codeword ML
+          decoding. First with hard input from a binary symmetric
+          channel:</p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 47&ndash;61</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// TX</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">C</span><span class="p">.</span><span class="n">get_k</span><span class="p">()).</span><span class="n">randomize</span><span class="p">();</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Random message:                      &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">enc</span><span class="p">(</span><span class="n">u</span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">pe</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.05</span><span class="p">;</span>
+<span class="w">        </span><span class="n">BSC</span><span class="w"> </span><span class="nf">channel</span><span class="p">(</span><span class="n">pe</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// RX</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">channel</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">c_est</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_Viterbi</span><span class="p">(</span><span class="n">r</span><span class="p">);</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">u_est</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_est</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Hard-input Viterbi message estimate: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_est</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+</pre></div>
+
+</div>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+Random message:                      ( 0, 0, 1, 0, 1, 0, 1, 0 )
+Hard-input Viterbi message estimate: ( 0, 0, 1, 0, 1, 0, 1, 0 )
+                    </pre>
+          </div>
+        </div>
+        <p class="mt-4">Soft-input decoding works just as well, along the
+          lines of <a href="../6_soft_decoding/index.html">the demo on soft
+            decoding</a>: the codeword is BPSK-transmitted over a BI-AWGN
+          channel and the <code>LLRCalculator</code> converts the noisy
+          observations into the LLRs consumed by
+          <code>dec_Viterbi_soft</code> (for the binary code here, one LLR
+          per code symbol; class template argument deduction gives exactly
+          the binary calculator we need). The same transmission can
+          alternatively be written as an <code>operator&gt;&gt;</code>-based
+          simulation chain built from the <code>Enc</code>, <code>Dec</code>,
+          and <code>Encinv</code> blocks, where the decoder block can be
+          switched to any other supported method (like
+          <code>method_t::BCJR</code> or <code>method_t::BP</code>) without
+          touching the rest of the chain:
+        </p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 63&ndash;85</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// TX</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">C</span><span class="p">.</span><span class="n">get_k</span><span class="p">()).</span><span class="n">randomize</span><span class="p">();</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Random message:                      &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">        </span><span class="n">BI_AWGN</span><span class="w"> </span><span class="nf">channel</span><span class="p">(</span><span class="mf">2.0</span><span class="p">);</span><span class="w">  </span><span class="c1">// BPSK at Eb/N0 = 2 dB</span>
+<span class="w">        </span><span class="n">LLRCalculator</span><span class="w"> </span><span class="nf">llrcalculator</span><span class="p">(</span><span class="n">channel</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// RX</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">llrs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">llrcalculator</span><span class="p">(</span><span class="n">channel</span><span class="p">(</span><span class="n">C</span><span class="p">.</span><span class="n">enc</span><span class="p">(</span><span class="n">u</span><span class="p">)));</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">c_est</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_Viterbi_soft</span><span class="p">(</span><span class="n">llrs</span><span class="p">);</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">u_est</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_est</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Soft-input Viterbi message estimate: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_est</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">        </span><span class="c1">// alternative realization: simulation chain</span>
+<span class="w">        </span><span class="n">Enc</span><span class="w"> </span><span class="nf">enc</span><span class="p">(</span><span class="n">C</span><span class="p">);</span>
+<span class="w">        </span><span class="n">Dec</span><span class="w"> </span><span class="nf">dec</span><span class="p">(</span><span class="n">C</span><span class="p">,</span><span class="w"> </span><span class="n">method_t</span><span class="o">::</span><span class="n">Viterbi_soft</span><span class="p">);</span>
+<span class="w">        </span><span class="n">Encinv</span><span class="w"> </span><span class="nf">encinv</span><span class="p">(</span><span class="n">C</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="w"> </span><span class="n">u_hat</span><span class="p">;</span>
+<span class="w">        </span><span class="n">u</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">enc</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">channel</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">llrcalculator</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">dec</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">encinv</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">u_hat</span><span class="p">;</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Simulation chain message estimate:   &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_hat</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+</pre></div>
+
+</div>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+Random message:                      ( 0, 1, 1, 0, 0, 1, 1, 1 )
+Soft-input Viterbi message estimate: ( 0, 1, 1, 0, 0, 1, 1, 1 )
+Simulation chain message estimate:   ( 0, 1, 1, 0, 0, 1, 1, 1 )
+            </pre>
+          </div>
+        </div>
+        <p class="mt-4">Not every encoder can be tailbitten with every L.
+          An encoder of full rank over F loses rank under tailbiting exactly
+          when its rows share polynomial factors with x<sup>L</sup>−1; the
+          resulting block-circulant generator matrix then has rank smaller
+          than Lk<sub>cc</sub> and the constructor throws. The polynomials of
+          the encoder (6, 5), i.e., (1+x, (1+x)<sup>2</sup>), share the
+          factor 1+x, which divides x<sup>L</sup>−1 for every L in
+          characteristic 2, so tailbiting fails regardless of L (zero
+          termination of the same encoder works, although it is
+          catastrophic):</p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 86&ndash;92</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="c1">// 1 + x and 1 + x^2 = (1 + x)^2 share the factor 1 + x, which divides x^L - 1 for every L</span>
+<span class="w">    </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">06</span><span class="p">,</span><span class="w"> </span><span class="mo">05</span><span class="p">},</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">tailbitten</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">invalid_argument</span><span class="o">&amp;</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">what</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+</pre></div>
+
+</div>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+Cannot construct convolutional code: tailbiting rank loss, the block-circulant generator matrix
+has rank smaller than L * k_cc
+            </pre>
+          </div>
+        </div>
+        <p class="mt-4">The octal constructor covers any k<sub>cc</sub> and
+          n<sub>cc</sub>. For k<sub>cc</sub> &gt; 1 the rows of
+          G<sub>cc</sub>(x) are given as nested braces. Per-row width
+          derivation correctly identifies row degree 1 for the first row (2,
+          1, 3) (in polynomial form: (1, x, 1+x)), while it identifies row
+          degree 2 for the second row (1, 4, 7) (in polynomial form:
+          (x<sup>2</sup>, 1, 1+x+x<sup>2</sup>)). This implies memory 2 for
+          the overall code. We print with <code>showmost</code>, which shows
+          the recovered G<sub>cc</sub>(x) without the (here uninteresting)
+          weight enumerator details:</p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 94&ndash;100</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="c1">// k_cc = 2, n_cc = 3 encoder with row degrees 1 and 2: row widths are derived from the</span>
+<span class="w">    </span><span class="c1">// largest entry per row, so (2, 1, 3) reads as (1, x, 1 + x) and (1, 4, 7) as</span>
+<span class="w">    </span><span class="c1">// (x^2, 1, 1 + x + x^2)</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({{</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">},</span><span class="w"> </span><span class="p">{</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">7</span><span class="p">}},</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">zero_terminated</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showmost</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+</pre></div>
+
+</div>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+[F_2; 24, 12]
+Linear code with properties: { 
+G = 
+  ⌈1 0 1 0 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0⌉
+  |0 1 1 0 0 1 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0|
+  |0 0 0 1 0 1 0 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0|
+  |0 0 0 0 1 1 0 0 1 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0|
+  |0 0 0 0 0 0 1 0 1 0 1 1 0 0 0 0 0 0 0 0 0 0 0 0|
+  |0 0 0 0 0 0 0 1 1 0 0 1 1 0 1 0 0 0 0 0 0 0 0 0|
+  |0 0 0 0 0 0 0 0 0 1 0 1 0 1 1 0 0 0 0 0 0 0 0 0|
+  |0 0 0 0 0 0 0 0 0 0 1 1 0 0 1 1 0 1 0 0 0 0 0 0|
+  |0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 1 0 0 0 0 0 0|
+  |0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 0 1 1 0 1 0 0 0|
+  |0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 1 0 0 0|
+  ⌊0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 0 1 1 0 1⌋
+H = 
+  ⌈1 0 0 0 0 1 0 0 1 0 1 0 0 1 1 0 1 0 0 0 0 0 0 1⌉
+  |0 1 0 0 0 0 0 1 1 0 0 1 0 0 1 0 1 0 0 1 1 0 0 0|
+  |0 0 1 0 0 1 0 1 0 0 1 1 0 1 0 0 0 0 0 1 1 0 0 1|
+  |0 0 0 1 0 0 0 1 0 0 0 0 0 1 1 0 0 1 0 0 1 0 0 0|
+  |0 0 0 0 1 1 0 0 1 0 0 1 0 1 0 0 1 1 0 1 0 0 0 0|
+  |0 0 0 0 0 0 1 1 1 0 1 1 0 0 1 0 0 1 0 1 0 0 0 1|
+  |0 0 0 0 0 0 0 0 0 1 1 1 0 1 1 0 0 1 0 0 1 0 0 0|
+  |0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 1 1 0 0 1 0 0 1|
+  |0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 1 1 0 0 1|
+  |0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 1|
+  |0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1|
+  ⌊0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0⌋
+
+}
+Convolutional code with properties: { k_cc = 2, n_cc = 3, L = 6, u = 2, zero-terminated,
+G_cc = [[1, x, 1 + x], [x^2, 1, 1 + x + x^2]] }
+            </pre>
+          </div>
+        </div>
+        <p class="mt-4">Octal notation for generator polynomials is
+          inherently binary; over other fields the generator matrix is
+          specified directly as a matrix of polynomials. The following
+          rate-2/3 systematic encoder with memory 1 over F<sub>4</sub>
+          (constructed as in <a href="../3_extension_fields/index.html">the
+            demo on finite extension fields</a>) is shown with both
+          terminations; note that the tailbitten code is reported as
+          quasi-cyclic with shift index dividing n<sub>cc</sub> = 3 as a
+          tailbitten convolutional code is by construction invariant under
+          rotation by one block of n<sub>cc</sub> symbols:</p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 102&ndash;114</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// rate-2/3 systematic encoder with memory 1 over F4</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">zero</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">one</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">G_cc</span><span class="w"> </span><span class="o">=</span>
+<span class="w">            </span><span class="n">Matrix</span><span class="o">&lt;</span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;&gt;</span><span class="p">({{</span><span class="n">one</span><span class="p">,</span><span class="w"> </span><span class="n">zero</span><span class="p">,</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">({</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">})},</span><span class="w"> </span><span class="p">{</span><span class="n">zero</span><span class="p">,</span><span class="w"> </span><span class="n">one</span><span class="p">,</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">({</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">})}});</span>
+
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">Czt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">(</span><span class="n">G_cc</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">zero_terminated</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showall</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">Czt</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">Ctb</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">(</span><span class="n">G_cc</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">tailbitten</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showall</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">Ctb</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+</pre></div>
+
+</div>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+[F_4; 15, 8], dmin = 3
+Linear code with properties: { 
+G = 
+  ⌈1 0 1 0 0 2 0 0 0 0 0 0 0 0 0⌉
+  |0 1 2 0 0 1 0 0 0 0 0 0 0 0 0|
+  |0 0 0 1 0 1 0 0 2 0 0 0 0 0 0|
+  |0 0 0 0 1 2 0 0 1 0 0 0 0 0 0|
+  |0 0 0 0 0 0 1 0 1 0 0 2 0 0 0|
+  |0 0 0 0 0 0 0 1 2 0 0 1 0 0 0|
+  |0 0 0 0 0 0 0 0 0 1 0 1 0 0 2|
+  ⌊0 0 0 0 0 0 0 0 0 0 1 2 0 0 1⌋
+H = 
+  ⌈1 0 3 0 1 1 0 3 3 0 2 2 0 0 1⌉
+  |0 1 1 0 3 3 0 2 2 0 1 1 0 0 3|
+  |0 0 0 1 3 0 0 3 3 0 2 2 0 0 1|
+  |0 0 0 0 0 0 1 3 0 0 3 3 0 0 2|
+  |0 0 0 0 0 0 0 0 0 1 3 0 0 0 3|
+  |0 0 0 0 0 0 0 0 0 0 0 0 1 0 0|
+  ⌊0 0 0 0 0 0 0 0 0 0 0 0 0 1 0⌋
+A(x) = 1 + 48x^3 + 93x^4 + 324x^5 + 1404x^6 + 3396x^7 + 7887x^8 + 13692x^9 + 16308x^10 + 14460x^11 + 6819x^12 + 1104x^13 tmax = 1 
+}
+Convolutional code with properties: { k_cc = 2, n_cc = 3, L = 4, u = 1, zero-terminated,
+G_cc = [[1, 0, 1 + 2x], [0, 1, 2 + x]] }
+[F_4; 12, 8], dmin = 3
+Linear code with properties: { 
+G = 
+  ⌈1 0 1 0 0 2 0 0 0 0 0 0⌉
+  |0 1 2 0 0 1 0 0 0 0 0 0|
+  |0 0 0 1 0 1 0 0 2 0 0 0|
+  |0 0 0 0 1 2 0 0 1 0 0 0|
+  |0 0 0 0 0 0 1 0 1 0 0 2|
+  |0 0 0 0 0 0 0 1 2 0 0 1|
+  |0 0 2 0 0 0 0 0 0 1 0 1|
+  ⌊0 0 1 0 0 0 0 0 0 0 1 2⌋
+H = 
+  ⌈1 0 3 0 1 1 0 3 3 3 0 2⌉
+  |0 1 1 0 3 3 0 2 2 3 3 1|
+  |0 0 0 1 3 0 0 3 3 2 3 2|
+  ⌊0 0 0 0 0 0 1 3 0 3 1 3⌋
+A(x) = 1 + 48x^3 + 138x^4 + 648x^5 + 2772x^6 + 6648x^7 + 13017x^8 + 16632x^9 + 15012x^10 + 8664x^11 + 1956x^12 tmax = 1 quasi-cyclic(ell = 3) 
+}
+Convolutional code with properties: { k_cc = 2, n_cc = 3, L = 4, u = 1, tailbitten,
+G_cc = [[1, 0, 1 + 2x], [0, 1, 2 + x]] }
+            </pre>
+          </div>
+        </div>
+        <p class="mt-4">CECCO can also go the other way. The
+          <code>ConvolutionalCode</code> constructor taking a plain
+          <code>LinearCode</code> performs complete recognition: it decides
+          whether the code admits a zero-terminated or tailbitten
+          convolutional representation at all and, if so, recovers the
+          canonical one with minimal k<sub>cc</sub>, then minimal
+          n<sub>cc</sub>, then minimal memory u, zero-terminated preferred
+          over tailbitten on ties. A code with no such representation is
+          rejected with an exception. For the round trip test we hide the
+          structure of two convolutional codes behind a random change of
+          basis (the row space, hence the code, is unchanged) and recognize
+          the resulting anonymous <code>LinearCode</code> as a
+          <code>ConvolutionalCode</code>:
+        </p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 116&ndash;129</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">roundtrip_test</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[](</span><span class="k">const</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;&amp;</span><span class="w"> </span><span class="n">CC</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CC</span><span class="p">.</span><span class="n">get_k</span><span class="p">();</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ZeroMatrix</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="p">);</span>
+<span class="w">        </span><span class="k">do</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">S</span><span class="p">.</span><span class="n">randomize</span><span class="p">();</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">S</span><span class="p">.</span><span class="n">rank</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">k</span><span class="p">);</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">C_obscured</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">LinearCode</span><span class="p">(</span><span class="n">CC</span><span class="p">.</span><span class="n">get_n</span><span class="p">(),</span><span class="w"> </span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">CC</span><span class="p">.</span><span class="n">get_G</span><span class="p">());</span><span class="w">  </span><span class="c1">// structure hidden by change of basis</span>
+
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">C_recognized</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">C_obscured</span><span class="p">);</span><span class="w">  </span><span class="c1">// ... and recovered by recognition</span>
+<span class="w">        </span><span class="n">assert</span><span class="p">(</span><span class="n">C_recognized</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">CC</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showmost</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">C_recognized</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">};</span>
+<span class="w">    </span><span class="n">roundtrip_test</span><span class="p">(</span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">05</span><span class="p">,</span><span class="w"> </span><span class="mo">07</span><span class="p">},</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">zero_terminated</span><span class="p">));</span>
+<span class="w">    </span><span class="n">roundtrip_test</span><span class="p">(</span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">05</span><span class="p">,</span><span class="w"> </span><span class="mo">07</span><span class="p">},</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">tailbitten</span><span class="p">));</span>
+</pre></div>
+
+</div>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+[F_2; 20, 8]
+Linear code with properties: { 
+G = 
+  ⌈1 1 0 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0⌉
+  |0 0 1 1 0 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0|
+  |0 0 0 0 1 1 0 1 1 1 0 0 0 0 0 0 0 0 0 0|
+  |0 0 0 0 0 0 1 1 0 1 1 1 0 0 0 0 0 0 0 0|
+  |0 0 0 0 0 0 0 0 1 1 0 1 1 1 0 0 0 0 0 0|
+  |0 0 0 0 0 0 0 0 0 0 1 1 0 1 1 1 0 0 0 0|
+  |0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 1 1 0 0|
+  ⌊0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 1 1⌋
+H = 
+  ⌈1 0 0 0 0 1 0 1 0 0 0 1 0 1 0 0 0 1 0 1⌉
+  |0 1 0 0 0 1 0 1 0 0 0 1 0 1 0 0 0 1 0 1|
+  |0 0 1 0 0 0 0 1 0 1 0 0 0 1 0 1 0 0 0 1|
+  |0 0 0 1 0 1 0 0 0 1 0 1 0 0 0 1 0 1 0 0|
+  |0 0 0 0 1 1 0 1 0 1 0 0 0 1 0 1 0 0 0 1|
+  |0 0 0 0 0 0 1 1 0 1 0 1 0 0 0 1 0 1 0 0|
+  |0 0 0 0 0 0 0 0 1 1 0 1 0 1 0 0 0 1 0 1|
+  |0 0 0 0 0 0 0 0 0 0 1 1 0 1 0 1 0 0 0 1|
+  |0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 0 1 0 0|
+  |0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 0 1|
+  |0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1|
+  ⌊0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1⌋
+
+}
+Convolutional code with properties: { k_cc = 1, n_cc = 2, L = 8, u = 2, zero-terminated,
+G_cc = [[1 + x^2, 1 + x + x^2]] }
+[F_2; 16, 8]
+Linear code with properties: { 
+G = 
+  ⌈1 1 0 1 1 1 0 0 0 0 0 0 0 0 0 0⌉
+  |0 0 1 1 0 1 1 1 0 0 0 0 0 0 0 0|
+  |0 0 0 0 1 1 0 1 1 1 0 0 0 0 0 0|
+  |0 0 0 0 0 0 1 1 0 1 1 1 0 0 0 0|
+  |0 0 0 0 0 0 0 0 1 1 0 1 1 1 0 0|
+  |0 0 0 0 0 0 0 0 0 0 1 1 0 1 1 1|
+  |1 1 0 0 0 0 0 0 0 0 0 0 1 1 0 1|
+  ⌊0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 1⌋
+H = 
+  ⌈1 0 0 0 0 1 0 1 0 0 0 1 0 1 0 0⌉
+  |0 1 0 0 0 1 0 1 0 0 0 1 1 0 1 0|
+  |0 0 1 0 0 0 0 1 0 1 0 0 0 1 0 1|
+  |0 0 0 1 0 1 0 0 0 1 0 1 0 0 1 0|
+  |0 0 0 0 1 1 0 1 0 1 0 0 1 0 1 1|
+  |0 0 0 0 0 0 1 1 0 1 0 1 1 1 0 0|
+  |0 0 0 0 0 0 0 0 1 1 0 1 0 1 1 1|
+  ⌊0 0 0 0 0 0 0 0 0 0 1 1 1 0 1 1⌋
+
+}
+Convolutional code with properties: { k_cc = 1, n_cc = 2, L = 8, u = 2, tailbitten,
+G_cc = [[1 + x^2, 1 + x + x^2]] }
+                    </pre>
+          </div>
+        </div>
+        <p class="mt-4">The recognized parameters and generator matrices
+          coincide with the ones we started from, for the zero-terminated as
+          well as the tailbitten code. The recognition constructor also makes
+          a structural fact visible: polynomial codes as in <a href="../5_polynomial_and_cyclic_codes/index.html">the
+            demo on
+            polynomial and cyclic codes</a> are precisely the zero-terminated
+          convolutional codes with k<sub>cc</sub> = n<sub>cc</sub> = 1 and
+          with the convolutional code generator polynomials determining the
+          polynomial code generator polynomial gamma. Recognizing the cyclic
+          binary [7, 4] Hamming code accordingly returns u = 3 and
+          G<sub>cc</sub> = (1 + x + x<sup>3</sup>), its generator polynomial
+          gamma:</p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 132&ndash;138</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">HamC</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">HammingCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">LinearCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="n">F2</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span><span class="w"> </span><span class="n">F2</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span><span class="w"> </span><span class="n">F2</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span><span class="w"> </span><span class="n">F2</span><span class="p">(</span><span class="mi">1</span><span class="p">)})));</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showall</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">HamC</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">CC</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">HamC</span><span class="p">);</span>
+<span class="w">        </span><span class="n">assert</span><span class="p">(</span><span class="n">CC</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">HamC</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">CC</span><span class="p">.</span><span class="n">is_zero_terminated</span><span class="p">());</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showall</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CC</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+</pre></div>
+
+</div>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+[F_2; 7, 4], dmin = 3
+Linear code with properties: { 
+[F_2; 7, 4], dmin = 3
+Linear code with properties: { 
+G = 
+  ⌈1 1 0 1 0 0 0⌉
+  |0 1 1 0 1 0 0|
+  |0 0 1 1 0 1 0|
+  ⌊0 0 0 1 1 0 1⌋
+H = 
+  ⌈1 0 0 1 0 1 1⌉
+  |0 1 0 1 1 1 0|
+  ⌊0 0 1 0 1 1 1⌋
+A(x) = 1 + 7x^3 + 7x^4 + x^7 tmax = 1 polynomial(cyclic, gamma = 1 + x + x^3)
+perfect dual-containing 
+}
+Hamming code with properties: { s = 3 }
+[F_2; 7, 4], dmin = 3
+Linear code with properties: { 
+G = 
+  ⌈1 1 0 1 0 0 0⌉
+  |0 1 1 0 1 0 0|
+  |0 0 1 1 0 1 0|
+  ⌊0 0 0 1 1 0 1⌋
+H = 
+  ⌈1 0 0 1 0 1 1⌉
+  |0 1 0 1 1 1 0|
+  ⌊0 0 1 0 1 1 1⌋
+A(x) = 1 + 7x^3 + 7x^4 + x^7 tmax = 1 polynomial(cyclic, gamma = 1 + x + x^3)
+perfect dual-containing 
+}
+Convolutional code with properties: { k_cc = 1, n_cc = 1, L = 4, u = 3, zero-terminated,
+G_cc = [[1 + x + x^3]] }
+            </pre>
+          </div>
+        </div>
+        <p class="mt-4">Finally, we build an expurgated tailbiting code.
+          The idea: take a tailbitten convolutional code and expurgate it
+          down to the subcode of codewords whose message polynomial is
+          divisible by a polynomial p(x) of degree c. In literature, this
+          p(x) is sometimes called an <em>expurgating linear function</em>
+          (ELF). The literature often says “CRC” here, but since the
+          polynomial code is in general not cyclic, we avoid that term. In
+          CECCO's terminology the admissible message polynomials form the
+          codewords of a polynomial code (that may or may not be cyclic) with
+          generator polynomial p(x). Expurgation removes the low-weight
+          codewords, trading dimension (k drops from L to L−c) for minimum
+          distance. With a well-chosen polynomial code the resulting
+          concatenated code constitutes an excellent, efficiently decodable
+          short linear code. Because the message space of the convolutional
+          code is a polynomial code, the generator matrix of the expurgated
+          code is simply the product of the polynomial code's banded
+          generator matrix and the and the block-circulant generator matrix
+          of the convolutional code:</p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 140&ndash;150</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">12</span><span class="p">;</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">CC</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">05</span><span class="p">,</span><span class="w"> </span><span class="mo">07</span><span class="p">},</span><span class="w"> </span><span class="n">L</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">tailbitten</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Tailbitten mother code: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showbasic</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CC</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, dmin = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CC</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">        </span><span class="c1">// messages divisible by p form a polynomial code with generator polynomial p, so the</span>
+<span class="w">        </span><span class="c1">// expurgated tailbitten code is generated by the product of the two generator matrices</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">expurgated</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="o">&amp;</span><span class="n">CC</span><span class="p">,</span><span class="w"> </span><span class="n">L</span><span class="p">](</span><span class="k">const</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;&amp;</span><span class="w"> </span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">const</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">kp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">p</span><span class="p">.</span><span class="n">degree</span><span class="p">();</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">LinearCode</span><span class="p">(</span><span class="n">CC</span><span class="p">.</span><span class="n">get_n</span><span class="p">(),</span><span class="w"> </span><span class="n">kp</span><span class="p">,</span><span class="w"> </span><span class="n">LinearCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">kp</span><span class="p">,</span><span class="w"> </span><span class="n">p</span><span class="p">).</span><span class="n">get_G</span><span class="p">()</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">CC</span><span class="p">.</span><span class="n">get_G</span><span class="p">());</span>
+<span class="w">        </span><span class="p">};</span>
+</pre></div>
+
+</div>
+        <p class="mt-4">ELFs are customarily also given in octal notation.
+          Since an expurgating polynomial has a nonzero constant term, its
+          width is derivable from the bit width of a single value, and the
+          demo uses this small helper at the polynomial level, mirroring the
+          row-width derivation of the octal constructor of the
+          <code>ConvolutionalCode</code> class template:
+        </p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 11&ndash;20</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="c1">// converts a polynomial in customary octal notation into the corresponding polynomial,</span>
+<span class="c1">// e.g., from_octal(013) = 1 + x^2 + x^3; the MSB is the constant term, so the width is</span>
+<span class="c1">// derivable from the bit width alone whenever p(0) != 0</span>
+<span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="w"> </span><span class="n">from_octal</span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="n">g</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="w"> </span><span class="n">p</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">width</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">bit_width</span><span class="p">(</span><span class="n">g</span><span class="p">);</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">e</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">e</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">width</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">e</span><span class="p">)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">((</span><span class="n">g</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="p">(</span><span class="n">width</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">e</span><span class="p">))</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mi">1u</span><span class="p">)</span><span class="w"> </span><span class="n">p</span><span class="p">.</span><span class="n">set_coefficient</span><span class="p">(</span><span class="n">e</span><span class="p">,</span><span class="w"> </span><span class="n">F2</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">p</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+
+</div>
+        <p class="mt-4">Instead of citing an ELF from the literature we let
+          CECCO find the best one: for the CC[F2; 24, 12] tailbitten (5, 7)
+          convolutional code with L = 12 we sweep over all degree-3 ELFs and
+          compare the minimum distances of the resulting CE[F2; 24, 9]
+          expurgated codes:</p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 152&ndash;168</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">        </span><span class="c1">// all degree-3 ELFs (expurgating linear functions) with nonzero constant term, again in</span>
+<span class="w">        </span><span class="c1">// octal notation</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="kt">size_t</span><span class="w"> </span><span class="n">dmin_best</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="n">g</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="mo">011u</span><span class="p">,</span><span class="w"> </span><span class="mo">013u</span><span class="p">,</span><span class="w"> </span><span class="mo">015u</span><span class="p">,</span><span class="w"> </span><span class="mo">017u</span><span class="p">})</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">cand</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">from_octal</span><span class="p">(</span><span class="n">g</span><span class="p">);</span>
+<span class="w">            </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">CE_cand</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">expurgated</span><span class="p">(</span><span class="n">cand</span><span class="p">);</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">CE_cand</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">()</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">dmin_best</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">dmin_best</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CE_cand</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">();</span>
+<span class="w">                </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cand</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">CELF</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">LinearCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">L</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">p</span><span class="p">.</span><span class="n">degree</span><span class="p">(),</span><span class="w"> </span><span class="n">p</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;ELF code:               &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showbasic</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CELF</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, dmin = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CELF</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">()</span>
+<span class="w">                  </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, gamma = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CELF</span><span class="p">.</span><span class="n">get_gamma</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">CE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">expurgated</span><span class="p">(</span><span class="n">p</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Expurgated code CE:     &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showbasic</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CE</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, dmin = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CE</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+</pre></div>
+
+</div>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+Tailbitten mother code: [F_2; 24, 12], dmin = 5
+ELF code:               [F_2; 12, 9], dmin = 2, gamma = 1 + x + x^2 + x^3
+Expurgated code CE:     [F_2; 24, 9], dmin = 8
+            </pre>
+          </div>
+        </div>
+        <p class="mt-4">Decoding the concatenated code CE uses the trick
+          that makes these codes practical: serial list Viterbi decoding on
+          the trellis of the convolutional code code.
+          <code>dec_Viterbi_list</code> returns candidate codewords in
+          nondecreasing trellis metric, so the first candidate whose
+          recovered message is divisible by the the generator polynomial
+          gamma of the ELF code is the ML codeword of the expurgated code
+          (provided the list is long enough). If no candidate passes, the
+          decoder reports a failure; increasing the list size trades
+          complexity for error/failure performance, which is exactly the
+          design parameter of these concatenated schemes:
+        </p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    <span class="text-secondary snippet-meta">Lines 170&ndash;190</span>
+  </div>
+  <div class="highlight"><pre><span></span><span class="w">        </span><span class="c1">// TX</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">CE</span><span class="p">.</span><span class="n">get_k</span><span class="p">()).</span><span class="n">randomize</span><span class="p">();</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Random message:                   &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CE</span><span class="p">.</span><span class="n">enc</span><span class="p">(</span><span class="n">u</span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">pe</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.05</span><span class="p">;</span>
+<span class="w">        </span><span class="n">BSC</span><span class="w"> </span><span class="nf">channel</span><span class="p">(</span><span class="n">pe</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// RX: serial list Viterbi decoding on the convolutional code, first ELF-passing candidate wins</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">channel</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">success</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">c_est</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">CE</span><span class="p">.</span><span class="n">dec_Viterbi_list</span><span class="p">(</span><span class="n">r</span><span class="p">,</span><span class="w"> </span><span class="mi">6</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Viterbi list candidate:  &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CC</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_est</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">((</span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">CE</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_est</span><span class="p">))</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">CELF</span><span class="p">.</span><span class="n">get_gamma</span><span class="p">()).</span><span class="n">is_zero</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;ELF-aided list message estimate:  &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CE</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_est</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">                </span><span class="n">success</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">                </span><span class="k">break</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">success</span><span class="p">)</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;ELF-aided list decoding failure!&quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+</pre></div>
+
+</div>
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <pre>
+Random message:                   ( 1, 0, 0, 0, 1, 0, 1, 1, 0 )
+Viterbi list candidate:  ( 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0 )
+Viterbi list candidate:  ( 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0 )
+Viterbi list candidate:  ( 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0 )
+Viterbi list candidate:  ( 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1 )
+Viterbi list candidate:  ( 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1 )
+ELF-aided list message estimate:  ( 1, 1, 0, 1, 0, 1, 0, 1, 1 )
+            </pre>
+          </div>
+        </div>
+        <p class="lead text-secondary mb-4">A complete, compilable demo is
+          shown below:</p>
+        <div class="card shadow-sm snippet-card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><strong>code.cpp</strong></span>
+    
+  </div>
+  <div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;bit&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;iomanip&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;iostream&gt;</span>
+
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cecco.hpp&quot;</span>
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">CECCO</span><span class="p">;</span>
+
+<span class="k">using</span><span class="w"> </span><span class="n">F2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Fp</span><span class="o">&lt;</span><span class="mi">2</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="k">using</span><span class="w"> </span><span class="n">F4</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Ext</span><span class="o">&lt;</span><span class="n">F2</span><span class="p">,</span><span class="w"> </span><span class="n">MOD</span><span class="p">{</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">}</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="c1">// converts a polynomial in customary octal notation into the corresponding polynomial,</span>
+<span class="c1">// e.g., from_octal(013) = 1 + x^2 + x^3; the MSB is the constant term, so the width is</span>
+<span class="c1">// derivable from the bit width alone whenever p(0) != 0</span>
+<span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="w"> </span><span class="n">from_octal</span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="n">g</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="w"> </span><span class="n">p</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">width</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">bit_width</span><span class="p">(</span><span class="n">g</span><span class="p">);</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">e</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">e</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">width</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">e</span><span class="p">)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">((</span><span class="n">g</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="p">(</span><span class="n">width</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">e</span><span class="p">))</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mi">1u</span><span class="p">)</span><span class="w"> </span><span class="n">p</span><span class="p">.</span><span class="n">set_coefficient</span><span class="p">(</span><span class="n">e</span><span class="p">,</span><span class="w"> </span><span class="n">F2</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">p</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="n">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// classic rate-1/2 encoder (5, 7) with memory 2, given in octal notation</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">05</span><span class="p">,</span><span class="w"> </span><span class="mo">07</span><span class="p">},</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">zero_terminated</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showall</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">T1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">get_minimal_trellis</span><span class="p">();</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Trellis state complexity: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">T1</span><span class="p">.</span><span class="n">get_maximum_depth</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="n">T1</span><span class="p">.</span><span class="n">export_as_tikz</span><span class="p">(</span><span class="s">&quot;trellis1.tikz&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">T2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">T1</span><span class="p">.</span><span class="n">merge_segments</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="w">    </span><span class="n">T2</span><span class="p">.</span><span class="n">export_as_tikz</span><span class="p">(</span><span class="s">&quot;trellis2.tikz&quot;</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="mi">16</span><span class="p">})</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">CL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">05</span><span class="p">,</span><span class="w"> </span><span class="mo">07</span><span class="p">},</span><span class="w"> </span><span class="n">L</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">zero_terminated</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;zero-terminated, L = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">setw</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;: [&quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_n</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_k</span><span class="p">()</span>
+<span class="w">                  </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;], R = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">double</span><span class="o">&gt;</span><span class="p">(</span><span class="n">CL</span><span class="p">.</span><span class="n">get_k</span><span class="p">())</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_n</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, dmin = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">()</span>
+<span class="w">                  </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="mi">16</span><span class="p">})</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">CL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">05</span><span class="p">,</span><span class="w"> </span><span class="mo">07</span><span class="p">},</span><span class="w"> </span><span class="n">L</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">tailbitten</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;tailbitten,      L = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">setw</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;: [&quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_n</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_k</span><span class="p">()</span>
+<span class="w">                  </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;], R = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">double</span><span class="o">&gt;</span><span class="p">(</span><span class="n">CL</span><span class="p">.</span><span class="n">get_k</span><span class="p">())</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_n</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, dmin = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CL</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">()</span>
+<span class="w">                  </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// TX</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">C</span><span class="p">.</span><span class="n">get_k</span><span class="p">()).</span><span class="n">randomize</span><span class="p">();</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Random message:                      &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">enc</span><span class="p">(</span><span class="n">u</span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">pe</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.05</span><span class="p">;</span>
+<span class="w">        </span><span class="n">BSC</span><span class="w"> </span><span class="nf">channel</span><span class="p">(</span><span class="n">pe</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// RX</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">channel</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">c_est</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_Viterbi</span><span class="p">(</span><span class="n">r</span><span class="p">);</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">u_est</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_est</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Hard-input Viterbi message estimate: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_est</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// TX</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">C</span><span class="p">.</span><span class="n">get_k</span><span class="p">()).</span><span class="n">randomize</span><span class="p">();</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Random message:                      &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">        </span><span class="n">BI_AWGN</span><span class="w"> </span><span class="nf">channel</span><span class="p">(</span><span class="mf">2.0</span><span class="p">);</span><span class="w">  </span><span class="c1">// BPSK at Eb/N0 = 2 dB</span>
+<span class="w">        </span><span class="n">LLRCalculator</span><span class="w"> </span><span class="nf">llrcalculator</span><span class="p">(</span><span class="n">channel</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// RX</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">llrs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">llrcalculator</span><span class="p">(</span><span class="n">channel</span><span class="p">(</span><span class="n">C</span><span class="p">.</span><span class="n">enc</span><span class="p">(</span><span class="n">u</span><span class="p">)));</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">c_est</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">dec_Viterbi_soft</span><span class="p">(</span><span class="n">llrs</span><span class="p">);</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">u_est</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_est</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Soft-input Viterbi message estimate: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_est</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">        </span><span class="c1">// alternative realization: simulation chain</span>
+<span class="w">        </span><span class="n">Enc</span><span class="w"> </span><span class="nf">enc</span><span class="p">(</span><span class="n">C</span><span class="p">);</span>
+<span class="w">        </span><span class="n">Dec</span><span class="w"> </span><span class="nf">dec</span><span class="p">(</span><span class="n">C</span><span class="p">,</span><span class="w"> </span><span class="n">method_t</span><span class="o">::</span><span class="n">Viterbi_soft</span><span class="p">);</span>
+<span class="w">        </span><span class="n">Encinv</span><span class="w"> </span><span class="nf">encinv</span><span class="p">(</span><span class="n">C</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="w"> </span><span class="n">u_hat</span><span class="p">;</span>
+<span class="w">        </span><span class="n">u</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">enc</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">channel</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">llrcalculator</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">dec</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">encinv</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">u_hat</span><span class="p">;</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Simulation chain message estimate:   &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u_hat</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// 1 + x and 1 + x^2 = (1 + x)^2 share the factor 1 + x, which divides x^L - 1 for every L</span>
+<span class="w">    </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">06</span><span class="p">,</span><span class="w"> </span><span class="mo">05</span><span class="p">},</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">tailbitten</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">invalid_argument</span><span class="o">&amp;</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">what</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// k_cc = 2, n_cc = 3 encoder with row degrees 1 and 2: row widths are derived from the</span>
+<span class="w">    </span><span class="c1">// largest entry per row, so (2, 1, 3) reads as (1, x, 1 + x) and (1, 4, 7) as</span>
+<span class="w">    </span><span class="c1">// (x^2, 1, 1 + x + x^2)</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({{</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">},</span><span class="w"> </span><span class="p">{</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">7</span><span class="p">}},</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">zero_terminated</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showmost</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// rate-2/3 systematic encoder with memory 1 over F4</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">zero</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">one</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">G_cc</span><span class="w"> </span><span class="o">=</span>
+<span class="w">            </span><span class="n">Matrix</span><span class="o">&lt;</span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;&gt;</span><span class="p">({{</span><span class="n">one</span><span class="p">,</span><span class="w"> </span><span class="n">zero</span><span class="p">,</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">({</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">})},</span><span class="w"> </span><span class="p">{</span><span class="n">zero</span><span class="p">,</span><span class="w"> </span><span class="n">one</span><span class="p">,</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">({</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">})}});</span>
+
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">Czt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">(</span><span class="n">G_cc</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">zero_terminated</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showall</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">Czt</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">Ctb</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F4</span><span class="o">&gt;</span><span class="p">(</span><span class="n">G_cc</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">tailbitten</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showall</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">Ctb</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">roundtrip_test</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[](</span><span class="k">const</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;&amp;</span><span class="w"> </span><span class="n">CC</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CC</span><span class="p">.</span><span class="n">get_k</span><span class="p">();</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ZeroMatrix</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="p">);</span>
+<span class="w">        </span><span class="k">do</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">S</span><span class="p">.</span><span class="n">randomize</span><span class="p">();</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">S</span><span class="p">.</span><span class="n">rank</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">k</span><span class="p">);</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">C_obscured</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">LinearCode</span><span class="p">(</span><span class="n">CC</span><span class="p">.</span><span class="n">get_n</span><span class="p">(),</span><span class="w"> </span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">CC</span><span class="p">.</span><span class="n">get_G</span><span class="p">());</span><span class="w">  </span><span class="c1">// structure hidden by change of basis</span>
+
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">C_recognized</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">C_obscured</span><span class="p">);</span><span class="w">  </span><span class="c1">// ... and recovered by recognition</span>
+<span class="w">        </span><span class="n">assert</span><span class="p">(</span><span class="n">C_recognized</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">CC</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showmost</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">C_recognized</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">};</span>
+<span class="w">    </span><span class="n">roundtrip_test</span><span class="p">(</span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">05</span><span class="p">,</span><span class="w"> </span><span class="mo">07</span><span class="p">},</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">zero_terminated</span><span class="p">));</span>
+<span class="w">    </span><span class="n">roundtrip_test</span><span class="p">(</span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">05</span><span class="p">,</span><span class="w"> </span><span class="mo">07</span><span class="p">},</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">tailbitten</span><span class="p">));</span>
+
+<span class="w">    </span><span class="c1">// every polynomial code (cyclic binary [7, 4] Hamming here) is zero-terminated with k_cc = n_cc = 1</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">HamC</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">HammingCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">LinearCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="n">F2</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span><span class="w"> </span><span class="n">F2</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span><span class="w"> </span><span class="n">F2</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span><span class="w"> </span><span class="n">F2</span><span class="p">(</span><span class="mi">1</span><span class="p">)})));</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showall</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">HamC</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">CC</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">HamC</span><span class="p">);</span>
+<span class="w">        </span><span class="n">assert</span><span class="p">(</span><span class="n">CC</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">HamC</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">CC</span><span class="p">.</span><span class="n">is_zero_terminated</span><span class="p">());</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showall</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CC</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">12</span><span class="p">;</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">CC</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConvolutionalCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">({</span><span class="mo">05</span><span class="p">,</span><span class="w"> </span><span class="mo">07</span><span class="p">},</span><span class="w"> </span><span class="n">L</span><span class="p">,</span><span class="w"> </span><span class="n">termination_t</span><span class="o">::</span><span class="n">tailbitten</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Tailbitten mother code: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showbasic</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CC</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, dmin = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CC</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">        </span><span class="c1">// messages divisible by p form a polynomial code with generator polynomial p, so the</span>
+<span class="w">        </span><span class="c1">// expurgated tailbitten code is generated by the product of the two generator matrices</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">expurgated</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="o">&amp;</span><span class="n">CC</span><span class="p">,</span><span class="w"> </span><span class="n">L</span><span class="p">](</span><span class="k">const</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;&amp;</span><span class="w"> </span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">const</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">kp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">p</span><span class="p">.</span><span class="n">degree</span><span class="p">();</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">LinearCode</span><span class="p">(</span><span class="n">CC</span><span class="p">.</span><span class="n">get_n</span><span class="p">(),</span><span class="w"> </span><span class="n">kp</span><span class="p">,</span><span class="w"> </span><span class="n">LinearCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">kp</span><span class="p">,</span><span class="w"> </span><span class="n">p</span><span class="p">).</span><span class="n">get_G</span><span class="p">()</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">CC</span><span class="p">.</span><span class="n">get_G</span><span class="p">());</span>
+<span class="w">        </span><span class="p">};</span>
+
+<span class="w">        </span><span class="c1">// all degree-3 ELFs (expurgating linear functions) with nonzero constant term, again in</span>
+<span class="w">        </span><span class="c1">// octal notation</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="kt">size_t</span><span class="w"> </span><span class="n">dmin_best</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="n">g</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="mo">011u</span><span class="p">,</span><span class="w"> </span><span class="mo">013u</span><span class="p">,</span><span class="w"> </span><span class="mo">015u</span><span class="p">,</span><span class="w"> </span><span class="mo">017u</span><span class="p">})</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">cand</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">from_octal</span><span class="p">(</span><span class="n">g</span><span class="p">);</span>
+<span class="w">            </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">CE_cand</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">expurgated</span><span class="p">(</span><span class="n">cand</span><span class="p">);</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">CE_cand</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">()</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">dmin_best</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">dmin_best</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CE_cand</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">();</span>
+<span class="w">                </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cand</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">CELF</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">LinearCode</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">L</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">p</span><span class="p">.</span><span class="n">degree</span><span class="p">(),</span><span class="w"> </span><span class="n">p</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;ELF code:               &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showbasic</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CELF</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, dmin = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CELF</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">()</span>
+<span class="w">                  </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, gamma = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CELF</span><span class="p">.</span><span class="n">get_gamma</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">CE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">expurgated</span><span class="p">(</span><span class="n">p</span><span class="p">);</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Expurgated code CE:     &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">showbasic</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CE</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;, dmin = &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CE</span><span class="p">.</span><span class="n">get_dmin</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+
+<span class="w">        </span><span class="c1">// TX</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">CE</span><span class="p">.</span><span class="n">get_k</span><span class="p">()).</span><span class="n">randomize</span><span class="p">();</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Random message:                   &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CE</span><span class="p">.</span><span class="n">enc</span><span class="p">(</span><span class="n">u</span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">pe</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.05</span><span class="p">;</span>
+<span class="w">        </span><span class="n">BSC</span><span class="w"> </span><span class="nf">channel</span><span class="p">(</span><span class="n">pe</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// RX: serial list Viterbi decoding on the convolutional code, first ELF-passing candidate wins</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">channel</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">success</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">c_est</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">CE</span><span class="p">.</span><span class="n">dec_Viterbi_list</span><span class="p">(</span><span class="n">r</span><span class="p">,</span><span class="w"> </span><span class="mi">6</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Viterbi list candidate:  &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CC</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_est</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">((</span><span class="n">Polynomial</span><span class="o">&lt;</span><span class="n">F2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">CE</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_est</span><span class="p">))</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">CELF</span><span class="p">.</span><span class="n">get_gamma</span><span class="p">()).</span><span class="n">is_zero</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;ELF-aided list message estimate:  &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">CE</span><span class="p">.</span><span class="n">encinv</span><span class="p">(</span><span class="n">c_est</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">                </span><span class="n">success</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">                </span><span class="k">break</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">success</span><span class="p">)</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;ELF-aided list decoding failure!&quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+
+</div>
+      </div>
+    </div>
+  <footer class="page-footer text-end mt-5">
+  <small><a href="../imprint.html">Impressum/Datenschutzerklärung</a>. Copyright &copy; 2026, Christian Senger &lt;<a href="mailto:senger@inue.uni-stuttgart.de">senger@inue.uni-stuttgart.de</a>&gt;.</small>
+</footer>
+</main>
+</body>
+
+</html>
