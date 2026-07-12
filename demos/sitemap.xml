@@ -1,35 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://christiansenger.github.io/cecco/www/</loc>
-    <lastmod>2026-04-28</lastmod>
+    <loc>https://cecco.senger.eu/</loc>
+    <lastmod>2026-07-13</lastmod>
   </url>
   <url>
-    <loc>https://christiansenger.github.io/cecco/www/0_basic_usage</loc>
-    <lastmod>2026-04-28</lastmod>
+    <loc>https://cecco.senger.eu/0_basic_usage</loc>
+    <lastmod>2026-07-13</lastmod>
   </url>
   <url>
-    <loc>https://christiansenger.github.io/cecco/www/1_prime_fields</loc>
-    <lastmod>2026-04-28</lastmod>
+    <loc>https://cecco.senger.eu/1_prime_fields</loc>
+    <lastmod>2026-07-13</lastmod>
   </url>
   <url>
-    <loc>https://christiansenger.github.io/cecco/www/2_finding_irreducible_polynomials</loc>
-    <lastmod>2026-04-28</lastmod>
+    <loc>https://cecco.senger.eu/2_finding_irreducible_polynomials</loc>
+    <lastmod>2026-07-13</lastmod>
   </url>
   <url>
-    <loc>https://christiansenger.github.io/cecco/www/3_extension_fields</loc>
-    <lastmod>2026-04-28</lastmod>
+    <loc>https://cecco.senger.eu/3_extension_fields</loc>
+    <lastmod>2026-07-13</lastmod>
   </url>
   <url>
-    <loc>https://christiansenger.github.io/cecco/www/4_linear_codes_and_decoding</loc>
-    <lastmod>2026-04-28</lastmod>
+    <loc>https://cecco.senger.eu/4_linear_codes_and_decoding</loc>
+    <lastmod>2026-07-13</lastmod>
   </url>
   <url>
-    <loc>https://christiansenger.github.io/cecco/www/5_polynomial_and_cyclic_codes</loc>
-    <lastmod>2026-04-28</lastmod>
+    <loc>https://cecco.senger.eu/5_polynomial_and_cyclic_codes</loc>
+    <lastmod>2026-07-13</lastmod>
   </url>
   <url>
-    <loc>https://christiansenger.github.io/cecco/www/imprint</loc>
-    <lastmod>2026-04-28</lastmod>
+    <loc>https://cecco.senger.eu/6_soft_decoding</loc>
+    <lastmod>2026-07-13</lastmod>
+  </url>
+  <url>
+    <loc>https://cecco.senger.eu/7_convolutional_codes</loc>
+    <lastmod>2026-07-13</lastmod>
+  </url>
+  <url>
+    <loc>https://cecco.senger.eu/imprint</loc>
+    <lastmod>2026-07-13</lastmod>
   </url>
 </urlset>
