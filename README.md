@@ -3,7 +3,7 @@ C++ Error Control COding (CECCO) is a header-only library for ECC simulations an
 
 Source code is available on Github <a href="https://github.com/christiansenger/cecco">here</a>.
 
-A growing <a href="https://christiansenger.github.io/cecco/www/#demos">collection of demos and examples</a> is available on the <a href="https://cecco.senger.eu">project website</a>.
+A growing <a href="https://cecco.senger.eu/#demos">collection of demos and examples</a> is available on the <a href="https://cecco.senger.eu">project website</a>.
 
 Detailed Doxygen documentation is available <a href="https://christiansenger.github.io/cecco/doxygen/html">here</a>.
 
