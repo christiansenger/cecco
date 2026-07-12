@@ -2,7 +2,8 @@ name: Build & Publish Doxygen
 
 on:
   push:
-    branches: [ main ]   # or your default branch
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
@@ -10,11 +11,17 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
 
       - name: Install Doxygen
         uses: ssciwr/doxygen-install@v2
@@ -29,28 +36,29 @@ jobs:
       - name: Build Doxygen
         run: doxygen Doxyfile
 
-      - name: Merge static repo content into Pages output
+      - name: Merge Doxygen into Pages output
         run: |
-          mkdir -p doc/html/www
-          cp -R demos/. doc/html/www/
+          rm -rf demos/doxygen/html
+          mkdir -p demos/doxygen/html
+          cp -R doc/html/. demos/doxygen/html/
 
-      - name: Configure Pages
+      - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload artifact
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # match your Doxyfile output (e.g. build/docs/html)
-          path: doc/html
+          path: ./demos
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
-
+        uses: actions/deploy-pages@v5
