@@ -5,7 +5,7 @@ Source code is available on Github <a href="https://github.com/christiansenger/c
 
 A growing <a href="https://christiansenger.github.io/cecco/www/#demos">collection of demos and examples</a> is available on the <a href="https://cecco.senger.eu">project website</a>.
 
-Detailed Doxygen documentation is available <a href="https://christiansenger.github.io/cecco/">here</a>.
+Detailed Doxygen documentation is available <a href="https://christiansenger.github.io/cecco/doxygen/html">here</a>.
 
 CECCO requires C++20. It is developed and tested with GCC 15 and Apple Clang 21. Older compilers may work, but are not part of the supported compatibility target. Clang 14 and older are not supported.
 
