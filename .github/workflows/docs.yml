@@ -12,8 +12,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: github-pages
-  cancel-in-progress: true
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -36,13 +36,19 @@ jobs:
       - name: Build Doxygen
         run: doxygen Doxyfile
 
-      - name: Merge Doxygen into Pages output
+      - name: Merge Doxygen into website
         run: |
           rm -rf demos/doxygen/html
           mkdir -p demos/doxygen/html
           cp -R doc/html/. demos/doxygen/html/
 
-      - name: Configure GitHub Pages
+      - name: Verify output
+        run: |
+          test -f demos/index.html
+          test -f demos/doxygen/html/index.html
+          find demos -maxdepth 3 -type f | sort | head -100
+
+      - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
@@ -54,11 +60,15 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
 
+    permissions:
+      pages: write
+      id-token: write
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@v4
