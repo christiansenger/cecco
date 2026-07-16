@@ -17,6 +17,7 @@
 #define CODES_HPP
 
 #include <bit>
+#include <queue>
 
 #include "code_bounds.hpp"
 #include "graphs.hpp"
@@ -37,7 +38,6 @@
 #include <limits>
 #include <numeric>
 #include <optional>
-#include <queue>
 #include <random>
 #include <ranges>
 #include <set>
