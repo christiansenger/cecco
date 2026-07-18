@@ -2,7 +2,7 @@
  * @file helpers.hpp
  * @brief Utility functions and mathematical helpers
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.1
+ * @version 2.2.1
  * @date 2026
  *
  * @copyright
@@ -283,6 +283,35 @@ inline InfInt bin(const InfInt& n, InfInt k) {
 }
 
 /**
+ * @brief Sierpinski triangle (Pascal's triangle modulo p)
+ *
+ * Provides binomial coefficients `C(n,k) mod p` without overflow or multi-precision arithmetic.
+ */
+class SierpinskiTriangle {
+   public:
+    /**
+     * @brief Precompute `C(n,k) mod p` for all n <= n_max and k <= k_max
+     * @throws std::invalid_argument if p is zero
+     */
+    SierpinskiTriangle(size_t n_max, size_t k_max, size_t p) : k_max(k_max), table((n_max + 1) * (k_max + 1)) {
+        if (p == 0) throw std::invalid_argument("SierpinskiTriangle modulus must be positive!");
+        for (size_t n = 0; n <= n_max; ++n) {
+            table[n * (k_max + 1)] = 1 % p;
+            for (size_t k = 1; k <= std::min(n, k_max); ++k)
+                table[n * (k_max + 1) + k] =
+                    (table[(n - 1) * (k_max + 1) + k - 1] + table[(n - 1) * (k_max + 1) + k]) % p;
+        }
+    }
+
+    /// @brief `C(n,k) mod p`, zero whenever k > n; k must not exceed the table's k_max
+    size_t operator()(size_t n, size_t k) const { return k > n ? 0 : table[n * (k_max + 1) + k]; }
+
+   private:
+    size_t k_max;
+    std::vector<size_t> table;
+};
+
+/**
  * @brief Exponentiation by square-and-multiply
  * @tparam T Type supporting multiplication and, for negative exponents, division
  * @param b Base value
@@ -369,7 +398,7 @@ namespace details {
  * @param count Number of candidates tied for best so far, including the current one (≥ 1)
  * @return true with probability 1/count
  *
- * Reservoir sampling with a reservoir of size one — Algorithm R (Wikipedia, "Reservoir
+ * Reservoir sampling with a reservoir of size one, Algorithm R (Wikipedia, "Reservoir
  * sampling"): for the i-th stream item draw `randomInteger(1, i)` and keep it iff the draw is 1,
  * i.e. with probability 1/i. Passing the running tie count (incremented for the current
  * candidate) thus leaves every tied candidate equally likely to be the one finally kept. Used by
@@ -525,6 +554,10 @@ class Cache {
  * Stores one optional value together with a `std::once_flag`. Use `call_once()` to guard
  * lazy initialization when multiple threads may read the same object. Copying or moving a
  * cache copies or moves the stored value, if any, and creates a fresh once flag.
+ *
+ * @note Classes containing `OnceCache` members need no hand-written copy or move operations:
+ * compiler-generated memberwise operations use the cache's copy and move operations, transferring
+ * the cached value while giving each destination cache its own fresh `std::once_flag`.
  *
  * @warning Concurrent reads through `call_once()` are thread-safe. Assignment, `emplace()`, and
  * manual value changes are not synchronization points and must not race with other operations.

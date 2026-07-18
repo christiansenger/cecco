@@ -131,7 +131,7 @@ concept FieldType =
  * `get_multiplicative_order()` and `get_additive_order()`.
  *
  * Cross-field constructors (embeddings between subfield and superfield) are expected but not
- * enforced by the concept — they live in the concrete classes.
+ * enforced by the concept: they live in the concrete classes.
  *
  * @note Satisfied by @ref CECCO::Fp, @ref CECCO::Ext, @ref CECCO::Iso. Not by @ref CECCO::Rationals
  * (characteristic 0).
@@ -250,7 +250,7 @@ concept PolynomialType = details::is_polynomial_v<T>;
  * Satisfied by @ref FiniteFieldType, @ref SignedIntType, `Rationals<InfInt>`, and by
  * `Polynomial<C>` exactly when C is itself reliably comparable (polynomials are kept in
  * canonical pruned form, so coefficient-wise comparison is mathematical equality). Excludes
- * `double` and `std::complex<double>` — and polynomials over them — because rounding makes
+ * `double` and `std::complex<double>` (and polynomials over them) because rounding makes
  * comparison unreliable. Used by algorithms that need stable equality (e.g. Hamming weight,
  * structural matrix tests).
  */
@@ -315,7 +315,7 @@ class Iso;
  * @tparam A First field type
  * @tparam B Second field type
  *
- * Two finite fields of the same cardinality are isomorphic. The check is on size only — the
+ * Two finite fields of the same cardinality are isomorphic. The check is on size only, the
  * explicit isomorphism (a concrete field homomorphism) is computed by @ref CECCO::Isomorphism.
  *
  * @section Usage_Examples
@@ -379,7 +379,7 @@ struct degree_over_prime<Iso<MAIN, OTHERS...>> {
  *
  * The relationship is recorded by **construction**, not by mathematical containment. If `F16` is
  * built directly as `Ext<F2, …>`, then `is_subfield_of_v<F16, F4>` is `false` even though
- * mathematically 𝔽₄ ⊆ 𝔽₁₆ — `F4` simply does not appear in `F16`'s construction. This is the
+ * mathematically 𝔽₄ ⊆ 𝔽₁₆: `F4` simply does not appear in `F16`'s construction. This is the
  * primitive that backs the user-facing @ref CECCO::SubfieldOf concept.
  */
 template <FiniteFieldType SUPERFIELD, FiniteFieldType SUBFIELD>
@@ -682,7 +682,7 @@ struct iso_info<Iso<MAIN, OTHERS...>> {
  * Computes the bridge field used by the cross-field constructors of @ref CECCO::Ext and
  * @ref CECCO::Iso. Procedure: intersect `collect_subfields_t<F>` with `collect_subfields_t<G>`
  * and pick the largest by `get_size()`. As a tiebreaker, if that largest field is isomorphic
- * to an `Iso` operand, the `Iso` itself is returned instead — this preserves the merged-tower
+ * to an `Iso` operand, the `Iso` itself is returned instead, which preserves the merged-tower
  * structure that the user explicitly built.
  *
  * @section Usage_Examples

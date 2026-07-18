@@ -2,7 +2,7 @@
  * @file matrices.hpp
  * @brief Matrix arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.1
+ * @version 2.3.2
  * @date 2026
  *
  * @copyright
@@ -20,7 +20,7 @@
  * operations bridge through @ref CECCO::largest_common_subfield_t.
  *
  * The class template `Matrix<T>` automatically tracks structural type
- * (@ref CECCO::details::matrix_type_t — Zero, Identity, Diagonal, Vandermonde, Toeplitz)
+ * (@ref CECCO::details::matrix_type_t: Zero, Identity, Diagonal, Vandermonde, Toeplitz)
  * to enable specialized fast paths. The type tag is transparent to callers; factories
  * (`IdentityMatrix`, `DiagonalMatrix`, `VandermondeMatrix`, …) all return `Matrix<T>`.
  *
@@ -351,7 +351,7 @@ class Matrix {
      * @note The type tag is re-detected afterwards, so incidental structure (e.g. an all-zero
      * draw over a small field) is recognized.
      *
-     * @note Unavailable for polynomial components: randomizing a polynomial needs a degree —
+     * @note Unavailable for polynomial components: randomizing a polynomial needs a degree,
      * see @ref CECCO::Polynomial::randomize.
      */
     Matrix& randomize()
@@ -517,7 +517,7 @@ class Matrix {
      *
      * @return All q^rank vectors in span(rows), where q = |T|
      *
-     * @warning Size grows as q^rank — only practical for small fields and small rank.
+     * @warning Size grows as q^rank, only practical for small fields and small rank.
      */
     std::vector<Vector<T>> rowspace() const
         requires FieldType<T>;
@@ -799,7 +799,7 @@ class Matrix {
      * @param j Column index
      * @return Reference to this matrix after erasing
      *
-     * Marks the component as erased; field arithmetic on erased elements is undefined — see
+     * Marks the component as erased; field arithmetic on erased elements is undefined, see
      * @ref CECCO_ERASURE_SUPPORT and the erase()/unerase() interface in fields.hpp.
      *
      * @warning An erased element can no longer participate in field operations or property
@@ -970,26 +970,26 @@ class Matrix {
     /**
      * @brief Row echelon form (REF), with a binary-field fast path
      *
-     * @param rank Optional out-parameter; if non-null, receives the rank
+     * @param rank_ptr Optional out-parameter; if non-null, receives the rank
      * @return Reference to this matrix after the reduction
      *
-     * Forward Gaussian elimination only — cheaper than RREF when only the rank or a
+     * Forward Gaussian elimination only, cheaper than RREF when only the rank or a
      * triangularised form is needed. For Fp<2>, pivot scaling is skipped at compile time. Rank
-     * is cached when @p rank is non-null.
+     * is cached when @p rank_ptr is non-null.
      */
-    Matrix<T>& ref(size_t* rank = nullptr)
+    Matrix<T>& ref(size_t* rank_ptr = nullptr)
         requires FieldType<T>;
 
     /**
      * @brief Reduced row echelon form (RREF)
      *
-     * @param rank Optional out-parameter; if non-null, receives the rank
+     * @param rank_ptr Optional out-parameter; if non-null, receives the rank
      * @return Reference to this matrix after the reduction
      *
      * Two phases: forward elimination (REF) followed by backward elimination. Rank is always
      * cached.
      */
-    Matrix<T>& rref(size_t* rank = nullptr)
+    Matrix<T>& rref(size_t* rank_ptr = nullptr)
         requires FieldType<T>;
 
     /**
@@ -1056,7 +1056,7 @@ class Matrix {
     /// @brief When true, accesses interpret storage as transposed (no data movement)
     bool transposed = false;
 
-    /// @brief Structural tag — see @ref details::matrix_type_t
+    /// @brief Structural tag, see @ref details::matrix_type_t
     details::matrix_type_t type = details::Zero;
 
     /// @brief Cache for matrix rank and Hamming weight (invalidated by mutating operations)
@@ -1310,9 +1310,9 @@ Matrix<T>::Matrix(std::initializer_list<std::initializer_list<T>> l) : m(l.size(
     data.resize(m * n, T(0));
 
     size_t i = 0;
-    for (const auto& row : l) {
+    for (auto row = l.begin(); row != l.end(); ++row) {
         size_t j = 0;
-        for (const auto& val : row) set_component(i, j++, val);
+        for (auto val = row->begin(); val != row->end(); ++val) set_component(i, j++, *val);
         ++i;
     }
     determine_type_tag();
@@ -1780,8 +1780,7 @@ Polynomial<U> Matrix<T>::characteristic_polynomial() const {
         for (size_t i = 0; i <= m; ++i) res.set_coefficient(m - i, P(i, 0));
         return res;
     } else if (type == details::Zero) {
-        Polynomial<T> res({0, 1});
-        return res ^ m;
+        return Monomial<T>(m, T(1));
     } else if (type == details::Diagonal) {
         Polynomial<T> res({1});
         for (size_t mu = 0; mu < m; ++mu) res *= Polynomial<T>({-(*this)(mu, mu), T(1)});
@@ -2364,8 +2363,8 @@ Matrix<T>& Matrix<T>::delete_columns(const std::vector<size_t>& v) {
     if (v.empty()) return *this;
 
     std::set<size_t> indices(v.begin(), v.end());
-    for (size_t idx : indices) {
-        if (idx >= n) throw std::invalid_argument("trying to delete non-existent column");
+    for (const size_t i : indices) {
+        if (i >= n) throw std::invalid_argument("trying to delete non-existent column");
     }
 
     Matrix res(m, n - indices.size());
@@ -2382,9 +2381,10 @@ Matrix<T>& Matrix<T>::delete_columns(const std::vector<size_t>& v) {
         }
         for (size_t i = 0; i < m; ++i) {
             size_t out = 0;
-            for (const auto& [begin, end] : runs) {
-                std::copy(data.begin() + i * n + begin, data.begin() + i * n + end, res.data.begin() + i * res.n + out);
-                out += end - begin;
+            for (auto run = runs.cbegin(); run != runs.cend(); ++run) {
+                std::copy(data.begin() + i * n + run->first, data.begin() + i * n + run->second,
+                          res.data.begin() + i * res.n + out);
+                out += run->second - run->first;
             }
         }
     } else {
@@ -2411,8 +2411,8 @@ Matrix<T>& Matrix<T>::delete_rows(const std::vector<size_t>& v) {
     if (v.empty()) return *this;
 
     std::set<size_t> indices(v.begin(), v.end());
-    for (size_t idx : indices) {
-        if (idx >= m) throw std::invalid_argument("trying to delete non-existent row");
+    for (const size_t i : indices) {
+        if (i >= m) throw std::invalid_argument("trying to delete non-existent row");
     }
 
     Matrix res(m - indices.size(), n);
@@ -2477,13 +2477,13 @@ Matrix<T>& Matrix<T>::erase_columns(const std::vector<size_t>& v)
     if (v.empty()) return *this;
 
     std::set<size_t> indices(v.begin(), v.end());
-    for (size_t idx : indices) {
-        if (idx >= n) throw std::invalid_argument("trying to erase non-existent column");
+    for (const size_t i : indices) {
+        if (i >= n) throw std::invalid_argument("trying to erase non-existent column");
     }
 
-    std::for_each(indices.crbegin(), indices.crend(), [&](auto col) {
+    for (const size_t col : indices) {
         for (size_t row = 0; row < m; ++row) erase_component(row, col);
-    });
+    }
 
     type = details::Generic;
     cache.invalidate();
@@ -2497,13 +2497,13 @@ Matrix<T>& Matrix<T>::erase_rows(const std::vector<size_t>& v)
     if (v.empty()) return *this;
 
     std::set<size_t> indices(v.begin(), v.end());
-    for (size_t idx : indices) {
-        if (idx >= m) throw std::invalid_argument("trying to erase non-existent row");
+    for (const size_t i : indices) {
+        if (i >= m) throw std::invalid_argument("trying to erase non-existent row");
     }
 
-    std::for_each(indices.crbegin(), indices.crend(), [&](auto row) {
+    for (const size_t row : indices) {
         for (size_t col = 0; col < n; ++col) erase_component(row, col);
-    });
+    }
 
     type = details::Generic;
     cache.invalidate();
@@ -2515,13 +2515,13 @@ Matrix<T>& Matrix<T>::unerase_columns(const std::vector<size_t>& v)
     requires FieldType<T>
 {
     std::set<size_t> indices(v.begin(), v.end());
-    for (size_t idx : indices) {
-        if (idx >= n) throw std::invalid_argument("trying to un-erase non-existent column");
+    for (const size_t i : indices) {
+        if (i >= n) throw std::invalid_argument("trying to un-erase non-existent column");
     }
 
-    std::for_each(indices.crbegin(), indices.crend(), [&](auto col) {
+    for (const size_t col : indices) {
         for (size_t row = 0; row < m; ++row) unerase_component(row, col);
-    });
+    }
 
     type = details::Generic;
     cache.invalidate();
@@ -2533,13 +2533,13 @@ Matrix<T>& Matrix<T>::unerase_rows(const std::vector<size_t>& v)
     requires FieldType<T>
 {
     std::set<size_t> indices(v.begin(), v.end());
-    for (size_t idx : indices) {
-        if (idx >= m) throw std::invalid_argument("trying to un-erase non-existent row");
+    for (const size_t i : indices) {
+        if (i >= m) throw std::invalid_argument("trying to un-erase non-existent row");
     }
 
-    std::for_each(indices.crbegin(), indices.crend(), [&](auto row) {
+    for (const size_t row : indices) {
         for (size_t col = 0; col < n; ++col) unerase_component(row, col);
-    });
+    }
 
     type = details::Generic;
     cache.invalidate();
@@ -2626,7 +2626,7 @@ constexpr Matrix<T>& Matrix<T>::transpose() {
 }
 
 template <ComponentType T>
-Matrix<T>& Matrix<T>::ref(size_t* rank)
+Matrix<T>& Matrix<T>::ref(size_t* rank_ptr)
     requires FieldType<T>
 {
     if (type == details::Generic || type == details::Toeplitz) {
@@ -2640,12 +2640,12 @@ Matrix<T>& Matrix<T>::ref(size_t* rank)
 
         cache.template invalidate<Weight>();
         cache.template set<Rank>(h);
-        if (rank != nullptr) *rank = h;
+        if (rank_ptr != nullptr) *rank_ptr = h;
         if (type == details::Toeplitz) type = details::Generic;
 
     } else if (type == details::Vandermonde) {
         // For Vandermonde matrices, calculate RREF (as special case of REF)
-        return rref(rank);
+        return rref(rank_ptr);
     } else if (type == details::Diagonal) {
         std::vector<size_t> zero_rows;
         size_t r = 0;
@@ -2667,19 +2667,19 @@ Matrix<T>& Matrix<T>::ref(size_t* rank)
         }
 
         cache.template set<Rank>(r);
-        if (rank != nullptr) *rank = r;
+        if (rank_ptr != nullptr) *rank_ptr = r;
     } else if (type == details::Identity) {
         cache.template set<Rank>(m);
-        if (rank != nullptr) *rank = m;
+        if (rank_ptr != nullptr) *rank_ptr = m;
     } else if (type == details::Zero) {
         cache.template set<Rank>(0);
-        if (rank != nullptr) *rank = 0;
+        if (rank_ptr != nullptr) *rank_ptr = 0;
     }
     return *this;
 }
 
 template <ComponentType T>
-Matrix<T>& Matrix<T>::rref(size_t* rank)
+Matrix<T>& Matrix<T>::rref(size_t* rank_ptr)
     requires FieldType<T>
 {
     if (type == details::Generic || type == details::Toeplitz) {
@@ -2692,7 +2692,7 @@ Matrix<T>& Matrix<T>::rref(size_t* rank)
             rref_backward_elimination_kernel<true>(this->data.data(), m, n, r);
 
         cache.template set<Rank>(r);
-        if (rank != nullptr) *rank = r;
+        if (rank_ptr != nullptr) *rank_ptr = r;
         if (r == m && m == n)
             type = details::Identity;
         else if (r == n && n > 0)
@@ -2703,7 +2703,7 @@ Matrix<T>& Matrix<T>::rref(size_t* rank)
         if (m == n) {
             // Case 1: Square Vandermonde -> I
             *this = IdentityMatrix<T>(m);
-            if (rank != nullptr) *rank = m;
+            if (rank_ptr != nullptr) *rank_ptr = m;
             type = details::Identity;
 
         } else if (m < n) {
@@ -2718,7 +2718,7 @@ Matrix<T>& Matrix<T>::rref(size_t* rank)
             this->horizontal_join(std::move(M));
 
             cache.template set<Rank>(m);
-            if (rank != nullptr) *rank = m;
+            if (rank_ptr != nullptr) *rank_ptr = m;
             type = details::Generic;
 
         } else {
@@ -2727,7 +2727,7 @@ Matrix<T>& Matrix<T>::rref(size_t* rank)
             this->vertical_join(ZeroMatrix<T>(m - n, n));
 
             cache.template set<Rank>(n);
-            if (rank != nullptr) *rank = n;
+            if (rank_ptr != nullptr) *rank_ptr = n;
             type = details::Toeplitz;  // very special case of Toeplitz...
         }
     } else if (type == details::Diagonal) {
@@ -2751,13 +2751,13 @@ Matrix<T>& Matrix<T>::rref(size_t* rank)
         }
 
         cache.template set<Rank>(r);
-        if (rank != nullptr) *rank = r;
+        if (rank_ptr != nullptr) *rank_ptr = r;
     } else if (type == details::Zero) {
         cache.template set<Rank>(0);
-        if (rank != nullptr) *rank = 0;
+        if (rank_ptr != nullptr) *rank_ptr = 0;
     } else if (type == details::Identity) {
         cache.template set<Rank>(m);
-        if (rank != nullptr) *rank = m;
+        if (rank_ptr != nullptr) *rank_ptr = m;
     }
     return *this;
 }
@@ -3675,7 +3675,7 @@ constexpr bool operator!=(const Matrix<T>& lhs, const Matrix<T>& rhs) {
  *
  * @return Reference to @p os for chaining
  *
- * Columns are separated by one blank — by three for polynomial components, whose own rendering
+ * Columns are separated by one blank, by three for polynomial components, whose own rendering
  * contains blanks. An empty matrix is printed as "(empty matrix)".
  */
 template <ComponentType T>

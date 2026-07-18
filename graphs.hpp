@@ -14,18 +14,14 @@
  *
  * @section Description
  *
- * Graph structures and decoding workspaces used by the decoders in `codes.hpp`. A trellis stores
- * vertices in layers and field-labelled edges between adjacent layers; its nested workspaces back
- * Viterbi and BCJR decoding, and it also provides trellis products, segment merging, text output, and
- * TikZ export. A Tanner graph is the bipartite variable-/check-node graph of a parity-check matrix; its
- * nested workspace backs sum-product (belief propagation) decoding. Soft workspaces derive their costs
- * from symbol-level channel/a-priori LLRs (q−1 per symbol), see
- * @ref CECCO::details::symbol_costs_from_llrs.
+ * Layered trellises and parity-check Tanner graphs used by the Viterbi, BCJR, and
+ * belief-propagation decoders in `codes.hpp`.
  */
 
 #ifndef GRAPHS_HPP
 #define GRAPHS_HPP
 
+#include <memory>
 #include <variant>
 
 #include "fields.hpp"
@@ -121,17 +117,13 @@ struct CheckEdge {
 };
 
 /**
- * @brief Per-segment symbol costs from symbol-level LLRs
- *
+ * @brief Convert one column of symbol-level LLRs to trellis costs
  * @tparam T Finite field of the trellis edge labels
- * @param llrs Symbol-level LLR matrix with q−1 rows; column s holds the LLRs of segment s
- * @param s Segment (column) index
- * @return Cost of every symbol of T, indexed by label
+ * @param llrs Matrix whose entry `(a - 1, s)` is `ln(P(r_s | 0) / P(r_s | a))`
+ * @param s Symbol index
+ * @return Costs indexed by field-element label, with cost zero for symbol 0
  *
- * Row a−1 of column s holds L_s(a) = ln(P(·|0)/P(·|a)) for symbol a = 1, …, q−1. The cost of
- * symbol 0 is 0 and the cost of symbol a is L_s(a), so lower cost means more likely. This is the
- * single soft-input format shared by all soft-input decoders. Non-finite LLRs (e.g. from a
- * perfect channel) are clamped to ±1e6 so the decoders never see ±∞.
+ * Lower cost means greater likelihood. Non-finite LLRs are clamped to ±1e6.
  */
 template <FiniteFieldType T>
 std::array<double, T::get_size()> symbol_costs_from_llrs(const Matrix<double>& llrs, size_t s) {
@@ -162,29 +154,14 @@ template <FieldType T>
 struct TannerGraph;
 
 /**
- * @brief Trellis with field-labelled edges between consecutive layers
- *
+ * @brief Layered trellis with field-labelled edges
  * @tparam T Field type used for edge labels
  *
- * Vertices are stored by layer in @ref V and edges by segment in @ref E. Segment `s`
- * connects layer `s` to layer `s + 1`. The invariant is `V[s][i].id == i`;
- * Viterbi and BCJR workspaces index their arrays by edge `from_id` and `to_id`.
+ * Segment `s` connects layers `s` and `s + 1`. Vertices are stored in @ref V with
+ * the invariant `V[s][i].id == i`; decoding workspaces use these indices for path metrics.
  *
- * Use @ref add_edge to build a trellis manually, @ref operator* to form trellis
- * products, and @ref merge_segments to combine several base-field segments into
- * one extension-field segment. Decoders in `codes.hpp` use the nested workspace
- * types for path metrics and edge costs.
- *
- * @code{.cpp}
- * Trellis<Fp<2>> Tr;
- * Tr.add_edge(0, 0, 0, 0);
- * Tr.add_edge(0, 0, 1, 1);
- * size_t depth = Tr.get_maximum_depth();
- * Tr.export_as_tikz("trellis.tikz");  // for fields of size <= 64
- * @endcode
- *
- * @see @ref Vector<T> for received words and LLR vectors
- * @see @ref FiniteFieldType for TikZ export constraints
+ * Supports trellis products, segment merging, Viterbi and BCJR workspaces, and
+ * text and TikZ export.
  */
 template <FieldType T>
 struct Trellis {
@@ -551,10 +528,10 @@ Trellis<T> Trellis<T>::operator*(const Trellis& other) const {
     Trellis result;
 
     for (size_t s = 0; s < num_segments; ++s) {
-        for (const auto& e1 : E[s]) {
-            for (const auto& e2 : other.E[s]) {
-                result.add_edge(s, get_or_add(s, e1.from_id, e2.from_id), get_or_add(s + 1, e1.to_id, e2.to_id),
-                                e1.value + e2.value);
+        for (auto e1 = E[s].cbegin(); e1 != E[s].cend(); ++e1) {
+            for (auto e2 = other.E[s].cbegin(); e2 != other.E[s].cend(); ++e2) {
+                result.add_edge(s, get_or_add(s, e1->from_id, e2->from_id), get_or_add(s + 1, e1->to_id, e2->to_id),
+                                e1->value + e2->value);
             }
         }
     }
@@ -565,8 +542,8 @@ Trellis<T> Trellis<T>::operator*(const Trellis& other) const {
 template <FieldType T>
 size_t Trellis<T>::get_maximum_depth() const noexcept {
     size_t max = 0;
-    for (const auto& seg : V)
-        if (seg.size() > max) max = seg.size();
+    for (size_t s = 0; s < V.size(); ++s)
+        if (V[s].size() > max) max = V[s].size();
     return max;
 }
 
@@ -925,33 +902,33 @@ Trellis<U> Trellis<T>::merge_segments() const {
     for (size_t g = 0; g < full_groups; ++g) {
         std::vector<std::vector<const details::Edge<T>*>> paths;
 
-        for (const auto& e : E[g * m]) paths.push_back({&e});
+        for (auto e = E[g * m].cbegin(); e != E[g * m].cend(); ++e) paths.push_back({std::to_address(e)});
 
         for (size_t step = 1; step < m; ++step) {
             std::vector<std::vector<const details::Edge<T>*>> next;
-            for (const auto& path : paths)
-                for (const auto& e : E[g * m + step])
-                    if (e.from_id == path.back()->to_id) {
-                        auto ext = path;
-                        ext.push_back(&e);
+            for (auto path = paths.cbegin(); path != paths.cend(); ++path)
+                for (auto e = E[g * m + step].cbegin(); e != E[g * m + step].cend(); ++e)
+                    if (e->from_id == path->back()->to_id) {
+                        auto ext = *path;
+                        ext.push_back(std::to_address(e));
                         next.push_back(std::move(ext));
                     }
             paths = std::move(next);
         }
 
-        for (const auto& path : paths) {
+        for (auto path = paths.cbegin(); path != paths.cend(); ++path) {
             Vector<T> v(m);
-            for (size_t i = 0; i < m; ++i) v.set_component(i, path[i]->value);
-            result.add_edge(seg, path.front()->from_id, path.back()->to_id, U(v));
+            for (size_t i = 0; i < m; ++i) v.set_component(i, (*path)[i]->value);
+            result.add_edge(seg, path->front()->from_id, path->back()->to_id, U(v));
         }
         ++seg;
     }
 
     for (size_t s = full_groups * m; s < n; ++s) {
-        for (const auto& e : E[s]) {
+        for (auto e = E[s].cbegin(); e != E[s].cend(); ++e) {
             Vector<T> v(m, T(0));
-            v.set_component(0, e.value);
-            result.add_edge(seg, e.from_id, e.to_id, U(v));
+            v.set_component(0, e->value);
+            result.add_edge(seg, e->from_id, e->to_id, U(v));
         }
         ++seg;
     }
@@ -960,24 +937,12 @@ Trellis<U> Trellis<T>::merge_segments() const {
 }
 
 /**
- * @brief Tanner graph of a parity-check matrix, with field-labelled check-to-variable edges
- *
+ * @brief Tanner graph of a parity-check matrix
  * @tparam T Field type used for edge labels
  *
- * Holds `n` variable nodes and one check node per parity-check equation. An edge `(check, var_id,
- * value)` records that variable `var_id` enters parity check `check` with coefficient `value`, i.e.
- * the nonzero entries of a parity-check matrix H. Build it with @ref add_edge, then use the nested
- * @ref BP_Workspace for sum-product (belief propagation) decoding in `codes.hpp`. TikZ export is
- * available for finite fields of size at most 64.
- *
- * @code{.cpp}
- * TannerGraph<Fp<2>> g(7);          // 7 variable nodes
- * g.add_edge(0, 0, 1);              // variable 0 enters check 0
- * g.add_edge(0, 1, 1);
- * g.export_as_tikz("tanner.tikz");  // for fields of size <= 64
- * @endcode
- *
- * @see @ref Trellis<T> for the Viterbi/BCJR counterpart
+ * Contains `n` variable nodes and one node per parity-check equation. An edge
+ * `(check, variable, value)` represents a nonzero parity-check coefficient.
+ * @ref BP_Workspace provides sum-product decoding state.
  */
 template <FieldType T>
 struct TannerGraph {

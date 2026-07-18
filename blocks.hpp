@@ -14,22 +14,18 @@
  *
  * @section Description
  *
- * Channel models, modulation/demodulation, and field multiplexing blocks for error-control
- * coding experiments. Provided blocks:
+ * Channels, modulation and demodulation, and extension-/subfield multiplexing blocks
+ * for coding experiments. Blocks compose left-to-right with `operator>>` and generally
+ * accept scalars, vectors, and matrices.
  *
- * - **Channels**: SDMEC (errors-and-erasures over any 𝔽_q), SDMC, BSC, BEC, BAC, AWGN, BI-AWGN.
- * - **Modulation**: NRZ and BPSK with configurable constellation.
- * - **Demodulation**: hard-decision (NRZDemapper, BPSKDemapper) and soft-decision (LLRCalculator).
- * - **Field multiplexing**: DEMUX/MUX between an extension field and a subfield; chained with
- *   BI_AWGN and LLRCalculator this realizes transmission of the binary image of a code over
- *   𝔽_{2^m} for the soft-input decoders in codes.hpp.
- * - **Chaining**: `operator>>` for left-to-right block composition.
- *
- * Most blocks expose element-wise, vector, and matrix overloads via the @ref CECCO::details::BlockProcessor
- * CRTP base; @ref CECCO::LLRCalculator defines its overloads directly because SDMEC symbols map to LLR vectors.
- *
- * @see @ref CECCO::details::BlockProcessor — CRTP foundation and chain example
- * @see @ref CECCO::SubfieldOf, @ref CECCO::ExtensionOf — concepts behind DEMUX/MUX
+ * @code{.cpp}
+ * using F2 = Fp<2>;
+ * using F4 = Ext<F2, {1, 1, 1}>;
+ * Vector<F4> c = {F4(0), F4(1), F4(2), F4(3)};
+ * BI_AWGN channel(6.0);
+ * LLRCalculator<F4> llr(channel);
+ * Matrix<double> L = c >> DEMUX<F4, F2>{} >> channel >> llr;
+ * @endcode
  */
 
 #ifndef BLOCKS_HPP
@@ -62,33 +58,19 @@ namespace CECCO {
 namespace details {
 
 /**
- * @brief CRTP base providing element-wise, vector, and matrix `operator()` overloads
- * @tparam T Derived class (CRTP)
- * @tparam InputType Element type accepted by the block
- * @tparam OutputType Element type produced by the block
+ * @brief CRTP base providing scalar, vector, and matrix block operations
+ * @tparam T Derived block type
+ * @tparam InputType Scalar input type
+ * @tparam OutputType Scalar output type
  *
- * Derived blocks implement a single-element `operator()(const InputType&)`; this base then
- * generates `Vector<OutputType> operator()(const Vector<InputType>&)` and the matrix
- * counterpart (plus rvalue versions, with in-place reuse when InputType == OutputType).
+ * Derived classes implement the scalar call operator; this base supplies vector and matrix
+ * overloads, reusing rvalue storage when input and output types match.
  *
- * Catch-all overloads accept any other @ref CECCO::FiniteFieldType and throw at runtime —
- * useful inside `if constexpr (std::is_same_v<F, InputType>)` guards in non-template
- * contexts, where the discarded branch must still compile.
+ * Calls with another finite-field type are accepted syntactically and throw at runtime,
+ * allowing otherwise discarded non-template branches to remain well-formed.
  *
- * Blocks are movable but non-copyable (@ref CECCO::details::NonCopyable, also inherited
- * directly by @ref CECCO::DEMUX / @ref CECCO::MUX): channels carry stochastic state such as
- * distribution caches and geometric countdowns, so copies would be statistically entangled —
- * construct blocks once and reference them in chains.
- *
- * @code{.cpp}
- * Vector<Fp<2>> message = {1, 0, 1, 1};
- * BPSKMapper map;
- * AWGN awgn(6.0, map.get_a(), map.get_b());
- * BPSKDemapper demap;
- *
- * Vector<Fp<2>> r;
- * message >> map >> awgn >> demap >> r;
- * @endcode
+ * @note Blocks are movable but non-copyable. Channel copies would duplicate distribution
+ * caches and stochastic countdown state, producing statistically coupled block instances.
  */
 template <typename T, typename InputType, typename OutputType>
 class BlockProcessor : private NonCopyable {
@@ -200,30 +182,18 @@ using DecoderProcessor = BlockProcessor<T, std::complex<double>, Fp<2>>;
 }  // namespace details
 
 /**
- * @brief Symmetric Discrete Memoryless Erasure Channel (SDMEC) over any finite field 𝔽_q
- * @tparam T Finite field type for channel input/output symbols
+ * @brief Symmetric errors-and-erasures channel over a finite field
+ * @tparam T Finite field of the transmitted symbols
  *
- * q-ary symmetric channel with independent error and erasure processes. Each transmitted
- * symbol is changed to a uniformly random different value with observed probability pe,
- * marked erased (overwriting any error) with observed probability px, and otherwise passed
- * through unchanged.
+ * Independently replaces a symbol by a uniformly selected different symbol with probability
+ * `pe`, then marks it erased with probability `px`; erasure takes precedence over error.
  *
- * For px = 0 this reduces to the traditional symmetric channel (use @ref CECCO::SDMC, or
- * @ref CECCO::BSC for q = 2). For pe = 0 it is the erasure channel (use @ref CECCO::BEC for
- * q = 2). Erasure support requires the @ref CECCO_ERASURE_SUPPORT macro at compile time.
+ * For `px == 0` this is an @ref CECCO::SDMC; over 𝔽₂, `pe == 0` gives an
+ * @ref CECCO::BEC. Erasures require @ref CECCO_ERASURE_SUPPORT.
  *
- * Capacity (bits/symbol):
- *   C = (1 − px) · [ log₂(q) + (1 − p̃)·log₂(1 − p̃) + p̃·log₂(p̃) − p̃·log₂(q − 1) ],
- * where p̃ = pe / (1 − px) is the conditional error probability.
- *
- * @code{.cpp}
- * using F4 = Ext<Fp<2>, {1, 1, 1}>;
- * SDMEC<F4> channel(0.05, 0.1);                    // 5% errors, 10% erasures
- * Vector<F4> r = Vector<F4>(20).randomize() >> channel;
- * double C = channel.get_capacity();
- * @endcode
- *
- * @see @ref CECCO::SDMC, @ref CECCO::BSC, @ref CECCO::BEC, @ref CECCO::BAC
+ * The capacity is
+ * `C = (1 − px)[log₂(q) + (1 − p̃)log₂(1 − p̃) + p̃log₂(p̃) − p̃log₂(q − 1)]`,
+ * where `p̃ = pe / (1 − px)`.
  */
 template <FieldType T>
 class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
@@ -357,7 +327,7 @@ double SDMEC<T>::get_capacity() const noexcept
 }
 
 /**
- * @brief Symmetric Discrete Memoryless Channel — errors only, no erasures
+ * @brief Symmetric Discrete Memoryless Channel: errors only, no erasures
  * @tparam T Finite field type for channel input/output symbols
  *
  * Convenience wrapper for `SDMEC<T>(pe, 0.0)` with a single-parameter constructor.
@@ -376,7 +346,7 @@ class SDMC : public SDMEC<T> {
 };
 
 /**
- * @brief Binary Symmetric Channel — type alias for `SDMC<Fp<2>>`
+ * @brief Binary Symmetric Channel: type alias for `SDMC<Fp<2>>`
  *
  * Bits are flipped with probability pe.
  *
@@ -385,7 +355,7 @@ class SDMC : public SDMEC<T> {
 using BSC = SDMC<Fp<2>>;
 
 /**
- * @brief Binary Erasure Channel — symbols are received correctly or marked erased
+ * @brief Binary Erasure Channel: symbols are received correctly or marked erased
  *
  * Convenience wrapper for `SDMEC<Fp<2>>(0.0, px)`. Requires @ref CECCO_ERASURE_SUPPORT.
  *
@@ -401,7 +371,7 @@ class BEC : public SDMEC<Fp<2>> {
 };
 
 /**
- * @brief Binary Asymmetric Channel (Z-channel) — 0 is preserved; 1 flips to 0 with probability p
+ * @brief Binary Asymmetric Channel (Z-channel): 0 is preserved; 1 flips to 0 with probability p
  *
  * @code{.cpp}
  * BAC bac(0.1);                            // 10% probability that 1 flips to 0
@@ -519,7 +489,7 @@ class NRZMapper : public details::EncoderProcessor<NRZMapper> {
 };
 
 /**
- * @brief Binary Phase Shift Keying mapper — `NRZMapper` with a = 0, b = 2
+ * @brief Binary Phase Shift Keying mapper: `NRZMapper` with a = 0, b = 2
  *
  * Antipodal constellation {−1, +1}, Eb = 1.
  *
@@ -636,7 +606,7 @@ double AWGN::calculate_pe(double EbNodB, double Eb, double b) noexcept {
 }
 
 /**
- * @brief Binary-Input AWGN — fused @ref NRZMapper + @ref AWGN block
+ * @brief Binary-Input AWGN: fused @ref NRZMapper + @ref AWGN block
  *
  * Maps binary inputs through an internal NRZMapper and then through AWGN, yielding noisy
  * complex symbols ready for hard decision (@ref NRZDemapper) or soft decision
@@ -797,7 +767,7 @@ class NRZDemapper : public details::DecoderProcessor<NRZDemapper> {
 };
 
 /**
- * @brief BPSK hard-decision demapper — `NRZDemapper` with threshold 0
+ * @brief BPSK hard-decision demapper: `NRZDemapper` with threshold 0
  *
  * @see @ref CECCO::BPSKMapper, @ref CECCO::NRZDemapper
  */
@@ -808,29 +778,14 @@ class BPSKDemapper : public NRZDemapper {
 };
 
 /**
- * @brief Log-Likelihood Ratio calculator for soft demodulation
- * @tparam T Code symbol field; sets the output format ((q−1)-row symbol-level LLR matrix)
+ * @brief Compute symbol-level log-likelihood ratios
+ * @tparam T Code-symbol field
  *
- * Turns channel observations into the symbol-level LLR matrix consumed by the soft-input decoders
- * in codes.hpp: q−1 rows, column j holding ln(P(r_j|0)/P(r_j|a)) for symbol a = 1, …, q−1. The
- * channel model is fixed at construction and selected per call by input type:
+ * Produces a `(q − 1) × n` matrix whose entry `(a − 1, j)` is
+ * `ln(P(r_j | 0) / P(r_j | a))`. Positive values favor zero; magnitude is reliability.
  *
- * - **BI-AWGN** (construct from a @ref NRZMapper + @ref AWGN pair or a @ref BI_AWGN; binary image,
- *   so T must have characteristic 2): each complex symbol gives a bit LLR b·(a − Re(r)) / σ² in
- *   nats. For a code over 𝔽_{2^m} apply it to the @ref CECCO::DEMUX'ed [T:𝔽_2]-row binary image;
- *   the matrix overload assembles the (q−1)-row symbol-level matrix (a symbol LLR is the sum of
- *   the bit LLRs selected by its nonzero coordinates). For 𝔽_2 this is one LLR per symbol.
- *
- * - **SDMEC over a prime field 𝔽_p** (construct from a @ref SDMEC): computes the symbol LLRs
- *   L_a(r) = ln(P(r|0)/P(r|a)), a = 1, …, p−1, directly from the transition probabilities. Scalar
- *   field input returns one LLR vector; vector input returns the (p−1) × n matrix. For a prime
- *   field symbol-level and prime-image coincide, so this is already the decoder format.
- *
- * Sign convention: positive LLR ⇒ symbol 0, negative ⇒ the indexed symbol; magnitude is
- * reliability. See the @ref BI_AWGN class doc for an end-to-end chain example.
- *
- * @see @ref CECCO::NRZDemapper for the hard-decision counterpart
- * @see @ref CECCO::SDMEC, @ref CECCO::BSC, @ref CECCO::BEC for the discrete channels
+ * Supports prime-field SDMEC observations and binary-image BI-AWGN observations. BI-AWGN
+ * requires characteristic two and combines the independent bit LLRs of each extension-field symbol.
  */
 template <FiniteFieldType T = Fp<2>>
 class LLRCalculator : private details::NonCopyable {
@@ -1010,32 +965,15 @@ template <FiniteFieldType T>
 LLRCalculator(const SDMEC<T>&) -> LLRCalculator<T>;
 
 /**
- * @brief Field demultiplexer — expand 𝔽_E elements into 𝔽_S coefficient vectors/matrices
+ * @brief Expand extension-field elements into subfield coordinates
  * @tparam E Extension field
  * @tparam S Subfield of E (S ⊆ E)
  *
- * Each E element decomposes into [E:S] coefficients over S via `as_vector()`. For a `Vector<E>`
- * of length n, the resulting `Matrix<S>` has [E:S] rows and n columns; column j holds the
- * coefficients of element j in `as_vector()` order (highest level of the construction tower
- * first). For S = 𝔽_2 the output is the binary image of the input; chained with
- * @ref CECCO::BI_AWGN and a field-aware @ref CECCO::LLRCalculator it produces the symbol-level LLR
- * matrix expected by the soft-input decoders in codes.hpp.
- *
- * @code{.cpp}
- * using F2 = Fp<2>;
- * using F4 = Ext<F2, {1, 1, 1}>;          // 𝔽_4 = 𝔽_2[x]/(x² + x + 1)
- * DEMUX<F4, F2> demux;
- *
- * Vector<F4> c = {F4(0), F4(1), F4(2), F4(3)};
- * Matrix<F2> M = c >> demux;              // 2×4 binary image of c
- *
- * BI_AWGN channel(6.0);
- * LLRCalculator<F4> llr(channel);         // field-aware: assembles 𝔽_4 symbol LLRs
- * Matrix<double> L = c >> demux >> channel >> llr;   // 3×4 symbol-level LLR matrix, column per symbol
- * @endcode
+ * A vector of `n` elements of E becomes an `[E:S] × n` matrix over S. Column `j`
+ * contains the coefficients of `input[j]` in `as_vector()` construction-tower order.
+ * For `S = 𝔽₂`, this is the binary image used by binary-input channels.
  *
  * @see @ref CECCO::MUX for the inverse
- * @see @ref CECCO::Ext, @ref CECCO::SubfieldOf
  */
 template <FiniteFieldType E, FiniteFieldType S>
     requires(SubfieldOf<E, S>)
@@ -1077,7 +1015,7 @@ Matrix<S> DEMUX<E, S>::operator()(const Vector<E>& in) {
 }
 
 /**
- * @brief Field multiplexer — reconstruct 𝔽_E elements from 𝔽_S coefficients
+ * @brief Field multiplexer: reconstruct 𝔽_E elements from 𝔽_S coefficients
  * @tparam S Subfield
  * @tparam E Extension of S
  *
@@ -1085,7 +1023,7 @@ Matrix<S> DEMUX<E, S>::operator()(const Vector<E>& in) {
  * as the coefficient vector of one E element, and the output `Vector<E>` has one entry per
  * input column. `original >> DEMUX{} >> MUX{} == original` for compatible field pairs.
  *
- * @see @ref CECCO::DEMUX for the inverse direction and a usage example
+ * @see @ref CECCO::DEMUX for the inverse direction
  * @see @ref CECCO::Ext, @ref CECCO::ExtensionOf
  */
 template <FiniteFieldType S, FiniteFieldType E>

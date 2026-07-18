@@ -60,7 +60,7 @@
  *   tables baked into the binary). Mix freely within a tower.
  * - For extension fields with q ≥ @ref CECCO_COMPRESS_LUTS_FROM_Q, the addition and
  *   multiplication tables are stored compressed (upper triangle only), saving ~50 % memory.
- * - Pure CRTP — no virtual dispatch; concepts (@ref CECCO::FieldType, @ref CECCO::FiniteFieldType)
+ * - Pure CRTP, no virtual dispatch; concepts (@ref CECCO::FieldType, @ref CECCO::FiniteFieldType)
  *   enforce the interface at compile time.
  *
  * @note CompileTime mode can exceed compiler recursion / step limits for larger fields. If
@@ -108,7 +108,7 @@
  * @def CECCO_USE_LUTS_FOR_FP
  * @brief Force prime fields to use lookup tables instead of modular arithmetic
  *
- * Almost always slower than direct mod-p arithmetic — leave undefined unless you have a reason.
+ * Almost always slower than direct mod-p arithmetic. Leave undefined unless you have a reason.
  */
 #ifdef DOXYGEN
 #define CECCO_USE_LUTS_FOR_FP
@@ -185,7 +185,7 @@ class Base {
  *
  * @tparam T Derived field type (CRTP parameter)
  *
- * Most members are `= delete`, present solely to advertise the interface — derived types
+ * Most members are `= delete`, present solely to advertise the interface. Derived types
  * shadow them with their own definitions. The free arithmetic operators in this file template
  * on @ref CECCO::FieldType and dispatch directly to `T`'s compound assignments; there is no
  * virtual dispatch.
@@ -208,11 +208,11 @@ class Field : public details::Base {
     /// @name Assignment Operators
     /// @{
 
-    /// @brief Assign from `int` — derived must implement
+    /// @brief Assign from `int` (derived must implement)
     T& operator=(int l) = delete;
-    /// @brief Copy assignment — derived must implement
+    /// @brief Copy assignment (derived must implement)
     T& operator=(const T& rhs) noexcept = delete;
-    /// @brief Move assignment — derived must implement
+    /// @brief Move assignment (derived must implement)
     T& operator=(T&& rhs) noexcept = delete;
 
     /// @}
@@ -231,31 +231,31 @@ class Field : public details::Base {
     /// @brief Unary `+` on an rvalue: returns the rvalue itself
     constexpr T&& operator+() && noexcept { return static_cast<T&&>(*this); }
 
-    /// @brief Additive inverse on an lvalue — derived must implement
+    /// @brief Additive inverse on an lvalue (derived must implement)
     T operator-() const& noexcept = delete;
-    /// @brief Additive inverse on an rvalue (in place) — derived must implement
+    /// @brief In-place additive inverse on an rvalue (derived must implement)
     T& operator-() && noexcept = delete;
 
     /// @}
     /// @name Compound Assignment
     /// @{
 
-    /// @brief `*this += rhs` — derived must implement
+    /// @brief `*this += rhs` (derived must implement)
     T& operator+=(const T& rhs) noexcept = delete;
-    /// @brief `*this -= rhs` — derived must implement
+    /// @brief `*this -= rhs` (derived must implement)
     T& operator-=(const T& rhs) noexcept = delete;
-    /// @brief `*this *= rhs` — derived must implement
+    /// @brief `*this *= rhs` (derived must implement)
     T& operator*=(const T& rhs) noexcept = delete;
-    /// @brief `*this /= rhs`; throws `std::invalid_argument` if rhs is zero — derived must implement
+    /// @brief `*this /= rhs` (derived must implement), throws `std::invalid_argument` if rhs is zero
     T& operator/=(const T& rhs) = delete;
 
     /// @}
     /// @name Randomization
     /// @{
 
-    /// @brief Uniform random element of the field — derived must implement; may return the same value
+    /// @brief Uniform random element of the field (derived must implement), may return the same value
     Field& randomize() = delete;
-    /// @brief Like @ref randomize but guaranteed to differ from the current value — derived must implement
+    /// @brief Like @ref randomize but guaranteed to differ from the current value (derived must implement)
     Field& randomize_force_change() = delete;
 
     /// @}
@@ -451,7 +451,7 @@ inline constexpr std::string_view ERASURE_MARKER = "X";
  * so equality is `numerator_a * denominator_b == numerator_b * denominator_a`. Construction
  * with a zero denominator throws `std::invalid_argument`.
  *
- * Pick `T = InfInt` for true ℚ — a fixed-width `T` (e.g. `int`, `long long`) caps numerator
+ * Pick `T = InfInt` for true ℚ. A fixed-width `T` (e.g. `int`, `long long`) caps numerator
  * and denominator and silently overflows past that range.
  *
  * @section Usage_Example
@@ -1275,7 +1275,7 @@ struct LutHolder<LutType, ProviderLutType, P, F, LutMode::RunTime> {
  * through the cached map. When `SUPERFIELD` is an @ref CECCO::Iso, @ref extract walks the MAIN
  * representation first, then each of OTHERS, until it finds one that contains `SUBFIELD`.
  *
- * @warning Mathematical containment is necessary but not sufficient — `SUBFIELD` must appear in
+ * @warning Mathematical containment is necessary but not sufficient: `SUBFIELD` must appear in
  * the construction tower of `SUPERFIELD` (or in one of an `Iso`'s components). Use an `Iso` to
  * merge towers when needed.
  *
@@ -1288,7 +1288,7 @@ struct LutHolder<LutType, ProviderLutType, P, F, LutMode::RunTime> {
  *
  * Embedding<F4, F16> phi;
  * F4 a(2);
- * F16 b = phi(a);             // upcast — always succeeds
+ * F16 b = phi(a);             // upcast, always succeeds
  * F4  c = phi.extract(b);     // throws std::invalid_argument if b ∉ φ(F4)
  * @endcode
  */
@@ -1544,7 +1544,7 @@ class Isomorphism {
     /**
      * @brief Construct from a precomputed mapping table (`iso[i] = φ(A(i))`)
      *
-     * @warning No validation — incorrect input gives undefined behaviour. Internal use.
+     * @warning No validation: incorrect input gives undefined behaviour. Internal use.
      */
     constexpr Isomorphism(const std::vector<size_t>& iso) : iso(iso) {}
 
@@ -1749,7 +1749,7 @@ class Fp : public details::Field<Fp<p>> {
     /**
      * @brief Mark this element as erased (encoded as `label == max(label_t)`)
      *
-     * @warning Erased elements must not participate in field arithmetic — see
+     * @warning Erased elements must not participate in field arithmetic, see
      * @ref CECCO_ERASURE_SUPPORT.
      */
     constexpr Fp& erase() noexcept;
@@ -2358,7 +2358,7 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
      */
     static constexpr bool is_constexpr_ready() noexcept { return mode == LutMode::CompileTime; }
 
-    /// @brief Modulus polynomial f(x) — the irreducible used to construct this field
+    /// @brief Modulus polynomial f(x): the irreducible used to construct this field
     static constexpr Polynomial<B> get_modulus();
 
     /**
@@ -2389,7 +2389,7 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
     /**
      * @brief Mark this element as erased (encoded as `label == max(label_t)`)
      *
-     * @warning Erased elements must not participate in field arithmetic — see
+     * @warning Erased elements must not participate in field arithmetic, see
      * @ref CECCO_ERASURE_SUPPORT.
      */
     constexpr Ext& erase() noexcept;
@@ -2659,7 +2659,7 @@ Ext<B, modulus, mode>::Ext(const Vector<T>& v) {
         static_assert(SubfieldOf<Ext<B, modulus, mode>, T>,
                       "extension field elements can only be constructed from vectors over subfields");
 
-        // [B:T] — length of one B component in T coordinates (T need not be B's immediate base)
+        // [B:T] is the length of one B component in T coordinates (T need not be B's immediate base)
         constexpr size_t mBT = details::degree_over_prime_v<B> / details::degree_over_prime_v<T>;
 
         if (v.get_n() != get_m() * mBT)
@@ -2937,12 +2937,12 @@ Polynomial<S> Ext<B, modulus, mode>::get_minimal_polynomial() const
 
     Polynomial<Ext> res = {1};
     size_t i = 0;
-    do {
+    for (;;) {
         const Ext beta = sqm<Ext>(*this, sqm<size_t>(S::get_size(), i));
         if (i > 0 && beta == *this) break;
         res *= Polynomial<Ext>({-beta, 1});
         ++i;
-    } while (true);
+    }
 
     return Polynomial<S>(res);
 }
@@ -2996,7 +2996,7 @@ Vector<T> Ext<B, modulus, mode>::as_vector() const {
     } else {
         static_assert(SubfieldOf<Ext<B, modulus, mode>, T>,
                       "extension field elements can only be converted into vectors over subfields");
-        // [B:T] — length of one B component in T coordinates (T need not be B's immediate base)
+        // [B:T] is the length of one B component in T coordinates (T need not be B's immediate base)
         constexpr size_t mBT = details::degree_over_prime_v<B> / details::degree_over_prime_v<T>;
         const auto intermediate = as_vector<B>();  // Explicitly call with B
         Vector<T> res(get_m() * mBT);
@@ -3067,7 +3067,7 @@ std::ostream& operator<<(std::ostream& os, const Ext<B, modulus, mode>& e) {
  * @tparam OTHERS Alternative representations of the same abstract field (each `Isomorphic<MAIN, OTHER>`).
  *                Pairwise distinctness is enforced at instantiation.
  *
- * Useful for merging two construction towers that meet at the same mathematical field — e.g.
+ * Useful for merging two construction towers that meet at the same mathematical field, e.g.
  * 𝔽₁₆ built once from 𝔽₂ and once from 𝔽₄. With those two `Ext` types wrapped in an `Iso`,
  * @ref CECCO::SubfieldOf can recognise both as containing 𝔽₂ and 𝔽₄, which makes the
  * cross-field constructors of @ref CECCO::Ext and @ref CECCO::Iso pick optimal paths. The
@@ -3146,7 +3146,7 @@ class Iso : public details::Base {
      *
      * Delegates to `MAIN(Ext(...))` (or to an `OTHERS` representation when MAIN cannot reach
      * the source directly), then stores the MAIN result. All paths supported by the
-     * `Ext`-from-`Ext` constructor are available — direct copy, isomorphism, upcast, downcast,
+     * `Ext`-from-`Ext` constructor are available: direct copy, isomorphism, upcast, downcast,
      * cross-tower bridge.
      *
      * @throws std::invalid_argument if no conversion path exists (typically a downcast where
@@ -3170,8 +3170,8 @@ class Iso : public details::Base {
     /**
      * @brief Cross-field conversion from another `Iso` of the same characteristic
      *
-     * Same four-way decision as the @ref Ext cross-field constructor — direct isomorphism,
-     * upcast, downcast, or bridge via @ref details::largest_common_subfield_t — but extended
+     * Same four-way decision as the @ref Ext cross-field constructor (direct isomorphism,
+     * upcast, downcast, or bridge via @ref details::largest_common_subfield_t), but extended
      * to handle every (MAIN, OTHERS...) pairing on both sides. Each side's representation
      * tower is searched for the cheapest viable path.
      *
@@ -3250,7 +3250,7 @@ class Iso : public details::Base {
     /**
      * @brief Mark this element as erased (delegates to MAIN)
      *
-     * @warning Erased elements must not participate in field arithmetic — see
+     * @warning Erased elements must not participate in field arithmetic, see
      * @ref CECCO_ERASURE_SUPPORT.
      */
     constexpr Iso& erase() noexcept;

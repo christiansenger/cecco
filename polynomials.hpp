@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.11
+ * @version 2.3.0
  * @date 2026
  *
  * @copyright
@@ -15,8 +15,8 @@
  * @section Description
  *
  * Univariate polynomials over any @ref CECCO::CoefficientType (finite fields, `double`,
- * `std::complex<double>`, signed integers). Algorithms that need division — long division,
- * GCD, LCM, derivatives, normalisation, irreducibility test — require @ref CECCO::FieldType
+ * `std::complex<double>`, signed integers). Algorithms that need division (long division,
+ * GCD, LCM, derivatives, normalisation, irreducibility test) require @ref CECCO::FieldType
  * coefficients. Cross-field constructors between two finite fields of the same characteristic
  * route through @ref CECCO::details::largest_common_subfield_t. Polynomials are stored in
  * canonical form (leading zero coefficients pruned automatically) and evaluated by Horner.
@@ -97,7 +97,7 @@ const Polynomial<T>& ZeroPolynomial();
  * Coefficients are stored low-to-high in a contiguous buffer; the leading-zero invariant is
  * maintained by an internal `prune()` so `data.size() - 1` is the degree (when non-empty and
  * not the zero polynomial). The empty polynomial (no coefficients) is *distinct* from the
- * zero polynomial — most queries throw `std::invalid_argument` on an empty polynomial.
+ * zero polynomial: most queries throw `std::invalid_argument` on an empty polynomial.
  *
  * Methods that need division are gated by `requires FieldType<T>`; methods that compare
  * against zero (degree, Hamming weight, …) are gated by `requires ReliablyComparableType<T>`.
@@ -397,7 +397,7 @@ class Polynomial {
     /**
      * @brief Test irreducibility by trial division against every monic polynomial of degree ≤ deg/2
      *
-     * Cost grows as q^{deg/2} in field size — practical only for small fields and small degrees.
+     * Cost grows as q^{deg/2} in field size, practical only for small fields and small degrees.
      *
      * @throws std::invalid_argument if `*this` is empty
      */
@@ -464,6 +464,20 @@ class Polynomial {
 
     /// @brief Reciprocal: reverse coefficients, sending p(x) to xⁿ · p(1/x)
     constexpr Polynomial& reciprocal();
+
+    /**
+     * @brief Multiply by x^s by prepending `s` zero coefficients (the zero polynomial is unchanged)
+     * @throws std::invalid_argument if `*this` is empty
+     */
+    constexpr Polynomial& shift_up(size_t s)
+        requires ReliablyComparableType<T>;
+
+    /**
+     * @brief Floor-divide by x^s by dropping the `s` lowest coefficients; degree < `s` yields the
+     * zero polynomial
+     * @throws std::invalid_argument if `*this` is empty
+     */
+    constexpr Polynomial& shift_down(size_t s);
 
     /// @brief Make monic by dividing every coefficient by the leading one (no-op on zero or already-monic)
     constexpr Polynomial& normalize()
@@ -785,7 +799,12 @@ Polynomial<T>& Polynomial<T>::Hasse_differentiate(size_t s)
         cache.template set<Weight>(0);
         return *this;
     }
-    for (size_t i = 0; i <= d - s; ++i) data[i] = bin<size_t>(i + s, s) * data[i + s];
+    if constexpr (FiniteFieldType<T>) {
+        const SierpinskiTriangle triangle(d, s, T::get_characteristic());
+        for (size_t i = 0; i <= d - s; ++i) data[i] = triangle(i + s, s) * data[i + s];
+    } else {
+        for (size_t i = 0; i <= d - s; ++i) data[i] = bin<size_t>(i + s, s) * data[i + s];
+    }
     data.resize(data.size() - s);
     prune();
     cache.invalidate();
@@ -890,6 +909,31 @@ template <CoefficientType T>
 constexpr Polynomial<T>& Polynomial<T>::reciprocal() {
     std::reverse(data.begin(), data.end());
     prune();  // a zero constant term in the original becomes a leading zero after reversal
+    return *this;
+}
+
+template <CoefficientType T>
+constexpr Polynomial<T>& Polynomial<T>::shift_up(size_t s)
+    requires ReliablyComparableType<T>
+{
+    if (data.empty()) throw std::invalid_argument("trying to shift empty polynomial");
+    if (s == 0 || is_zero()) return *this;
+    data.insert(data.begin(), s, T(0));  // the weight is unchanged, so the cache stays valid
+    return *this;
+}
+
+template <CoefficientType T>
+constexpr Polynomial<T>& Polynomial<T>::shift_down(size_t s) {
+    if (data.empty()) throw std::invalid_argument("trying to shift empty polynomial");
+    if (s == 0) return *this;
+    if (s >= data.size()) {
+        data.resize(1);
+        data[0] = T(0);
+        cache.template set<Weight>(0);
+        return *this;
+    }
+    data.erase(data.begin(), data.begin() + s);  // the leading coefficient stays, so no prune needed
+    cache.invalidate();
     return *this;
 }
 
@@ -1183,6 +1227,38 @@ constexpr Polynomial<T> reciprocal(Polynomial<T>&& poly) {
 }
 
 template <CoefficientType T>
+constexpr Polynomial<T> shift_up(const Polynomial<T>& poly, size_t s)
+    requires ReliablyComparableType<T>
+{
+    Polynomial<T> res(poly);
+    res.shift_up(s);
+    return res;
+}
+
+template <CoefficientType T>
+constexpr Polynomial<T> shift_up(Polynomial<T>&& poly, size_t s)
+    requires ReliablyComparableType<T>
+{
+    Polynomial<T> res(std::move(poly));
+    res.shift_up(s);
+    return res;
+}
+
+template <CoefficientType T>
+constexpr Polynomial<T> shift_down(const Polynomial<T>& poly, size_t s) {
+    Polynomial<T> res(poly);
+    res.shift_down(s);
+    return res;
+}
+
+template <CoefficientType T>
+constexpr Polynomial<T> shift_down(Polynomial<T>&& poly, size_t s) {
+    Polynomial<T> res(std::move(poly));
+    res.shift_down(s);
+    return res;
+}
+
+template <CoefficientType T>
 constexpr Polynomial<T> normalize(const Polynomial<T>& poly)
     requires FieldType<T>
 {
@@ -1289,21 +1365,21 @@ const Polynomial<T>& OnePolynomial() {
  *
  * @param a First polynomial
  * @param b Second polynomial
- * @param s Optional out-pointer for the Bézout coefficient of @p a
- * @param t Optional out-pointer for the Bézout coefficient of @p b
- * @return gcd(a, b); if both @p s and @p t are non-null, additionally `gcd(a, b) = s·a + t·b`
+ * @param s_ptr Optional out-pointer for the Bézout coefficient of @p a
+ * @param t_ptr Optional out-pointer for the Bézout coefficient of @p b
+ * @return gcd(a, b); if both @p s_ptr and @p t_ptr are non-null, additionally `gcd(a, b) = s·a + t·b`
  *
  * Operands are reordered internally so that the higher-degree one drives the recursion.
  */
 template <CoefficientType T>
-Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, Polynomial<T>* t = nullptr)
+Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s_ptr = nullptr, Polynomial<T>* t_ptr = nullptr)
     requires FieldType<T>
 {
     if (a.degree() < b.degree()) std::swap(a, b);
 
-    if (s != nullptr && t != nullptr) {  // extended EA
-        *s = OnePolynomial<T>();
-        *t = ZeroPolynomial<T>();
+    if (s_ptr != nullptr && t_ptr != nullptr) {  // extended EA
+        *s_ptr = OnePolynomial<T>();
+        *t_ptr = ZeroPolynomial<T>();
         Polynomial<T> u = ZeroPolynomial<T>();
         Polynomial<T> v = OnePolynomial<T>();
         // while (b.degree() > 0) {
@@ -1313,11 +1389,11 @@ Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s = nullptr, 
             b = a - q * b1;
             a = std::move(b1);
             Polynomial<T> u1 = std::move(u);
-            u = *s - q * u1;
-            *s = std::move(u1);
+            u = *s_ptr - q * u1;
+            *s_ptr = std::move(u1);
             Polynomial<T> v1 = std::move(v);
-            v = *t - q * v1;
-            *t = std::move(v1);
+            v = *t_ptr - q * v1;
+            *t_ptr = std::move(v1);
         }
     } else {  // "normal" EA
               // while (b.degree() > 0) {

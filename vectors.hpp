@@ -271,7 +271,7 @@ class Vector {
      * Distribution per component: finite-field types draw uniformly from the field; signed
      * integers from [−100, 100]; `double` and the parts of `std::complex<double>` from [−1, 1].
      *
-     * @note Unavailable for polynomial components: randomizing a polynomial needs a degree —
+     * @note Unavailable for polynomial components: randomizing a polynomial needs a degree,
      * see @ref CECCO::Polynomial::randomize.
      */
     Vector& randomize()
@@ -432,7 +432,7 @@ class Vector {
      * @param v Indices (deduplicated internally)
      * @throws std::invalid_argument if any index in `v` is out of bounds
      *
-     * @warning Erased components must not participate in field arithmetic — see
+     * @warning Erased components must not participate in field arithmetic, see
      * @ref CECCO_ERASURE_SUPPORT.
      */
     Vector& erase_components(const std::vector<size_t>& v)
@@ -772,8 +772,8 @@ Vector<T>& Vector<T>::delete_components(const std::vector<size_t>& v) {
     if (v.empty()) return *this;
 
     std::set<size_t> indices(v.begin(), v.end());
-    for (size_t idx : indices) {
-        if (idx >= data.size()) throw std::invalid_argument("trying to delete non-existent component");
+    for (const size_t i : indices) {
+        if (i >= data.size()) throw std::invalid_argument("trying to delete non-existent component");
     }
 
     std::vector<T> new_data;
@@ -797,11 +797,11 @@ Vector<T>& Vector<T>::erase_components(const std::vector<size_t>& v)
     if (v.empty()) return *this;
 
     std::set<size_t> indices(v.begin(), v.end());
-    for (size_t idx : indices) {
-        if (idx >= data.size()) throw std::invalid_argument("trying to erase non-existent component");
+    for (const size_t i : indices) {
+        if (i >= data.size()) throw std::invalid_argument("trying to erase non-existent component");
     }
 
-    std::for_each(indices.cbegin(), indices.cend(), [&](auto i) { data[i].erase(); });
+    for (const size_t i : indices) data[i].erase();
 
     cache.invalidate();
     return *this;
@@ -814,11 +814,11 @@ Vector<T>& Vector<T>::unerase_components(const std::vector<size_t>& v)
     if (v.empty()) return *this;
 
     std::set<size_t> indices(v.begin(), v.end());
-    for (size_t idx : indices) {
-        if (idx >= data.size()) throw std::invalid_argument("trying to un-erase non-existent component");
+    for (const size_t i : indices) {
+        if (i >= data.size()) throw std::invalid_argument("trying to un-erase non-existent component");
     }
 
-    std::for_each(indices.cbegin(), indices.cend(), [&](auto i) { data[i].unerase(); });
+    for (const size_t i : indices) data[i].unerase();
 
     cache.invalidate();
     return *this;
@@ -1612,8 +1612,8 @@ template <ComponentType T>
 std::ostream& operator<<(std::ostream& os, const Vector<T>& rhs) {
     os << "( ";
     const char* sep = "";
-    for (const auto& elem : rhs.data) {
-        os << sep << elem;
+    for (size_t i = 0; i < rhs.data.size(); ++i) {
+        os << sep << rhs.data[i];
         sep = ", ";
     }
     os << " )";
