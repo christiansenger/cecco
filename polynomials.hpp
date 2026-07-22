@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.0
+ * @version 2.3.2
  * @date 2026
  *
  * @copyright
@@ -395,38 +395,56 @@ class Polynomial {
     }
 
     /**
-     * @brief Test irreducibility by trial division against every monic polynomial of degree ≤ deg/2
+     * @brief Test irreducibility over the coefficient field by Rabin's test
      *
-     * Cost grows as q^{deg/2} in field size, practical only for small fields and small degrees.
+     * A polynomial g of degree t over 𝔽_q is irreducible iff x^{q^t} ≡ x (mod g) and
+     * gcd(x^{q^{t/p}} − x, g) = 1 for every prime p dividing t. Runs in time polynomial in t and
+     * log q, using modular exponentiation (@ref poly_long_div) and @ref GCD.
      *
      * @throws std::invalid_argument if `*this` is empty
      */
-    constexpr bool is_irreducible() const
+    bool is_irreducible() const
         requires FiniteFieldType<T>
     {
-        const size_t d = degree();
-        if (d == 0) return false;
-        if (d == 1) return true;
+        const size_t t = degree();
+        if (t == 0) return false;
+        if (t == 1) return true;
 
-        constexpr size_t q = T::get_size();
+        const auto& g = *this;
+        Polynomial<T> x(T(0));
+        x.set_coefficient(1, T(1));
 
-        for (size_t i = 1; i <= d / 2; ++i) {
-            size_t count = 1;
-            for (size_t j = 0; j < i; ++j) count *= q;
-
-            for (size_t k = 0; k < count; ++k) {
-                size_t x = k;
-                Polynomial<T> p;
-                for (size_t j = 0; j < i; ++j) {
-                    p.set_coefficient(j, T(x % q));
-                    x /= q;
-                }
-                p.set_coefficient(i, T(1));
-                if (((*this) % p).is_zero()) return false;
+        // a ↦ a^q mod g (the Frobenius endomorphism), by square-and-multiply
+        const auto frobenius = [&g](Polynomial<T> a) {
+            Polynomial<T> result(T(1));
+            a = a % g;
+            for (size_t e = T::get_size(); e > 0; e >>= 1) {
+                if (e & 1) result = (result * a) % g;
+                if (e >> 1) a = (a * a) % g;
             }
-        }
+            return result;
+        };
 
-        return true;
+        // x^{q^m} mod g, by iterating the Frobenius m times
+        const auto x_frobenius = [&](size_t m) {
+            Polynomial<T> r = x;
+            for (size_t i = 0; i < m; ++i) r = frobenius(r);
+            return r;
+        };
+
+        std::vector<size_t> primes;
+        size_t m = t;
+        for (size_t p = 2; p * p <= m; ++p)
+            if (m % p == 0) {
+                primes.push_back(p);
+                while (m % p == 0) m /= p;
+            }
+        if (m > 1) primes.push_back(m);
+
+        for (auto p = primes.cbegin(); p != primes.cend(); ++p)
+            if (GCD(g, x_frobenius(t / *p) - x).degree() != 0) return false;
+
+        return x_frobenius(t) == x;
     }
 
     /// @brief Hamming weight: number of non-zero, non-erased coefficients; cached on first call
@@ -765,19 +783,14 @@ Polynomial<T>& Polynomial<T>::differentiate(size_t s)
         cache.template set<Weight>(0);
         return *this;
     }
-    if constexpr (requires { typename T::BASE_FIELD; }) {
-        using B = typename T::BASE_FIELD;
-        for (size_t i = 0; i <= d - s; ++i) {
-            B coeff(1);
-            for (size_t k = 1; k <= s; ++k) coeff *= B(i + k);
-            data[i] = T(coeff) * data[i + s];
-        }
-    } else {
-        for (size_t i = 0; i <= d - s; ++i) {
-            T coeff(1);
+    for (size_t i = 0; i <= d - s; ++i) {
+        T coeff(1);
+        if constexpr (T::get_characteristic() != 0) {
+            for (size_t k = 1; k <= s; ++k) coeff *= T((i + k) % T::get_characteristic());
+        } else {
             for (size_t k = 1; k <= s; ++k) coeff *= T(i + k);
-            data[i] = coeff * data[i + s];
         }
+        data[i] = coeff * data[i + s];
     }
     data.resize(data.size() - s);
     prune();
@@ -803,7 +816,12 @@ Polynomial<T>& Polynomial<T>::Hasse_differentiate(size_t s)
         const SierpinskiTriangle triangle(d, s, T::get_characteristic());
         for (size_t i = 0; i <= d - s; ++i) data[i] = triangle(i + s, s) * data[i + s];
     } else {
-        for (size_t i = 0; i <= d - s; ++i) data[i] = bin<size_t>(i + s, s) * data[i + s];
+        // C(i + s, s) evaluated in T, overflow-free for arbitrary degrees (exact in characteristic 0)
+        for (size_t i = 0; i <= d - s; ++i) {
+            T coeff(1);
+            for (size_t k = 1; k <= s; ++k) coeff *= T(i + k) / T(k);
+            data[i] = coeff * data[i + s];
+        }
     }
     data.resize(data.size() - s);
     prune();
@@ -1335,14 +1353,12 @@ std::ostream& operator<<(std::ostream& os, const Polynomial<T>& rhs) {
  * @brief Monomial a · xⁱ
  *
  * @param i Power of x
- * @param a Coefficient (defaults to T(1))
+ * @param a Coefficient (defaults to T(1)); a zero coefficient yields the zero polynomial
  */
 template <CoefficientType T>
-constexpr Polynomial<T> Monomial(size_t i, auto&& a = T(1))
-    requires std::convertible_to<std::decay_t<decltype(a)>, T>
-{
-    Polynomial<T> res;
-    res.set_coefficient(i, std::forward<decltype(a)>(a));
+constexpr Polynomial<T> Monomial(size_t i, const T& a = T(1)) {
+    Polynomial<T> res(0);
+    res.set_coefficient(i, a);
     return res;
 }
 
@@ -1375,19 +1391,18 @@ template <CoefficientType T>
 Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s_ptr = nullptr, Polynomial<T>* t_ptr = nullptr)
     requires FieldType<T>
 {
-    if (a.degree() < b.degree()) std::swap(a, b);
+    const bool swapped = a.degree() < b.degree();
+    if (swapped) std::swap(a, b);
 
     if (s_ptr != nullptr && t_ptr != nullptr) {  // extended EA
         *s_ptr = OnePolynomial<T>();
         *t_ptr = ZeroPolynomial<T>();
         Polynomial<T> u = ZeroPolynomial<T>();
         Polynomial<T> v = OnePolynomial<T>();
-        // while (b.degree() > 0) {
         while (!b.is_zero()) {
-            const Polynomial<T> q = a / b;
-            Polynomial<T> b1 = std::move(b);
-            b = a - q * b1;
-            a = std::move(b1);
+            auto [q, rem] = a.poly_long_div(b);
+            a = std::move(b);
+            b = std::move(rem);
             Polynomial<T> u1 = std::move(u);
             u = *s_ptr - q * u1;
             *s_ptr = std::move(u1);
@@ -1396,14 +1411,13 @@ Polynomial<T> GCD(Polynomial<T> a, Polynomial<T> b, Polynomial<T>* s_ptr = nullp
             *t_ptr = std::move(v1);
         }
     } else {  // "normal" EA
-              // while (b.degree() > 0) {
         while (!b.is_zero()) {
-            const Polynomial<T> q = a / b;
-            Polynomial<T> b1 = std::move(b);
-            b = a - q * b1;
-            a = std::move(b1);
+            Polynomial<T> rem = a % b;
+            a = std::move(b);
+            b = std::move(rem);
         }
     }
+    if (swapped && s_ptr != nullptr && t_ptr != nullptr) std::swap(*s_ptr, *t_ptr);
     return a;
 }
 
@@ -1465,9 +1479,12 @@ Polynomial<T> LCM(const std::vector<Polynomial<T>>& polys)
  * @warning Does **not** follow C++ precedence for `^`: in `b * base ^ exponent` the parser
  * evaluates `(b * base) ^ exponent`. Parenthesise as `b * (base ^ exponent)`, or call
  * @ref CECCO::sqm directly.
+ *
+ * @throws std::invalid_argument if @p exponent is negative
  */
 template <CoefficientType T>
 constexpr Polynomial<T> operator^(const Polynomial<T>& base, int exponent) {
+    if (exponent < 0) throw std::invalid_argument("polynomial exponentiation requires a non-negative exponent!");
     return sqm<Polynomial<T>>(base, exponent);
 }
 
@@ -1554,7 +1571,7 @@ constexpr Vector<Fp<p>> ConwayCoefficients() {
         else if constexpr (m == 3)
             return {9, 2, 0, 1};
         else if constexpr (m == 4)
-            return {3, 4, 5, 0, 1};
+            return {2, 10, 8, 0, 1};
     } else if constexpr (p == 13) {
         if constexpr (m == 1)
             return {11, 1};
@@ -1596,6 +1613,11 @@ constexpr Vector<Fp<p>> ConwayCoefficients() {
             return {35, 1};
         else if constexpr (m == 2)
             return {2, 33, 1};
+    } else if constexpr (p == 41) {
+        if constexpr (m == 1)
+            return {35, 1};
+        else if constexpr (m == 2)
+            return {6, 38, 1};
     } else if constexpr (p == 43) {
         if constexpr (m == 1)
             return {40, 1};
@@ -1664,11 +1686,17 @@ constexpr Vector<Fp<p>> ConwayCoefficients() {
 /**
  * @brief Conway polynomial for 𝔽_{p^m} as a `Polynomial<Fp<p>>`
  *
- * Wraps @ref ConwayCoefficients; returns the empty polynomial if (p, m) is not tabulated.
+ * Wraps @ref ConwayCoefficients.
+ *
+ * @throws std::logic_error if (p, m) is not tabulated
  */
 template <uint16_t p, size_t m>
 constexpr Polynomial<Fp<p>> ConwayPolynomial() {
-    return Polynomial<Fp<p>>(ConwayCoefficients<p, m>());
+    const auto coefficients = ConwayCoefficients<p, m>();
+    if (coefficients.get_n() == 0)
+        throw std::logic_error("No Conway polynomial tabulated for p = " + std::to_string(p) +
+                               ", m = " + std::to_string(m) + "!");
+    return Polynomial<Fp<p>>(coefficients);
 }
 
 /**
