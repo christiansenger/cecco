@@ -2,7 +2,7 @@
  * @file codes.hpp
  * @brief Error control codes library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.5.2
+ * @version 2.5.3
  * @date 2026
  *
  * @copyright
@@ -4266,12 +4266,23 @@ class GRSCode : public LinearCode<T> {
             if (!nonzero) return {};
 
             return GSA_rank_candidates(dec_KVA_impl(a, Theta, list_size), [&llrs](const Vector<T>& c) {
-                double cost = 0.0;
+                // finite contributions are summed without saturation; a +inf contribution means the
+                // candidate uses an impossible symbol and ranks last, a -inf contribution ranks it first
+                double finite_sum = 0.0;
+                bool pos_inf = false;
+                bool neg_inf = false;
                 for (size_t i = 0; i < c.get_n(); ++i) {
                     const size_t label = c[i].get_label();
-                    if (label > 0) cost += llrs(label - 1, i);
+                    if (label == 0) continue;
+                    const double l = llrs(label - 1, i);
+                    if (std::isinf(l))
+                        (l > 0.0 ? pos_inf : neg_inf) = true;
+                    else
+                        finite_sum += l;
                 }
-                return cost;
+                if (pos_inf) return std::numeric_limits<double>::infinity();
+                if (neg_inf) return -std::numeric_limits<double>::infinity();
+                return finite_sum;
             });
         }
     }
@@ -4850,6 +4861,7 @@ class GRSCode : public LinearCode<T> {
         }
 
         const auto B = M.basis_of_kernel();
+        if (B.get_m() == 0) return {};
         std::vector<Polynomial<T>> Q(ell + 1, ZeroPolynomial<T>());
         for (size_t mu = 0; mu <= ell; ++mu) {
             if (width[mu] == 0) continue;
@@ -5017,6 +5029,7 @@ class GRSCode : public LinearCode<T> {
         }
 
         const auto B = M.basis_of_kernel();
+        if (B.get_m() == 0) return {};
         std::vector<Polynomial<T>> Q(ell + 1, ZeroPolynomial<T>());
         for (size_t mu = 0; mu <= ell; ++mu)
             for (size_t nu = 0; nu < width[mu]; ++nu) Q[mu].set_coefficient(nu, B(0, offset[mu] + nu));
@@ -6374,6 +6387,7 @@ class GoppaCode : public AlternantCode<GRSCode<SUPER>> {
           g(std::move(g)),
           irreducible(this->g.is_irreducible()),
           squarefree(irreducible || GCD(this->g, derivative(this->g, 1)).degree() == 0) {
+        if (this->g.degree() < 1) throw std::invalid_argument("Goppa polynomial must be nonconstant");
     } catch (const std::invalid_argument& e) {
         throw std::invalid_argument(std::string("Cannot construct Goppa code: ") + e.what());
     }
@@ -6496,10 +6510,9 @@ class GoppaCode : public AlternantCode<GRSCode<SUPER>> {
             const auto& a = this->get_a();
             std::vector<Polynomial<SUPER>> inv(n);
             for (size_t i = 0; i < n; ++i) {
+                // the constructor rejects any locator that is a root of g, so gcd(g, x + a[i]) is a nonzero constant
                 Polynomial<SUPER> v, u;
                 const auto d = GCD(g, Polynomial<SUPER>({a[i], SUPER(1)}), &v, &u);
-                if (d.is_empty() || d.is_zero() || d.degree() != 0)
-                    throw std::invalid_argument("Goppa locator a[" + std::to_string(i) + "] is a root of g");
                 inv[i] = ((SUPER(1) / d[0]) * u) % g;
             }
             Patterson_inv_cache.emplace(std::move(inv));

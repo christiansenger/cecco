@@ -2,7 +2,7 @@
  * @file polynomials.hpp
  * @brief Polynomial arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.2
+ * @version 2.3.3
  * @date 2026
  *
  * @copyright
@@ -1706,7 +1706,7 @@ constexpr Polynomial<Fp<p>> ConwayPolynomial() {
  * bounded in expectation by the density of irreducibles, but unbounded in the worst case;
  * suitable as a `modulus` for @ref CECCO::Ext.
  */
-template <FieldType T>
+template <FiniteFieldType T>
 Polynomial<T> find_irreducible(size_t degree) {
     if (degree == 0) return Polynomial<T>(T(1));
     Polynomial<T> res;
