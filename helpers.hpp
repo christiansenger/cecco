@@ -2,7 +2,7 @@
  * @file helpers.hpp
  * @brief Utility functions and mathematical helpers
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.1
+ * @version 2.2.2
  * @date 2026
  *
  * @copyright
@@ -70,9 +70,13 @@ class RNG {
 
     /**
      * @brief Set deterministic seed for all threads
-     * @param seed Base seed value (combined with thread ID)
+     * @param seed Base seed value (combined with a per-thread registration index)
      *
-     * Selects deterministic seeding. Each thread uses @p seed XOR its thread ID hash.
+     * Selects deterministic seeding. Each thread derives its seed from @p seed and an index
+     * assigned on the thread's first use of the generator; the first thread (index 0) uses
+     * @p seed unchanged. Single-threaded runs are therefore fully reproducible. In
+     * multithreaded runs the set of streams is fixed, but their assignment to threads follows
+     * first-use order, which scheduling may permute across runs.
      */
     static void seed(uint32_t seed) {
         use_deterministic_seed.store(true);
@@ -97,12 +101,18 @@ class RNG {
 
     static uint32_t get_initial_seed() {
         if (use_deterministic_seed.load()) {
-            auto tid = std::hash<std::thread::id>{}(std::this_thread::get_id());
-            return deterministic_seed_value.load() ^ static_cast<uint32_t>(tid);
+            // Weyl increment (2^32 / golden ratio) decorrelates the per-thread seeds
+            return deterministic_seed_value.load() + 0x9e3779b9u * thread_index();
         } else {
             static thread_local std::random_device rd;
             return rd();
         }
+    }
+
+    static uint32_t thread_index() {
+        static std::atomic<uint32_t> count{0};
+        static thread_local const uint32_t index = count.fetch_add(1);
+        return index;
     }
 
     static uint32_t get_current_seed() { return get_initial_seed(); }
@@ -283,6 +293,36 @@ inline InfInt bin(const InfInt& n, InfInt k) {
 }
 
 /**
+ * @brief Base-2 logarithm of a positive @ref InfInt of arbitrary magnitude
+ * @param v Positive integer
+ * @return `log2(v)` as `long double`
+ * @throws std::invalid_argument if v <= 0
+ *
+ * Evaluates the leading decimal digits and shifts by the remaining length, avoiding any
+ * conversion of @p v to a builtin integer type (which would overflow beyond 2^64).
+ */
+inline long double log2(const InfInt& v) {
+    if (v <= 0) throw std::invalid_argument("log2 requires a positive argument!");
+    const std::string s = v.to_string();
+    const size_t lead = std::min<size_t>(s.size(), 18);
+    return std::log2(std::stold(s.substr(0, lead))) + static_cast<long double>(s.size() - lead) * std::log2(10.0L);
+}
+
+/**
+ * @brief Conversion of an @ref InfInt of arbitrary magnitude to `long double`
+ * @param v Integer
+ * @return Nearest representable value (about 18 significant decimal digits are preserved)
+ */
+inline long double to_long_double(const InfInt& v) {
+    const std::string s = v.to_string();
+    const size_t sign = (s[0] == '-') ? 1 : 0;
+    const size_t digits = s.size() - sign;
+    const size_t lead = std::min<size_t>(digits, 18);
+    const long double head = std::stold(s.substr(0, sign + lead));
+    return head * std::pow(10.0L, static_cast<long double>(digits - lead));
+}
+
+/**
  * @brief Sierpinski triangle (Pascal's triangle modulo p)
  *
  * Provides binomial coefficients `C(n,k) mod p` without overflow or multi-precision arithmetic.
@@ -293,7 +333,8 @@ class SierpinskiTriangle {
      * @brief Precompute `C(n,k) mod p` for all n <= n_max and k <= k_max
      * @throws std::invalid_argument if p is zero
      */
-    SierpinskiTriangle(size_t n_max, size_t k_max, size_t p) : k_max(k_max), table((n_max + 1) * (k_max + 1)) {
+    SierpinskiTriangle(size_t n_max, size_t k_max, size_t p)
+        : n_max(n_max), k_max(k_max), table((n_max + 1) * (k_max + 1)) {
         if (p == 0) throw std::invalid_argument("SierpinskiTriangle modulus must be positive!");
         for (size_t n = 0; n <= n_max; ++n) {
             table[n * (k_max + 1)] = 1 % p;
@@ -303,10 +344,17 @@ class SierpinskiTriangle {
         }
     }
 
-    /// @brief `C(n,k) mod p`, zero whenever k > n; k must not exceed the table's k_max
-    size_t operator()(size_t n, size_t k) const { return k > n ? 0 : table[n * (k_max + 1) + k]; }
+    /// @brief `C(n,k) mod p`, zero whenever k > n (even beyond the precomputed range)
+    /// @throws std::invalid_argument if k <= n and n > n_max or k > k_max
+    size_t operator()(size_t n, size_t k) const {
+        if (k > n) return 0;
+        if (n > n_max || k > k_max)
+            throw std::invalid_argument("SierpinskiTriangle argument(s) beyond precomputed range!");
+        return table[n * (k_max + 1) + k];
+    }
 
    private:
+    size_t n_max;
     size_t k_max;
     std::vector<size_t> table;
 };
@@ -321,26 +369,40 @@ class SierpinskiTriangle {
  * For negative exponents, computes `(1/b)^|e|`.
  *
  * @note Returns `T(1)` for e = 0.
- * @throws std::overflow_error if T is an unsigned integral type and the result would overflow it
+ * @throws std::overflow_error if T is an integral type and the result would overflow it
+ * @throws std::invalid_argument for negative exponents when T is integral or has no division
  */
 template <class T>
 constexpr T sqm(T b, int e) {
     static_assert(std::is_integral_v<decltype(e)>, "exponent must be integral type");
     if (e == 0) return T(1);
     if (e < 0) {
-        b = T(1) / b;
-        if (e == std::numeric_limits<int>::min())
-            throw std::invalid_argument(
-                "Exponent e too large!");  // INT_MIN might be INT_MAX+1, potential problem in next line
-        e = -e;
+        if constexpr (std::is_integral_v<T> || std::is_same_v<T, InfInt> || !requires(T x) { T(1) / x; }) {
+            throw std::invalid_argument("sqm: negative exponent requires an invertible base type!");
+        } else {
+            b = T(1) / b;
+            if (e == std::numeric_limits<int>::min())
+                throw std::invalid_argument(
+                    "Exponent e too large!");  // INT_MIN might be INT_MAX+1, potential problem in next line
+            e = -e;
+        }
     }
     // square and multiply
     T temp(1);
     unsigned int exp = static_cast<unsigned int>(e);
-    if constexpr (std::is_unsigned_v<T>) {
+    if constexpr (std::is_integral_v<T>) {
         const auto mul = [](T x, T y) -> T {
-            if (x != T(0) && y > std::numeric_limits<T>::max() / x)
-                throw std::overflow_error("sqm: integer overflow");
+            if constexpr (std::is_unsigned_v<T>) {
+                if (x != T(0) && y > std::numeric_limits<T>::max() / x)
+                    throw std::overflow_error("sqm: integer overflow");
+            } else {
+                constexpr T max = std::numeric_limits<T>::max();
+                constexpr T min = std::numeric_limits<T>::min();
+                if (x != T(0) && y != T(0)) {
+                    if (x > T(0) ? (y > T(0) ? x > max / y : y < min / x) : (y > T(0) ? x < min / y : y < max / x))
+                        throw std::overflow_error("sqm: integer overflow");
+                }
+            }
             return x * y;
         };
         while (exp > 0) {
@@ -385,8 +447,8 @@ constexpr T daa(T b, int m) {
     unsigned int um = static_cast<unsigned int>(m);
     while (um > 0) {
         if (um & 1) temp += b;
-        b += b;
         um >>= 1;
+        if (um > 0) b += b;
     }
     return temp;
 }
@@ -409,9 +471,7 @@ namespace details {
  * else if (metric == best && details::reservoir_accept(++ties)) choice = cand;
  * @endcode
  */
-inline bool reservoir_accept(size_t count) {
-    return std::uniform_int_distribution<size_t>(1, count)(gen()) == 1;
-}
+inline bool reservoir_accept(size_t count) { return std::uniform_int_distribution<size_t>(1, count)(gen()) == 1; }
 
 /**
  * @brief Constexpr floor function
@@ -590,7 +650,7 @@ class OnceCache {
 
     OnceCache& operator=(const OnceCache& other) {
         if (this != &other) {
-            reset_for_assignment();
+            reset();
             if (other.has_value()) data.emplace(other.value());
         }
         return *this;
@@ -598,7 +658,7 @@ class OnceCache {
 
     OnceCache& operator=(OnceCache&& other) {
         if (this != &other) {
-            reset_for_assignment();
+            reset();
             if (other.has_value()) data.emplace(std::move(other.value()));
         }
         return *this;
@@ -640,15 +700,13 @@ class OnceCache {
 
     const T* operator->() const { return &*data; }
 
-    void reset() const { data.reset(); }
-
-   private:
-    void reset_for_assignment() {
+    void reset() const {
         data.reset();
         flag.~once_flag();
         new (&flag) std::once_flag();
     }
 
+   private:
     mutable std::optional<T> data;
     mutable std::once_flag flag;
 };

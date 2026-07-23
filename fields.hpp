@@ -2,7 +2,7 @@
  * @file fields.hpp
  * @brief Finite field arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.14
+ * @version 2.3.16
  * @date 2026
  *
  * @copyright
@@ -122,7 +122,9 @@
  * only the upper triangle (exploiting commutativity), saving ~50 % memory. Optimal value
  * depends on cache size.
  */
+#ifndef CECCO_COMPRESS_LUTS_FROM_Q
 #define CECCO_COMPRESS_LUTS_FROM_Q 256
+#endif
 
 #include <span>
 
@@ -778,6 +780,20 @@ using label_t = typename std::conditional_t<sqm(p, m) < 255, uint8_t, uint16_t>;
 
 namespace details {
 
+struct SignedLabel {
+    size_t magnitude;
+    bool negative;
+};
+
+constexpr SignedLabel parse_signed_label(int l, size_t field_size) {
+    const bool negative = l < 0;
+    const size_t magnitude =
+        negative ? static_cast<size_t>(-(l + 1)) + 1 : static_cast<size_t>(l);
+    if (magnitude >= field_size)
+        throw std::invalid_argument("absolute value of l must be no larger than the field size minus one");
+    return {magnitude, negative};
+}
+
 /**
  * @brief Encode polynomial coefficients (low-to-high) as a base-q integer label
  *
@@ -1267,9 +1283,17 @@ struct LutHolder<LutType, ProviderLutType, P, F, LutMode::RunTime> {
  * @tparam SUBFIELD   Subfield (finite-field type)
  * @tparam SUPERFIELD Superfield (finite-field type, must satisfy `SubfieldOf<SUPERFIELD, SUBFIELD>`)
  *
- * The embedding is determined by mapping a generator: with factor = (|SUPERFIELD| − 1) /
- * (|SUBFIELD| − 1), it sends g_sub^k ↦ g_super^{k · factor}. Identities φ(0) = 0, φ(1) = 1 are
- * fixed. The full table is computed once per template instantiation and cached.
+ * Maps zero and one identically and preserves addition and multiplication. The identity map on
+ * labels is tried first: it is the natural embedding whenever `SUBFIELD` sits in the tower that
+ * defines the labels of `SUPERFIELD` (same field, prime subfield, plain `Ext` towers), and it is
+ * the unique choice consistent with label-based conversions such as `Ext(const Vector<B>&)` and
+ * `as_vector()`. Only for relationships where labels do not correspond (`Iso`-mediated towers)
+ * the image of a multiplicative generator is selected among the generators of the unique
+ * subgroup of `SUPERFIELD*` of order `|SUBFIELD| − 1`; candidates are accepted only when
+ * `φ(x + 1) = φ(x) + 1` for every `x`, which together with multiplicativity implies additivity.
+ * The table is computed once per template instantiation and cached. Construction uses O(q) memory
+ * and O(q) time in the identity case, O(q²) in the worst case, for q = |SUBFIELD|; applying the
+ * resulting map is O(1).
  *
  * Forward map (`operator()`) is an O(1) array lookup; @ref extract reverses it via linear search
  * through the cached map. When `SUPERFIELD` is an @ref CECCO::Iso, @ref extract walks the MAIN
@@ -1278,6 +1302,8 @@ struct LutHolder<LutType, ProviderLutType, P, F, LutMode::RunTime> {
  * @warning Mathematical containment is necessary but not sufficient: `SUBFIELD` must appear in
  * the construction tower of `SUPERFIELD` (or in one of an `Iso`'s components). Use an `Iso` to
  * merge towers when needed.
+ *
+ * @throws std::logic_error if the declared finite-field relationship admits no additive embedding
  *
  * @section Usage_Example
  *
@@ -1390,32 +1416,56 @@ std::vector<size_t> Embedding<SUBFIELD, SUPERFIELD>::compute_embedding() {
     constexpr size_t super_size = SUPERFIELD::get_size();
     std::vector<size_t> embedding(sub_size);
 
-    // Zero maps to zero
+    const auto sub_gen = SUBFIELD::get_generator();
+
+    const auto is_additive = [&] {
+        const SUBFIELD sub_one(1);
+        const SUPERFIELD super_one(1);
+        for (size_t i = 0; i < sub_size; ++i) {
+            const SUBFIELD x(i);
+            const auto lhs = SUPERFIELD(embedding[(x + sub_one).get_label()]);
+            const auto rhs = SUPERFIELD(embedding[i]) + super_one;
+            if (lhs != rhs) return false;
+        }
+        return true;
+    };
+
+    for (size_t i = 0; i < sub_size; ++i) embedding[i] = i;
+    // φ(1) = 1, so multiplicativity on the generator column extends to all products
+    const auto identity_is_multiplicative = [&] {
+        const SUPERFIELD phi_gen(embedding[sub_gen.get_label()]);
+        for (size_t i = 0; i < sub_size; ++i) {
+            const SUBFIELD x(i);
+            if (SUPERFIELD(embedding[(sub_gen * x).get_label()]) != phi_gen * SUPERFIELD(embedding[i])) return false;
+        }
+        return true;
+    };
+    if (identity_is_multiplicative() && is_additive()) return embedding;
+
     embedding[0] = 0;
-    // Identity maps to identity
     embedding[1] = 1;
 
-    // Embedding prime field: canonical embedding, no power factor needed
-    if (sub_size == SUPERFIELD::get_characteristic()) {
-        for (size_t i = 2; i < sub_size; ++i) embedding[i] = i;
-        return embedding;
-    }
-
-    const auto sub_gen = SUBFIELD::get_generator();
     const auto super_gen = SUPERFIELD::get_generator();
-    constexpr size_t power_factor = (super_size - 1) / (sub_size - 1);
+    constexpr size_t factor = (super_size - 1) / (sub_size - 1);
+    const auto subgroup_gen = sqm<SUPERFIELD>(super_gen, factor);
 
-    const auto super_gen_to_power_factor = sqm<SUPERFIELD>(super_gen, power_factor);
+    const auto fill_embedding = [&](const SUPERFIELD& image_gen) {
+        auto sub_elem = sub_gen;
+        auto super_elem = image_gen;
+        for (size_t i = 1; i < sub_size - 1; ++i) {
+            embedding[sub_elem.get_label()] = super_elem.get_label();
+            sub_elem *= sub_gen;
+            super_elem *= image_gen;
+        }
+    };
 
-    auto sub_elem = sub_gen;
-    auto sup_elem = super_gen_to_power_factor;
-    for (size_t i = 1; i < sub_size - 1; ++i) {
-        embedding[sub_elem.get_label()] = sup_elem.get_label();
-        sub_elem *= sub_gen;
-        sup_elem *= super_gen_to_power_factor;
+    for (size_t e = 1; e < sub_size - 1; ++e) {
+        if (std::gcd(e, sub_size - 1) != 1) continue;
+        fill_embedding(sqm<SUPERFIELD>(subgroup_gen, e));
+        if (is_additive()) return embedding;
     }
 
-    return embedding;
+    throw std::logic_error("Cannot construct additive subfield embedding");
 }
 
 namespace details {
@@ -1535,18 +1585,9 @@ struct IsomorphismPair {
 template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
 class Isomorphism {
-    using PrimeField = Fp<A::get_p()>;
-
    public:
     /// @brief Construct (or retrieve from cache) the isomorphism map A → B
     Isomorphism();
-
-    /**
-     * @brief Construct from a precomputed mapping table (`iso[i] = φ(A(i))`)
-     *
-     * @warning No validation: incorrect input gives undefined behaviour. Internal use.
-     */
-    constexpr Isomorphism(const std::vector<size_t>& iso) : iso(iso) {}
 
     /// @brief Apply φ to @p a
     constexpr B operator()(const A& a) const {
@@ -1560,7 +1601,7 @@ class Isomorphism {
     Isomorphism<B, A> inverse() const;
 
    private:
-    std::vector<size_t> iso;
+    std::span<const size_t> iso;
 };
 
 /*
@@ -1569,24 +1610,26 @@ Isomorphism member functions
 
 template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
-Isomorphism<A, B>::Isomorphism() : iso(A::get_size()) {
-    // Use runtime comparison of get_info() strings to determine canonical template parameter ordering
-    // This ensures both Isomorphism<A,B> and Isomorphism<B,A> use the same details::IsomorphismPair
+Isomorphism<A, B>::Isomorphism() {
     if constexpr (std::is_same_v<A, B>) {
-        // Same field - trivial identity mapping
-        std::iota(iso.begin(), iso.end(), 0);
+        static const std::vector<size_t> identity = [] {
+            std::vector<size_t> table(A::get_size());
+            std::iota(table.begin(), table.end(), 0);
+            return table;
+        }();
+        iso = std::span<const size_t>(identity);
     } else {
-        // Use get_info() strings to determine canonical ordering
-        if (A::get_info() < B::get_info()) {
-            // A is "smaller" - use details::IsomorphismPair<A,B> forward mapping
+        // process-local total ordering via the addresses of the pair statics (under std::less, and
+        // the two directions evaluate complementary comparisons), so that Isomorphism<A,B> and
+        // Isomorphism<B,A> share one details::IsomorphismPair even for types with equal get_info()
+        static const bool a_first = std::less<const std::once_flag*>{}(&details::IsomorphismPair<A, B>::computed_flag,
+                                                                       &details::IsomorphismPair<B, A>::computed_flag);
+        if (a_first) {
             details::IsomorphismPair<A, B>::compute_if_needed();
-            std::copy(details::IsomorphismPair<A, B>::forward_iso.begin(),
-                      details::IsomorphismPair<A, B>::forward_iso.end(), iso.begin());
+            iso = std::span<const size_t>(details::IsomorphismPair<A, B>::forward_iso);
         } else {
-            // B is "smaller" - use details::IsomorphismPair<B,A> reverse mapping
             details::IsomorphismPair<B, A>::compute_if_needed();
-            std::copy(details::IsomorphismPair<B, A>::reverse_iso.begin(),
-                      details::IsomorphismPair<B, A>::reverse_iso.end(), iso.begin());
+            iso = std::span<const size_t>(details::IsomorphismPair<B, A>::reverse_iso);
         }
     }
 }
@@ -1594,9 +1637,8 @@ Isomorphism<A, B>::Isomorphism() : iso(A::get_size()) {
 template <FiniteFieldType A, FiniteFieldType B>
     requires Isomorphic<A, B>
 Isomorphism<B, A> Isomorphism<A, B>::inverse() const {
-    std::vector<size_t> iso_inv(A::get_size());
-    for (size_t i = 0; i < A::get_size(); ++i) iso_inv[iso[i]] = i;
-    return Isomorphism<B, A>(std::move(iso_inv));
+    // the shared details::IsomorphismPair already stores both directions
+    return Isomorphism<B, A>();
 }
 
 /**
@@ -1628,7 +1670,12 @@ class Fp : public details::Field<Fp<p>> {
     /// @brief Default constructor: 0
     constexpr Fp() noexcept : label(0) {}
 
-    /// @brief Construct from `int`, reducing modulo p (handles negative values)
+    /// @brief Construct from a signed element label `l ∈ {−(p − 1), …, p − 1}`
+    ///
+    /// A non-negative value selects that label; a negative value selects the additive inverse
+    /// of the element with label `|l|`. This is label construction, not reduction modulo p.
+    ///
+    /// @throws std::invalid_argument if `|l| >= p`
     constexpr Fp(int l);
 
     constexpr Fp(const Fp& other) noexcept = default;
@@ -1662,8 +1709,9 @@ class Fp : public details::Field<Fp<p>> {
 
     ~Fp() noexcept = default;
 
-    /// @brief Assign `int`, reducing modulo p
-    constexpr Fp& operator=(int l) noexcept;
+    /// @brief Assign a signed element label (same semantics and range as @ref Fp(int))
+    /// @throws std::invalid_argument if `|l| >= p`
+    constexpr Fp& operator=(int l);
 
     constexpr Fp& operator=(const Fp& rhs) noexcept = default;
     constexpr Fp& operator=(Fp&& rhs) noexcept = default;
@@ -1852,9 +1900,9 @@ class Fp : public details::Field<Fp<p>> {
 
 template <uint16_t p>
 constexpr Fp<p>::Fp(int l) {
-    if (l <= -(int)p || l >= (int)p) l %= (int)p;
-    if (l < 0) l += (int)p;
-    label = l;
+    const auto parsed = details::parse_signed_label(l, p);
+    label = static_cast<label_t>(parsed.magnitude);
+    if (parsed.negative) label = lut_neg(label);
 }
 
 template <uint16_t p>
@@ -1913,10 +1961,10 @@ Fp<p>::Fp(const Iso<MAIN, OTHERS...>& other)
 }
 
 template <uint16_t p>
-constexpr Fp<p>& Fp<p>::operator=(int l) noexcept {
-    if (l <= -(int)p || l >= (int)p) l %= (int)p;
-    if (l < 0) l += (int)p;
-    label = l;
+constexpr Fp<p>& Fp<p>::operator=(int l) {
+    const auto parsed = details::parse_signed_label(l, p);
+    label = static_cast<label_t>(parsed.magnitude);
+    if (parsed.negative) label = lut_neg(label);
     return *this;
 }
 
@@ -2162,8 +2210,9 @@ std::ostream& operator<<(std::ostream& os, const Fp<p>& e) {
  *        irreducible monic modulus polynomial
  *
  * @tparam B Base field, either @ref CECCO::Fp, another @ref CECCO::Ext, or @ref CECCO::Iso
- * @tparam modulus Coefficients of f(x) low-to-high (constant term first); leading coefficient
- *                 must be 1, degree m ≥ 2; f(x) must be irreducible over B
+ * @tparam modulus Coefficients of f(x) low-to-high (constant term first), given as reduced
+ *                 base-field labels in {0, …, q − 1}; leading coefficient must be 1, degree
+ *                 m ≥ 2; f(x) must be irreducible over B
  * @tparam mode @ref CECCO::LutMode::RunTime (default) or @ref CECCO::LutMode::CompileTime
  *
  * The result has q = |B| and Q = q^m elements; elements are stored as `label_t` integers in
@@ -2196,6 +2245,13 @@ template <FiniteFieldType B, MOD modulus, LutMode mode = LutMode::RunTime>
 class Ext : public details::Field<Ext<B, modulus, mode>> {
     static_assert(modulus.back() == 1, "provided polynomial is not monic");
     static_assert(modulus.size() > 2, "provided polynomial has degree less than 2");
+    static_assert(
+        []() constexpr {
+            for (size_t i = 0; i < modulus.size(); ++i)
+                if (modulus[i] < 0 || static_cast<size_t>(modulus[i]) >= B::get_size()) return false;
+            return true;
+        }(),
+        "modulus coefficients must be reduced base field labels in {0, ..., q - 1}");
     static_assert(B::ready(), "base field must be fully instantiated");
     static_assert(mode == LutMode::RunTime || B::is_constexpr_ready(),
                   "CompileTime extension fields require all base fields to have constexpr-ready interfaces");
@@ -2212,7 +2268,15 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
     /// @brief Default constructor: 0
     constexpr Ext() noexcept : label{0} {}
 
-    /// @brief Construct from an integer label `l ∈ {0, …, Q − 1}`; throws `std::invalid_argument` otherwise
+    /**
+     * @brief Construct from a signed element label `l ∈ {−(Q − 1), …, Q − 1}`
+     *
+     * A non-negative value selects that label; a negative value selects the additive inverse
+     * of the element with label `|l|`. This is label construction, not reduction modulo the
+     * characteristic.
+     *
+     * @throws std::invalid_argument if `|l| >= Q`
+     */
     Ext(int l);
 
     constexpr Ext(const Ext& other) noexcept = default;
@@ -2270,7 +2334,8 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
     constexpr Ext(const Fp<p>& other)
         requires SubfieldOf<Ext<B, modulus, mode>, Fp<p>> && (!std::is_same_v<B, Fp<p>>);
 
-    /// @brief Assign integer label `l ∈ {0, …, Q − 1}`; throws `std::invalid_argument` otherwise
+    /// @brief Assign a signed element label (same semantics and range as @ref Ext(int))
+    /// @throws std::invalid_argument if `|l| >= Q`
     constexpr Ext& operator=(int l);
 
     constexpr Ext& operator=(const Ext& rhs) noexcept = default;
@@ -2549,8 +2614,9 @@ class Ext : public details::Field<Ext<B, modulus, mode>> {
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 Ext<B, modulus, mode>::Ext(int l) {
-    if (l < 0 || static_cast<size_t>(l) >= Q) throw std::invalid_argument("l must be positive and no larger than Q-1");
-    label = l;
+    const auto parsed = details::parse_signed_label(l, Q);
+    label = static_cast<label_t>(parsed.magnitude);
+    if (parsed.negative) label = lut_neg()(label);
 }
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
@@ -2789,8 +2855,9 @@ constexpr Ext<B, modulus, mode>::Ext(const Fp<p>& other)
 
 template <FiniteFieldType B, MOD modulus, LutMode mode>
 constexpr Ext<B, modulus, mode>& Ext<B, modulus, mode>::operator=(int l) {
-    if (l < 0 || static_cast<size_t>(l) >= Q) throw std::invalid_argument("l must be positive and no larger than Q-1");
-    label = l;
+    const auto parsed = details::parse_signed_label(l, Q);
+    label = static_cast<label_t>(parsed.magnitude);
+    if (parsed.negative) label = lut_neg()(label);
     return *this;
 }
 
@@ -2893,8 +2960,8 @@ Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize() {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
-    thread_local std::uniform_int_distribution<label_t> dist(0, Q - 1);
-    label = dist(gen());
+    thread_local std::uniform_int_distribution<size_t> dist(0, Q - 1);
+    label = static_cast<label_t>(dist(gen()));
     return *this;
 }
 
@@ -2903,8 +2970,8 @@ Ext<B, modulus, mode>& Ext<B, modulus, mode>::randomize_force_change() {
 #ifdef CECCO_ERASURE_SUPPORT
     this->unerase();
 #endif
-    thread_local std::uniform_int_distribution<label_t> dist(1, Q - 1);
-    label = lut_add()(label, dist(gen()));
+    thread_local std::uniform_int_distribution<size_t> dist(1, Q - 1);
+    label = lut_add()(label, static_cast<label_t>(dist(gen())));
     return *this;
 }
 
@@ -3111,7 +3178,7 @@ class Iso : public details::Base {
     /// @brief Default constructor: 0 (consistent across all representations)
     constexpr Iso() noexcept : main_() {}
 
-    /// @brief Construct from `int` via the MAIN representation
+    /// @brief Construct from a signed element label via the MAIN representation
     constexpr Iso(int l) : main_(l) {}
 
     /// @brief Wrap a MAIN-representation element
@@ -3265,7 +3332,7 @@ class Iso : public details::Base {
 
     /// @brief Assign a MAIN-representation element directly
     constexpr Iso& operator=(const MAIN& other);
-    /// @brief Assign an `int` via MAIN
+    /// @brief Assign a signed element label via MAIN
     constexpr Iso& operator=(int other);
 
     /// @brief Assign from an `OTHERS` representation (copy-and-swap; same semantics as the constructor)
@@ -3779,11 +3846,9 @@ Vector<T> Iso<MAIN, OTHERS...>::as_vector() const
     requires((SubfieldOf<MAIN, T> || ((SubfieldOf<OTHERS, T>) || ...))) && (!std::is_same_v<Iso<MAIN, OTHERS...>, T>)
 {
     if constexpr (std::is_same_v<T, MAIN>) {
-        // T is MAIN - direct conversion
-        return main_.template as_vector<T>();
+        return Vector<T>(1, main_);  // one-dimensional over itself
     } else if constexpr (((std::is_same_v<T, OTHERS>) || ...)) {
-        // T is one of OTHERS - convert main_ to T first
-        return as<T>().template as_vector<T>();
+        return Vector<T>(1, as<T>());  // one-dimensional over itself
     } else if constexpr (SubfieldOf<MAIN, T>) {
         // T is subfield of MAIN - use main_ directly
         return main_.template as_vector<T>();
