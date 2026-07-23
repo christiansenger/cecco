@@ -2,7 +2,7 @@
  * @file graphs.hpp
  * @brief Trellises and Tanner graphs
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.3.0
+ * @version 2.3.1
  * @date 2026
  *
  * @copyright
@@ -530,8 +530,8 @@ Trellis<T> Trellis<T>::operator*(const Trellis& other) const {
     for (size_t s = 0; s < num_segments; ++s) {
         for (auto e1 = E[s].cbegin(); e1 != E[s].cend(); ++e1) {
             for (auto e2 = other.E[s].cbegin(); e2 != other.E[s].cend(); ++e2) {
-                result.add_edge(s, get_or_add(s, e1->from_id, e2->from_id), get_or_add(s + 1, e1->to_id, e2->to_id),
-                                e1->value + e2->value);
+                result.add_parallel_edge(s, get_or_add(s, e1->from_id, e2->from_id),
+                                         get_or_add(s + 1, e1->to_id, e2->to_id), e1->value + e2->value);
             }
         }
     }
@@ -609,8 +609,7 @@ template <FieldType T>
 template <typename cost_t>
     requires std::integral<cost_t> ||
              std::floating_point<cost_t>
-             void Trellis<T>::ListViterbi_Workspace<cost_t>::calculate_edge_costs(const Trellis& tr,
-                                                                                  const Vector<T>& r)
+             void Trellis<T>::ListViterbi_Workspace<cost_t>::calculate_edge_costs(const Trellis& tr, const Vector<T>& r)
                  requires std::integral<cost_t>
 {
     if (r.get_n() != tr.E.size()) throw std::invalid_argument("Vector length must match number of trellis segments!");
@@ -825,10 +824,17 @@ void Trellis<T>::tikz_picture(std::ostream& file, const WS* ws, size_t frontier)
                 path.clear();
                 size_t v = i;
                 path.push_back(v);
+                bool complete = true;
                 for (size_t s = frontier; s > 0; --s) {
-                    v = ws->backptrs[s][v]->from_id;
+                    const auto* edge = ws->backptrs[s][v];
+                    if (edge == nullptr) {  // no survivor recorded (yet), nothing to draw
+                        complete = false;
+                        break;
+                    }
+                    v = edge->from_id;
                     path.push_back(v);
                 }
+                if (!complete) continue;
                 file << "\n        \\draw[trellispath, green, double=green!15] (" << frontier - 1 << "_" << path[1]
                      << ") -- (" << frontier << "_" << path[0] << ");";
                 if (path.size() > 2) {
@@ -895,16 +901,27 @@ Trellis<U> Trellis<T>::merge_segments() const {
     constexpr size_t m = details::degree_over_prime_v<U> / details::degree_over_prime_v<T>;
     const size_t n = E.size();
     const size_t full_groups = n / m;
+    const size_t tail = n - full_groups * m;
+    const size_t segments = full_groups + (tail != 0 ? 1 : 0);
 
     Trellis<U> result;
-    size_t seg = 0;
 
-    for (size_t g = 0; g < full_groups; ++g) {
+    // add_parallel_edge accepts a new sink id only in ascending order, which paths cannot guarantee
+    result.V.resize(segments + 1);
+    result.E.resize(segments);
+    for (size_t s = 1; s <= segments; ++s) {
+        const size_t src = std::min(s * m, n);
+        result.V[s].reserve(V[src].size());
+        for (size_t i = 0; i < V[src].size(); ++i) result.V[s].emplace_back(static_cast<uint32_t>(i));
+    }
+
+    for (size_t g = 0; g < segments; ++g) {
+        const size_t width = (g < full_groups) ? m : tail;
         std::vector<std::vector<const details::Edge<T>*>> paths;
 
         for (auto e = E[g * m].cbegin(); e != E[g * m].cend(); ++e) paths.push_back({std::to_address(e)});
 
-        for (size_t step = 1; step < m; ++step) {
+        for (size_t step = 1; step < width; ++step) {
             std::vector<std::vector<const details::Edge<T>*>> next;
             for (auto path = paths.cbegin(); path != paths.cend(); ++path)
                 for (auto e = E[g * m + step].cbegin(); e != E[g * m + step].cend(); ++e)
@@ -918,19 +935,9 @@ Trellis<U> Trellis<T>::merge_segments() const {
 
         for (auto path = paths.cbegin(); path != paths.cend(); ++path) {
             Vector<T> v(m);
-            for (size_t i = 0; i < m; ++i) v.set_component(i, (*path)[i]->value);
-            result.add_edge(seg, path->front()->from_id, path->back()->to_id, U(v));
+            for (size_t i = 0; i < width; ++i) v.set_component(i, (*path)[i]->value);
+            result.add_parallel_edge(g, path->front()->from_id, path->back()->to_id, U(v));
         }
-        ++seg;
-    }
-
-    for (size_t s = full_groups * m; s < n; ++s) {
-        for (auto e = E[s].cbegin(); e != E[s].cend(); ++e) {
-            Vector<T> v(m, T(0));
-            v.set_component(0, e->value);
-            result.add_edge(seg, e->from_id, e->to_id, U(v));
-        }
-        ++seg;
     }
 
     return result;
@@ -955,8 +962,12 @@ struct TannerGraph {
      * @param check Check-node index; checks are created on demand
      * @param var_id Incident variable-node id
      * @param value Parity-check coefficient carried by the edge
+     * @throws std::invalid_argument if `var_id` is not a variable node of this graph
      */
     void add_edge(size_t check, uint32_t var_id, T value) {
+        if (var_id >= n)
+            throw std::invalid_argument("Variable node id " + std::to_string(var_id) +
+                                        " out of range for Tanner graph with " + std::to_string(n) + " variable nodes");
         if (check >= checks.size()) checks.resize(check + 1);
         checks[check].emplace_back(var_id, value);
     }

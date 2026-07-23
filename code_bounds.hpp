@@ -2,7 +2,7 @@
  * @file code_bounds.hpp
  * @brief Bounds on code parameters
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 1.0.0
+ * @version 1.0.1
  * @date 2026
  *
  * @copyright
@@ -22,7 +22,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <iostream>
 #include <limits>
 #include <stdexcept>
 
@@ -39,16 +38,16 @@ long double HammingUpperBound(size_t n, size_t dmin) {
     if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
 
     constexpr size_t q = T::get_size();
-    try {
-        const size_t tmax = (dmin - 1) / 2;
-        InfInt h = 0;
-        for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-
-        return n - std::log2(static_cast<long double>(h.toUnsignedLongLong())) / std::log2(static_cast<long double>(q));
-    } catch (const InfIntException& e) {
-        std::cerr << " [Hamming bound overflow]";
-        return std::numeric_limits<long double>::infinity();
+    const size_t tmax = (dmin - 1) / 2;
+    const InfInt N = n, Q = q;
+    InfInt h = 0;
+    InfInt term = 1;
+    for (size_t i = 0; i <= tmax; ++i) {
+        if (i > 0) term = term * (N - i + 1) / i * (Q - 1);
+        h += term;
     }
+
+    return n - log2(h) / std::log2(static_cast<long double>(q));
 }
 
 namespace details {
@@ -75,25 +74,26 @@ long double JohnsonUpperBound(size_t n, size_t dmin) {
     if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
 
     constexpr size_t q = T::get_size();
-    try {
-        const size_t tmax = (dmin - 1) / 2;
-        const InfInt s = dmin % 2;
-        InfInt h = 0;
-        for (size_t i = 0; i <= tmax; ++i) h += bin<InfInt>(n, i) * sqm<InfInt>(q - 1, i);
-
-        const InfInt numerator = bin<InfInt>(n, tmax + 1) * sqm<InfInt>(q - 1, tmax + 1) -
-                                 s * bin<InfInt>(dmin, tmax) * details::A<T>(n, dmin, dmin);
-
-        const InfInt denominator = details::A<T>(n, dmin, tmax + 1);
-
-        return n - std::log2(static_cast<long double>(h.toUnsignedLongLong()) +
-                             static_cast<long double>(numerator.toUnsignedLongLong()) /
-                                 static_cast<long double>(denominator.toUnsignedLongLong())) /
-                       std::log2(static_cast<long double>(q));
-    } catch (const InfIntException& e) {
-        std::cerr << " [Johnson bound overflow]";
-        return std::numeric_limits<long double>::infinity();
+    const size_t tmax = (dmin - 1) / 2;
+    const InfInt s = dmin % 2;
+    const InfInt N = n, Q = q;
+    InfInt h = 0;
+    InfInt term = 1;
+    for (size_t i = 0; i <= tmax; ++i) {
+        if (i > 0) term = term * (N - i + 1) / i * (Q - 1);
+        h += term;
     }
+    term = term * (N - tmax) / (tmax + 1) * (Q - 1);
+
+    const InfInt numerator = term - s * bin<InfInt>(dmin, tmax) * details::A<T>(n, dmin, dmin);
+
+    const InfInt denominator = details::A<T>(n, dmin, tmax + 1);
+
+    // exact form of h + numerator/denominator, scaled by the (positive) denominator
+    const InfInt bracket = h * denominator + numerator;
+    if (bracket <= 0) return std::numeric_limits<long double>::infinity();
+
+    return n - (log2(bracket) - log2(denominator)) / std::log2(static_cast<long double>(q));
 }
 
 template <FiniteFieldType T>
@@ -103,24 +103,16 @@ long double PlotkinUpperBound(size_t n, size_t dmin) {
     if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
 
     constexpr size_t q = T::get_size();
-    try {
-        const InfInt Q = q, N = n, D = dmin;
-        if (Q * D > N * (Q - 1)) {  // conventional
-            return std::log2(static_cast<long double>((Q * D).toUnsignedLongLong()) /
-                             static_cast<long double>((Q * D - N * (Q - 1)).toUnsignedLongLong())) /
-                   std::log2(static_cast<long double>(q));
-        } else {  // improved
-            const InfInt temp = (Q * D + (Q - 2)) / (Q - 1);
-            const InfInt denominator = Q * D - (temp - 1) * (Q - 1);
+    const InfInt Q = q, N = n, D = dmin;
+    if (Q * D > N * (Q - 1)) {  // conventional
+        return (log2(Q * D) - log2(Q * D - N * (Q - 1))) / std::log2(static_cast<long double>(q));
+    } else {  // improved
+        const InfInt temp = (Q * D + (Q - 2)) / (Q - 1);
+        const InfInt denominator = Q * D - (temp - 1) * (Q - 1);
 
-            return static_cast<long double>((N - temp + 2).toUnsignedLongLong()) +
-                   std::log2(static_cast<long double>(D.toUnsignedLongLong()) /
-                             static_cast<long double>(denominator.toUnsignedLongLong())) /
-                       std::log2(static_cast<long double>(q));
-        }
-    } catch (const InfIntException& e) {
-        std::cerr << " [Plotkin bound overflow]";
-        return std::numeric_limits<long double>::infinity();
+        // N - temp + 2 >= 1 in this branch, so the conversion cannot overflow
+        return static_cast<long double>((N - temp + 2).toUnsignedLongLong()) +
+               (log2(D) - log2(denominator)) / std::log2(static_cast<long double>(q));
     }
 }
 
@@ -131,29 +123,21 @@ long double EliasUpperBound(size_t n, size_t dmin) {
     if (dmin > n) throw std::invalid_argument("Cannot calculate upper bounds with dmin>n");
 
     constexpr size_t q = T::get_size();
-    try {
-        long double minimum = std::numeric_limits<long double>::infinity();
-        const InfInt Q = q, N = n, D = dmin;
-        for (size_t w = 0; Q * w <= (Q - 1) * N; ++w) {
-            const InfInt denominator = Q * w * w - InfInt(2) * (Q - 1) * N * w + (Q - 1) * N * D;
-            if (denominator > 0) {
-                InfInt h = 0;
-                for (size_t i = 0; i <= w; ++i) h += bin<InfInt>(N, i) * sqm<InfInt>(Q - 1, i);
-
-                long double temp = static_cast<long double>(((Q - 1) * N * D).toUnsignedLongLong()) /
-                                   static_cast<long double>(denominator.toUnsignedLongLong());
-
-                temp /= static_cast<long double>(h.toUnsignedLongLong());
-
-                minimum = std::min(minimum, temp);
-            }
+    long double minimum = std::numeric_limits<long double>::infinity();
+    const InfInt Q = q, N = n, D = dmin;
+    InfInt h = 0;
+    InfInt term = 1;
+    for (size_t w = 0; Q * w <= (Q - 1) * N; ++w) {
+        if (w > 0) term = term * (N - w + 1) / w * (Q - 1);
+        h += term;
+        const InfInt denominator = Q * w * w - InfInt(2) * (Q - 1) * N * w + (Q - 1) * N * D;
+        if (denominator > 0) {
+            const long double temp = log2((Q - 1) * N * D) - log2(denominator) - log2(h);
+            minimum = std::min(minimum, temp);
         }
-
-        return n + std::log2(minimum) / std::log2(static_cast<long double>(q));
-    } catch (const InfIntException& e) {
-        std::cerr << " [Elias bound overflow]";
-        return std::numeric_limits<long double>::infinity();
     }
+
+    return n + minimum / std::log2(static_cast<long double>(q));
 }
 
 inline size_t SingletonUpperBound(size_t n, size_t dmin) {
@@ -220,29 +204,27 @@ size_t GilbertVarshamovLowerBound(size_t n, size_t dmin) {
     if (dmin == 1) return n;
 
     constexpr size_t q = T::get_size();
-    try {
-        InfInt sum = 0;
-        for (size_t i = 0; i <= dmin - 2; ++i) sum += bin<InfInt>(n - 1, i) * sqm<InfInt>(q - 1, i);
-        size_t r = 0;
-        for (InfInt qr = 1; qr <= sum; qr *= q) ++r;
+    InfInt sum = 0;
+    for (size_t i = 0; i <= dmin - 2; ++i) sum += bin<InfInt>(n - 1, i) * sqm<InfInt>(q - 1, i);
+    size_t r = 0;
+    for (InfInt qr = 1; qr <= sum; qr *= q) ++r;
 
-        return r <= n ? n - r : 0;
-    } catch (const InfIntException& e) {
-        std::cerr << " [Gilbert-Varshamov bound overflow]";
-        return 0;
-    }
+    return r <= n ? n - r : 0;
 }
 
 template <FiniteFieldType T>
 size_t BurstUpperBound(size_t n, size_t ell) {
+    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
     if (ell > n) throw std::invalid_argument("Burst bound: burst length ell must be at most n");
     constexpr size_t q = T::get_size();
-    return std::floor(n - ell - std::log2(1 + (q - 1) * (n - ell) / q) / std::log2(q));
+    const long double x = 1.0L + static_cast<long double>(q - 1) * static_cast<long double>(n - ell) / q;
+    return static_cast<size_t>(std::floor(n - ell - std::log2(x) / std::log2(static_cast<long double>(q))));
 }
 
-constexpr size_t ReigerBurstUpperBound(size_t n, size_t ell) noexcept {
-    if (2 * ell > n) return 0;
-    return n - 2 * ell;
+constexpr size_t ReigerBurstUpperBound(size_t n, size_t ell) {
+    if (n == 0) throw std::invalid_argument("Cannot calculate upper bounds with n=0!");
+    if (ell > n) throw std::invalid_argument("Burst bound: burst length ell must be at most n");
+    return ell > n / 2 ? 0 : n - 2 * ell;
 }
 
 }  // namespace CECCO

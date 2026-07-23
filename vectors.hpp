@@ -2,7 +2,7 @@
  * @file vectors.hpp
  * @brief Vector arithmetic library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.1.9
+ * @version 2.1.10
  * @date 2026
  *
  * @copyright
@@ -55,15 +55,17 @@
 #include <algorithm>
 #include <complex>
 #include <concepts>
+#include <functional>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <random>
 #include <ranges>
 #include <set>
-#include <stdexcept
-#include <functional>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -563,7 +565,9 @@ template <ComponentType T>
 Vector<T>::Vector(const Vector<T>& other) : data(other.data), cache(other.cache) {}
 
 template <ComponentType T>
-constexpr Vector<T>::Vector(Vector<T>&& other) noexcept : data(std::move(other.data)), cache(std::move(other.cache)) {}
+constexpr Vector<T>::Vector(Vector<T>&& other) noexcept : data(std::move(other.data)), cache(std::move(other.cache)) {
+    other.cache.invalidate();
+}
 
 template <ComponentType T>
 template <FiniteFieldType S>
@@ -612,6 +616,7 @@ constexpr Vector<T>& Vector<T>::operator=(Vector<T>&& rhs) noexcept {
     if (this == &rhs) return *this;
     data = std::move(rhs.data);
     cache = std::move(rhs.cache);
+    rhs.cache.invalidate();
     return *this;
 }
 
@@ -624,11 +629,11 @@ template <ComponentType T>
 template <FiniteFieldType S>
     requires FiniteFieldType<T> && (S::get_characteristic() == T::get_characteristic())
 Vector<T>& Vector<T>::operator=(const Vector<S>& other) {
+    cache.invalidate();
     data.resize(other.get_n());
     for (size_t i = 0; i < other.get_n(); ++i) {
         data[i] = T(other[i]);
     }
-    cache.invalidate();
     return *this;
 }
 
@@ -648,8 +653,8 @@ constexpr Vector<T> Vector<T>::operator-() && {
 template <ComponentType T>
 Vector<T>& Vector<T>::operator+=(const Vector<T>& rhs) {
     if (data.size() != rhs.data.size()) throw std::invalid_argument("trying to add vectors of different lengths");
-    std::transform(data.begin(), data.end(), rhs.data.begin(), data.begin(), std::plus<T>{});
     cache.invalidate();
+    std::transform(data.begin(), data.end(), rhs.data.begin(), data.begin(), std::plus<T>{});
     return *this;
 }
 
@@ -659,8 +664,8 @@ Vector<T>& Vector<T>::operator-=(const Vector<T>& rhs) {
         throw std::invalid_argument(
             "trying to subtract vectors of different "
             "lengths");
-    std::transform(data.begin(), data.end(), rhs.data.begin(), data.begin(), std::minus<T>{});
     cache.invalidate();
+    std::transform(data.begin(), data.end(), rhs.data.begin(), data.begin(), std::minus<T>{});
     return *this;
 }
 
@@ -683,8 +688,8 @@ Vector<T>& Vector<T>::operator/=(const T& s)
     if constexpr (FieldType<T>) {
         operator*=(T(1) / s);
     } else {
-        std::ranges::for_each(data, [&s](T& v) { v /= s; });
         cache.invalidate();
+        std::ranges::for_each(data, [&s](T& v) { v /= s; });
     }
     return *this;
 }
@@ -797,13 +802,13 @@ Vector<T>& Vector<T>::erase_components(const std::vector<size_t>& v)
     if (v.empty()) return *this;
 
     std::set<size_t> indices(v.begin(), v.end());
-    for (const size_t i : indices) {
-        if (i >= data.size()) throw std::invalid_argument("trying to erase non-existent component");
+    for (auto it = indices.cbegin(); it != indices.cend(); ++it) {
+        if (*it >= data.size()) throw std::invalid_argument("trying to erase non-existent component");
     }
 
-    for (const size_t i : indices) data[i].erase();
-
     cache.invalidate();
+    for (auto it = indices.cbegin(); it != indices.cend(); ++it) data[*it].erase();
+
     return *this;
 }
 
@@ -814,13 +819,13 @@ Vector<T>& Vector<T>::unerase_components(const std::vector<size_t>& v)
     if (v.empty()) return *this;
 
     std::set<size_t> indices(v.begin(), v.end());
-    for (const size_t i : indices) {
-        if (i >= data.size()) throw std::invalid_argument("trying to un-erase non-existent component");
+    for (auto it = indices.cbegin(); it != indices.cend(); ++it) {
+        if (*it >= data.size()) throw std::invalid_argument("trying to un-erase non-existent component");
     }
 
-    for (const size_t i : indices) data[i].unerase();
-
     cache.invalidate();
+    for (auto it = indices.cbegin(); it != indices.cend(); ++it) data[*it].unerase();
+
     return *this;
 }
 
@@ -860,6 +865,7 @@ Vector<T>& Vector<T>::pad_back(size_t n) {
 
 template <ComponentType T>
 constexpr Vector<T>& Vector<T>::fill(const T& value) {
+    cache.invalidate();
     std::fill(data.begin(), data.end(), value);
     if constexpr (ReliablyComparableType<T>) {
         if (value == T(0))
@@ -873,13 +879,13 @@ constexpr Vector<T>& Vector<T>::fill(const T& value) {
 
 template <ComponentType T>
 constexpr Vector<T>& Vector<T>::rotate_left(size_t i) {
-    std::rotate(data.begin(), data.begin() + i, data.end());
+    if (data.size() > 1) std::rotate(data.begin(), data.begin() + i % data.size(), data.end());
     return *this;
 }
 
 template <ComponentType T>
 constexpr Vector<T>& Vector<T>::rotate_right(size_t i) {
-    std::rotate(data.rbegin(), data.rbegin() + i, data.rend());
+    if (data.size() > 1) std::rotate(data.rbegin(), data.rbegin() + i % data.size(), data.rend());
     return *this;
 }
 
@@ -945,8 +951,8 @@ Vector<T>& Vector<T>::set_subvector(const Vector& v, size_t i) {
             "trying to replace subvector with "
             "vector of incompatible length");
     if (this == &v) return *this;  // only reachable with i == 0: overwriting the vector with itself
-    std::copy(v.data.begin(), v.data.end(), data.begin() + i);
     cache.invalidate();
+    std::copy(v.data.begin(), v.data.end(), data.begin() + i);
     return *this;
 }
 
@@ -957,8 +963,8 @@ Vector<T>& Vector<T>::set_subvector(Vector&& v, size_t i) {
             "trying to replace subvector with "
             "vector of incompatible length");
     if (this == &v) return *this;  // only reachable with i == 0: overwriting the vector with itself
-    std::move(v.data.begin(), v.data.end(), data.begin() + i);
     cache.invalidate();
+    std::move(v.data.begin(), v.data.end(), data.begin() + i);
     return *this;
 }
 
@@ -1061,6 +1067,7 @@ template <ComponentType T>
 Vector<T>& Vector<T>::randomize()
     requires CoefficientType<T>
 {
+    cache.invalidate();
     if constexpr (FieldType<T>) {
         std::ranges::for_each(data, std::mem_fn(&T::randomize));
     } else if constexpr (std::same_as<T, double>) {
@@ -1074,7 +1081,6 @@ Vector<T>& Vector<T>::randomize()
         std::uniform_int_distribution<long long> dist(-100, 100);
         std::ranges::for_each(data, [&](T& val) { val = T(dist(gen())); });
     }
-    cache.invalidate();
     return *this;
 }
 
@@ -1082,6 +1088,7 @@ template <ComponentType T>
 Vector<T>& Vector<T>::randomize_nonzero()
     requires FieldType<T>
 {
+    cache.invalidate();
     const T zero(0);
     for (size_t i = 0; i < data.size(); ++i) {
         data[i] = zero;
@@ -1100,13 +1107,20 @@ Vector<T>& Vector<T>::randomize_pairwise_distinct()
     if (n > q)
         throw std::invalid_argument("Cannot generate pairwise distinct vector: length " + std::to_string(n) +
                                     " exceeds field size " + std::to_string(q));
-    std::vector<size_t> labels(q);
-    std::iota(labels.begin(), labels.end(), 0);
-    std::shuffle(labels.begin(), labels.end(), gen());
+    cache.invalidate();
+    // partial Fisher-Yates over the label range, tracking only displaced entries: O(n) instead of O(q)
+    std::unordered_map<size_t, size_t> displaced;
+    const auto label_at = [&](size_t idx) {
+        const auto it = displaced.find(idx);
+        return it != displaced.end() ? it->second : idx;
+    };
     bool zero_drawn = false;
     for (size_t i = 0; i < n; ++i) {
-        if (labels[i] == 0) zero_drawn = true;
-        data[i] = T(labels[i]);
+        const size_t j = std::uniform_int_distribution<size_t>(i, q - 1)(gen());
+        const size_t label = label_at(j);
+        displaced[j] = label_at(i);
+        if (label == 0) zero_drawn = true;
+        data[i] = T(label);
     }
     // labels are pairwise distinct, so the zero element occurs at most once
     cache.template set<Weight>(zero_drawn ? n - 1 : n);
@@ -1117,13 +1131,16 @@ template <ComponentType T>
 size_t Vector<T>::as_integer() const
     requires FiniteFieldType<T>
 {
+    constexpr size_t q = T::get_size();
     size_t result = 0;
     for (size_t i = 0; i < data.size(); ++i) {
-        const auto& digit = data[data.size() - i - 1];
+        const auto& digit = data[i];
 #ifdef CECCO_ERASURE_SUPPORT
         if (digit.is_erased()) throw std::invalid_argument("Cannot convert vector with erased component to integer");
 #endif
-        result += digit.get_label() * sqm<size_t>(T::get_size(), i);
+        if (result > (std::numeric_limits<size_t>::max() - digit.get_label()) / q)
+            throw std::overflow_error("Cannot convert vector to integer, value exceeds the size_t range!");
+        result = result * q + digit.get_label();
     }
     return result;
 }
@@ -1134,16 +1151,16 @@ Vector<T>& Vector<T>::from_integer(size_t value, size_t n)
 {
     constexpr size_t q = T::get_size();
 
-    Vector<T> v(n, T(0));
+    Vector<T> v(n);
     for (size_t i = 0; i < n; ++i) {
-        const size_t digit = value % q;
+        v.data[n - 1 - i] = T(value % q);
         value /= q;
-        v.set_component(n - 1 - i, T(digit));
     }
+    v.cache.invalidate();  // raw writes bypass set_component's cache handling
     if (value != 0)
         throw std::out_of_range("Cannot convert integer value to base " + std::to_string(T::get_size()) +
                                 " vector of length " + std::to_string(n) + "!");
-    *this = v;
+    *this = std::move(v);
     return *this;
 }
 
@@ -1312,10 +1329,15 @@ constexpr Vector<T> operator/(Vector<T>&& lhs, const T& rhs) {
     return res;
 }
 
-/// @brief Discrete linear convolution (= coefficients of `Polynomial(v) * Polynomial(w)`)
+/// @brief Discrete linear convolution (= coefficients of `Polynomial(v) * Polynomial(w)`); the
+/// result always has length `v.get_n() + w.get_n() - 1`
+/// @throws std::invalid_argument if either input is empty
 template <CoefficientType T>
 Vector<T> convolve(const Vector<T>& v, const Vector<T>& w) {
-    return Vector(Polynomial(v) * Polynomial(w));
+    if (v.get_n() == 0 || w.get_n() == 0) throw std::invalid_argument("Cannot convolve empty vector(s)!");
+    Vector<T> res(Polynomial(v) * Polynomial(w));
+    res.pad_back(v.get_n() + w.get_n() - 1);
+    return res;
 }
 
 template <CoefficientType T>

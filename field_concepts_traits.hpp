@@ -2,7 +2,7 @@
  * @file field_concepts_traits.hpp
  * @brief Concepts, traits, and type utilities for finite field arithmetic
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.2.0
+ * @version 2.2.1
  * @date 2026
  *
  * @copyright
@@ -78,7 +78,7 @@ class Base;
  * @code{.cpp}
  * template <FieldType F>
  * F discriminant(const F& a, const F& b, const F& c) {
- *     return b * b - F(4) * a * c;
+ *     return b * b - daa(a * c, 4);
  * }
  * @endcode
  *
@@ -255,9 +255,9 @@ concept PolynomialType = details::is_polynomial_v<T>;
  * structural matrix tests).
  */
 template <typename T>
-concept ReliablyComparableType = FiniteFieldType<details::coefficient_of_t<T>> ||
-                                 std::same_as<details::coefficient_of_t<T>, Rationals<InfInt>> ||
-                                 SignedIntType<details::coefficient_of_t<T>>;
+concept ReliablyComparableType =
+    FiniteFieldType<details::coefficient_of_t<T>> || std::same_as<details::coefficient_of_t<T>, Rationals<InfInt>> ||
+    SignedIntType<details::coefficient_of_t<T>>;
 
 /**
  * @concept ComponentType

@@ -2,7 +2,7 @@
  * @file blocks.hpp
  * @brief Communication system blocks library
  * @author Christian Senger <senger@inue.uni-stuttgart.de>
- * @version 2.9.0
+ * @version 2.9.1
  * @date 2026
  *
  * @copyright
@@ -39,6 +39,7 @@
 /*
 // transitive
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <ios>
@@ -94,13 +95,18 @@ class BlockProcessor : private NonCopyable {
     /**
      * @brief Apply the block element-wise (rvalue input)
      * @param in Input vector (moved)
-     * @return Vector of processed outputs
+     * @return Vector of processed outputs (reuses input storage when InputType == OutputType)
      */
     Vector<OutputType> operator()(Vector<InputType>&& in) {
-        const size_t n = in.get_n();
-        Vector<OutputType> res(n);
-        for (size_t i = 0; i < n; ++i) res.set_component(i, derived()(std::move(in[i])));
-        return res;
+        if constexpr (std::is_same_v<InputType, OutputType>) {
+            for (size_t i = 0; i < in.get_n(); ++i) in.set_component(i, derived()(std::move(in[i])));
+            return std::move(in);
+        } else {
+            const size_t n = in.get_n();
+            Vector<OutputType> res(n);
+            for (size_t i = 0; i < n; ++i) res.set_component(i, derived()(std::move(in[i])));
+            return res;
+        }
     }
 
     /**
@@ -253,6 +259,7 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
    private:
     double pe;
     double px;
+    double p_error_given_not_erased{0.0};
     std::geometric_distribution<unsigned long long> error_dist;
     unsigned long long error_trials{0};
     unsigned long long error_failures_before_hit{0};
@@ -265,23 +272,23 @@ class SDMEC : public details::SameTypeProcessor<SDMEC<T>, T> {
 
 template <FieldType T>
 SDMEC<T>::SDMEC(double pe, double px) : pe(pe), px(px) {
+    if (!std::isfinite(pe) || pe < 0.0 || pe > 1.0)
+        throw std::out_of_range("SDMEC error probability must be in [0,1], got: " + std::to_string(pe));
+    if (!std::isfinite(px) || px < 0.0 || px > 1.0 - pe)
+        throw std::out_of_range("SDMEC erasure probability must be in [0," + std::to_string(1.0 - pe) +
+                                "], got: " + std::to_string(px));
 #ifndef CECCO_ERASURE_SUPPORT
     if (px != 0.0) throw std::invalid_argument("px != 0 requires CECCO_ERASURE_SUPPORT");
 #endif
-    if (pe < 0.0 || pe > 1.0)
-        throw std::out_of_range("SDMEC error probability must be in [0,1], got: " + std::to_string(pe));
-    if (px < 0.0 || px > 1.0 - pe)
-        throw std::out_of_range("SDMEC erasure probability must be in [0," + std::to_string(1.0 - pe) +
-                                "], got: " + std::to_string(px));
 
-    const double p_error_given_not_erased = (px == 1.0) ? 0.0 : pe / (1.0 - px);
-    error_dist = std::geometric_distribution<unsigned long long>(p_error_given_not_erased);
-    if (p_error_given_not_erased > 0.0) {
+    p_error_given_not_erased = (px >= 1.0) ? 0.0 : pe / (1.0 - px);
+    if (p_error_given_not_erased > 0.0 && p_error_given_not_erased < 1.0) {
+        error_dist = std::geometric_distribution<unsigned long long>(p_error_given_not_erased);
         error_failures_before_hit = error_dist(gen());
     }
 #ifdef CECCO_ERASURE_SUPPORT
-    erasure_dist = std::geometric_distribution<unsigned long long>(px);
-    if (px > 0.0) {
+    if (px > 0.0 && px < 1.0) {
+        erasure_dist = std::geometric_distribution<unsigned long long>(px);
         erasure_failures_before_hit = erasure_dist(gen());
     }
 #endif
@@ -290,7 +297,9 @@ SDMEC<T>::SDMEC(double pe, double px) : pe(pe), px(px) {
 template <FieldType T>
 T SDMEC<T>::operator()(const T& in) {
     T res(in);
-    if (error_dist.p() > 0.0) {
+    if (p_error_given_not_erased >= 1.0) {
+        res.randomize_force_change();
+    } else if (p_error_given_not_erased > 0.0) {
         if (error_trials == error_failures_before_hit) {
             res.randomize_force_change();
             error_trials = 0;
@@ -300,7 +309,9 @@ T SDMEC<T>::operator()(const T& in) {
         }
     }
 #ifdef CECCO_ERASURE_SUPPORT
-    if (px > 0.0) {
+    if (px >= 1.0) {
+        res.erase();
+    } else if (px > 0.0) {
         if (erasure_trials == erasure_failures_before_hit) {
             res.erase();
             erasure_trials = 0;
@@ -317,7 +328,7 @@ template <FieldType T>
 double SDMEC<T>::get_capacity() const noexcept
     requires(FiniteFieldType<T>)
 {
-    const double ptilde = error_dist.p();
+    const double ptilde = p_error_given_not_erased;
     const double q = static_cast<double>(T::get_size());
 
     const double term1 = (ptilde > 0.0 && ptilde < 1.0) ? ptilde * std::log2(ptilde) : 0.0;
@@ -534,21 +545,24 @@ class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
      */
     AWGN(double EbNodB, double a, double b)
         : Eb(NRZMapper(a, b).get_Eb()),
-          dist(0, std::sqrt(0.5 * Eb / std::pow(10.0, EbNodB / 10.0))),
-          pe(calculate_pe(EbNodB, Eb, b)) {}
+          sigma(std::sqrt(0.5 * Eb / std::pow(10.0, EbNodB / 10.0))),
+          dist(0, sigma > 0.0 ? sigma : 1.0),  // sigma = 0 violates normal_distribution's precondition
+          pe(calculate_pe(EbNodB, Eb, b)) {
+        if (!std::isfinite(EbNodB) || !std::isfinite(a) || !std::isfinite(b))
+            throw std::invalid_argument("AWGN parameters must be finite!");
+        if (!std::isfinite(sigma))
+            throw std::invalid_argument("AWGN noise standard deviation must be finite, adjust Eb/N0!");
+    }
 
     /** @name Noise Parameters
      * @{
      */
 
     /** @brief Noise variance σ² (per real component). */
-    double get_variance() const noexcept {
-        const double s = dist.stddev();
-        return s * s;
-    }
+    double get_variance() const noexcept { return sigma * sigma; }
 
     /** @brief Noise standard deviation σ (per real component). */
-    double get_standard_deviation() const noexcept { return dist.stddev(); }
+    double get_standard_deviation() const noexcept { return sigma; }
 
     /** @brief Theoretical hard-decision bit error probability for the configured constellation/SNR. */
     constexpr double get_pe() const noexcept { return pe; }
@@ -561,8 +575,11 @@ class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
      * @return Symbol with independent Gaussian noise added to each real component
      */
     std::complex<double> operator()(const std::complex<double>& in) {
-        std::complex<double> res(in.real() + dist(gen()), in.imag() + dist(gen()));
-        return res;
+        if (sigma == 0.0) return in;
+        // sequenced draws: I before Q, so seeded runs reproduce across compilers
+        const double noise_i = dist(gen());
+        const double noise_q = dist(gen());
+        return {in.real() + noise_i, in.imag() + noise_q};
     }
 
     /**
@@ -572,13 +589,14 @@ class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
      * For complex signaling with noise on both I and Q the formula is C = log₂(1 + Eb/(2σ²)).
      */
     double get_capacity() const noexcept {
-        const double var = get_variance();
-        if (var == 0.0) return 0.0;  // degenerate zero-energy constellation (a = b = 0)
-        return 0.5 * std::log2(1 + Eb / var);
+        // sigma = 0 is either the noiseless channel (Eb > 0) or the zero-energy constellation (a = b = 0)
+        if (sigma == 0.0) return Eb > 0.0 ? std::numeric_limits<double>::infinity() : 0.0;
+        return 0.5 * std::log2(1 + Eb / (sigma * sigma));
     }
 
    private:
     const double Eb{};
+    const double sigma{};
     std::normal_distribution<double> dist;
     const double pe{};
 
@@ -593,6 +611,8 @@ class AWGN : public details::SameTypeProcessor<AWGN, std::complex<double>> {
 };
 
 double AWGN::calculate_pe(double EbNodB, double Eb, double b) noexcept {
+    if (Eb == 0.0) return 0.5;  // degenerate zero-energy constellation (a = b = 0), avoid 0/0
+
     // For NRZ/BPSK: Pe = 0.5 * erfc(b/(2*sigma))
     // where b is constellation distance and sigma is noise std dev
     const double EbN0_linear = std::pow(10.0, EbNodB / 10.0);
@@ -873,9 +893,9 @@ class LLRCalculator : private details::NonCopyable {
 
         const size_t n = in.get_n();
         Matrix<double> llrs(q - 1, n);
+        std::array<double, m> bit;
         for (size_t j = 0; j < n; ++j) {
-            Vector<double> bit(m);
-            for (size_t i = 0; i < m; ++i) bit.set_component(i, (*this)(in(i, j)));
+            for (size_t i = 0; i < m; ++i) bit[i] = (*this)(in(i, j));
             for (size_t lab = 1; lab < q; ++lab) {
                 double L = 0.0;
                 size_t bits = lab;
@@ -927,13 +947,23 @@ class LLRCalculator : private details::NonCopyable {
     Matrix<double> operator()(const Vector<T>& r)
         requires(T::get_size() == T::get_characteristic())
     {
+        if (model != channel_model_t::sdmec)
+            throw std::logic_error("This LLRCalculator was not constructed for hard input!");
+
         constexpr size_t q = T::get_size();
         const size_t n = r.get_n();
+        const double L = sdmec_reliability();
 
         Matrix<double> llrs(q - 1, n);
         for (size_t j = 0; j < n; ++j) {
-            const Vector<double> column = (*this)(r[j]);
-            for (size_t a = 1; a < q; ++a) llrs.set_component(a - 1, j, column[a - 1]);
+#ifdef CECCO_ERASURE_SUPPORT
+            if (r[j].is_erased()) continue;
+#endif
+            const size_t y = r[j].get_label();
+            if (y == 0)
+                for (size_t a = 1; a < q; ++a) llrs.set_component(a - 1, j, L);
+            else
+                llrs.set_component(y - 1, j, -L);
         }
         return llrs;
     }
@@ -999,16 +1029,14 @@ class DEMUX : private details::NonCopyable {
 template <FiniteFieldType E, FiniteFieldType S>
     requires(SubfieldOf<E, S>)
 Matrix<S> DEMUX<E, S>::operator()(const Vector<E>& in) {
-    if (in.get_n() == 0) return Matrix<S>(0, 0);
+    constexpr size_t m = details::degree_over_prime_v<E> / details::degree_over_prime_v<S>;
+    if (in.get_n() == 0) return Matrix<S>(m, 0);
 
-    auto temp = in[0].template as_vector<S>();
-    Matrix<S> M(temp.get_n(), in.get_n());
+    Matrix<S> M(m, in.get_n());
 
-    M.set_submatrix(0, 0, transpose(Matrix<S>(std::move(temp))));
-
-    for (size_t i = 1; i < in.get_n(); ++i) {
-        auto col_vector = in[i].template as_vector<S>();
-        M.set_submatrix(0, i, transpose(Matrix<S>(std::move(col_vector))));
+    for (size_t j = 0; j < in.get_n(); ++j) {
+        const auto column = in[j].template as_vector<S>();
+        for (size_t i = 0; i < m; ++i) M.set_component(i, j, column[i]);
     }
 
     return M;
